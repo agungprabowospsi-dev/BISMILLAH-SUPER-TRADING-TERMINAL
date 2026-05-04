@@ -1,0 +1,43 @@
+import os
+import asyncio
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.core.database import init_db
+from app.core.redis_client import init_redis
+from app.core.knowledge_base import init_knowledge_base
+from app.api import screener, analytic, monitoring, scalping, health
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("🚀 Starting BISMILLAH SUPER TRADING TERMINAL...")
+    await init_db()
+    await init_redis()
+    await init_knowledge_base()
+    logger.info("✅ All systems online — BISMILLAH!")
+    yield
+    logger.info("Shutting down...")
+
+app = FastAPI(
+    title="BISMILLAH SUPER TRADING TERMINAL",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(health.router)
+app.include_router(screener.router, prefix="/api/screener")
+app.include_router(analytic.router, prefix="/api/analytic")
+app.include_router(monitoring.router, prefix="/api/monitoring")
+app.include_router(scalping.router, prefix="/ws")
