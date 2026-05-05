@@ -28,7 +28,7 @@ async def run_screener(req: ScreenerRequest):
             raise HTTPException(500, "Failed to fetch stock list")
 
         # Pre-filter: ambil 50 saham terlikuid saja dulu
-        tickers = [s["ticker"] for s in stocks[:50]]
+        tickers = [s.get("code", s.get("ticker","")) for s in stocks[:50]]
 
         # Analisis paralel (batch 10)
         results = []
