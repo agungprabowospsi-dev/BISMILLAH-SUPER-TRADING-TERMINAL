@@ -14,12 +14,12 @@ api.interceptors.response.use(
 )
 
 export const checkHealth = () => api.get('/health')
-export const runScreener = (mode, filters={}) => api.post('/screener/scan', { mode, filters })
-export const analyzeStock = (ticker, mode) => api.post('/analytic/analyze', { ticker, mode })
-export const startMonitoring = (data) => api.post('/monitoring/add', data)
-export const getMonitoringList = () => api.get('/monitoring/list')
-export const removeMonitoring = (ticker) => api.delete(`/monitoring/remove/${ticker}`)
-export const getScalpingData = (ticker) => api.get(`/scalping/data/${ticker}`)
+export const runScreener = (mode, filters={}) => api.post('/api/screener/run', { mode, filters })
+export const analyzeStock = (ticker, mode) => api.post('/api/analytic/analyze', { ticker, mode })
+export const startMonitoring = (data) => api.post('/api/monitoring/start', data)
+export const getMonitoringList = () => api.get('/api/monitoring/list')
+export const removeMonitoring = (ticker) => api.delete(`/api/monitoring/remove/${ticker}`)
+export const getScalpingData = (ticker) => api.get(`/api/scalping/data/${ticker}`)
 export const getWsUrl = (ticker) => {
   return `wss://bismillah-super-trading-terminal-production.up.railway.app/ws/scalping/${ticker}`
 }
