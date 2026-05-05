@@ -1,8 +1,8 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
-COPY package*.json ./
+COPY frontend/package*.json ./
 RUN npm install
-COPY . .
+COPY frontend/ .
 ARG VITE_BACKEND_URL=https://bismillah-super-trading-terminal-production.up.railway.app
 ENV VITE_BACKEND_URL=$VITE_BACKEND_URL
 RUN npm run build
