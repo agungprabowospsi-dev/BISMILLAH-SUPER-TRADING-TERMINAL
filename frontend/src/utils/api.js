@@ -1,7 +1,6 @@
 import axios from 'axios'
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ||
-  'https://bismillah-super-trading-terminal-production.up.railway.app'
+const BACKEND_URL = 'https://bismillah-super-trading-terminal-production.up.railway.app'
 
 export const api = axios.create({
   baseURL: BACKEND_URL,
@@ -22,7 +21,6 @@ export const getMonitoringList = () => api.get('/monitoring/list')
 export const removeMonitoring = (ticker) => api.delete(`/monitoring/remove/${ticker}`)
 export const getScalpingData = (ticker) => api.get(`/scalping/data/${ticker}`)
 export const getWsUrl = (ticker) => {
-  const base = BACKEND_URL.replace('https://','wss://').replace('http://','ws://')
-  return `${base}/ws/scalping/${ticker}`
+  return `wss://bismillah-super-trading-terminal-production.up.railway.app/ws/scalping/${ticker}`
 }
 export default api
