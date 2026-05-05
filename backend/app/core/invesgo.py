@@ -17,7 +17,7 @@ def _headers():
 async def get_stock_list() -> list:
     """Ambil semua saham IDX"""
     async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/stocks", headers=_headers())
+        r = await client.get(f"{INVESGO_BASE_URL}/analysis/list/stock", headers=_headers())
         r.raise_for_status()
         return r.json()
 
@@ -25,9 +25,9 @@ async def get_ohlcv_daily(ticker: str, period: str = "1y") -> list:
     """OHLCV harian"""
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.get(
-            f"{INVESGO_BASE_URL}/stocks/{ticker}/ohlcv",
+            f"{INVESGO_BASE_URL}/analysis/chart/stock/{ticker}",
             headers=_headers(),
-            params={"period": period, "interval": "1d"}
+            params={"period": period}
         )
         r.raise_for_status()
         return r.json()
@@ -36,9 +36,8 @@ async def get_ohlcv_intraday(ticker: str, interval: str = "5m") -> list:
     """OHLCV intraday"""
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.get(
-            f"{INVESGO_BASE_URL}/stocks/{ticker}/ohlcv",
-            headers=_headers(),
-            params={"interval": interval, "period": "5d"}
+            f"{INVESGO_BASE_URL}/analysis/intraday-data/{ticker}",
+            headers=_headers()
         )
         r.raise_for_status()
         return r.json()
@@ -46,27 +45,48 @@ async def get_ohlcv_intraday(ticker: str, interval: str = "5m") -> list:
 async def get_orderbook(ticker: str) -> dict:
     """Orderbook bid/ask"""
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/stocks/{ticker}/orderbook", headers=_headers())
+        r = await client.get(f"{INVESGO_BASE_URL}/analysis/order-book/{ticker}", headers=_headers())
         r.raise_for_status()
         return r.json()
 
 async def get_broker_summary(ticker: str) -> dict:
-    """Broker summary untuk bandarmology"""
+    """Broker summary"""
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/stocks/{ticker}/broker-summary", headers=_headers())
+        r = await client.get(f"{INVESGO_BASE_URL}/analysis/inventory-chart/stock/{ticker}", headers=_headers())
         r.raise_for_status()
         return r.json()
 
 async def get_foreign_flow(ticker: str) -> dict:
     """Net foreign buy/sell"""
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/stocks/{ticker}/foreign-flow", headers=_headers())
+        r = await client.get(f"{INVESGO_BASE_URL}/analysis/intraday/{ticker}", headers=_headers())
         r.raise_for_status()
         return r.json()
 
 async def get_tick(ticker: str) -> dict:
     """Tick data realtime"""
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/stocks/{ticker}/tick", headers=_headers())
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(f"{INVESGO_BASE_URL}/analysis/intraday/{ticker}", headers=_headers())
+        r.raise_for_status()
+        return r.json()
+
+async def get_company_info(ticker: str) -> dict:
+    """Info perusahaan"""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(f"{INVESGO_BASE_URL}/analysis/information/{ticker}", headers=_headers())
+        r.raise_for_status()
+        return r.json()
+
+async def get_price_table(ticker: str) -> dict:
+    """Price table"""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(f"{INVESGO_BASE_URL}/analysis/price-table/{ticker}", headers=_headers())
+        r.raise_for_status()
+        return r.json()
+
+async def get_sector_rotation() -> dict:
+    """Sector rotation"""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(f"{INVESGO_BASE_URL}/analysis/sector/rotation", headers=_headers())
         r.raise_for_status()
         return r.json()
