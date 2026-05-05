@@ -14,8 +14,8 @@ api.interceptors.response.use(
 )
 
 export const checkHealth = () => api.get('/health')
-export const runScreener = (mode, filters={}) => api.post('/api/screener/run', { mode, filters })
-export const analyzeStock = (ticker, mode) => api.post('/api/analytic/analyze', { ticker, mode })
+export const runScreener = (mode, filters={}) => api.post('/api/screener/run', { mode: mode.toLowerCase(), filters })
+export const analyzeStock = (ticker, mode) => api.post('/api/analytic/analyze', { ticker, mode: mode.toLowerCase() })
 export const startMonitoring = (data) => api.post('/api/monitoring/start', data)
 export const getMonitoringList = () => api.get('/api/monitoring/list')
 export const removeMonitoring = (ticker) => api.delete(`/api/monitoring/remove/${ticker}`)
