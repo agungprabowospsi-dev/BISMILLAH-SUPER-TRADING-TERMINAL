@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .card{@apply bg-bg-card border border-border-dim rounded-lg}
+  .btn-primary{@apply px-4 py-2 bg-accent-green text-bg-primary font-display font-semibold text-sm rounded tracking-wider uppercase transition-all duration-200 hover:brightness-110 active:scale-95}
+  .btn-ghost{@apply px-4 py-2 border border-border-bright text-slate-300 font-display font-medium text-sm rounded tracking-wider uppercase transition-all duration-200 hover:border-accent-green hover:text-accent-green active:scale-95}
+  .label-xs{@apply text-xs font-mono text-slate-500 uppercase tracking-widest}
+  .score-bar{@apply h-1.5 rounded-full bg-border-dim overflow-hidden}
+  .badge-buy{@apply px-2 py-0.5 text-xs font-mono font-semibold rounded bg-accent-green/10 text-accent-green border border-accent-green/30}
+  .badge-sell{@apply px-2 py-0.5 text-xs font-mono font-semibold rounded bg-accent-red/10 text-accent-red border border-accent-red/30}
+  .badge-hold{@apply px-2 py-0.5 text-xs font-mono font-semibold rounded bg-slate-600/30 text-slate-400 border border-slate-600/30}
+  .tab-btn{@apply px-5 py-2.5 font-display font-semibold text-sm tracking-widest uppercase transition-all duration-200 border-b-2}
+  .tab-active{@apply text-accent-green border-accent-green}
+  .tab-inactive{@apply text-slate-500 border-transparent hover:text-slate-300}
+  .shimmer{background:linear-gradient(90deg,#111827 25%,#1a2234 50%,#111827 75%);background-size:1000px 100%;animation:shimmer 1.5s infinite}
+}
+
+@keyframes shimmer{0%{background-position:-1000px 0}100%{background-position:1000px 0}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+@keyframes scrollTicker{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@keyframes fadeIn{0%{opacity:0}100%{opacity:1}}
+@keyframes slideUp{0%{opacity:0;transform:translateY(16px)}100%{opacity:1;transform:translateY(0)}}
+
+.blink{animation:blink 1s step-end infinite}
+.ticker-inner{animation:scrollTicker 40s linear infinite;white-space:nowrap}
+.ticker-inner:hover{animation-play-state:paused}
+.animate-fade-in{animation:fadeIn 0.3s ease-out}
+.animate-slide-up{animation:slideUp 0.4s ease-out}
