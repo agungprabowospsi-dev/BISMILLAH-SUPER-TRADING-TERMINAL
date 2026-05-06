@@ -13,7 +13,7 @@ def _headers():
         "Content-Type": "application/json"
     }
 
-async def _get(path, params=None):
+async def _get(path: str, params: dict = None):
     async with httpx.AsyncClient(timeout=30) as client:
         url = f"{INVESGO_BASE_URL}{path}"
         logger.info(f"InvesGo GET: {url}")
@@ -23,40 +23,37 @@ async def _get(path, params=None):
             raise Exception(f"InvesGo API error {r.status_code}: {path}")
         return r.json()
 
-async def get_stock_list():
+async def get_stock_list() -> list:
     data = await _get("/analysis/list/stock")
     if isinstance(data, list):
         return data
     return data.get("data", [])
 
-async def get_ohlcv_daily(ticker, period="1y"):
+async def get_ohlcv_daily(ticker: str, period: str = "1y") -> list:
     data = await _get(f"/analysis/chart/stock/{ticker}", {"period": period})
     if isinstance(data, list):
         return data
     return data.get("data", [])
 
-async def get_ohlcv_intraday(ticker, interval="5m"):
-    try:
-        data = await _get(f"/analysis/intraday-data/{ticker}", {"interval": interval})
-        if isinstance(data, list):
-            return data
-        return data.get("data", [])
-    except:
-        return await get_ohlcv_daily(ticker, "1mo")
+async def get_ohlcv_intraday(ticker: str, interval: str = "5m") -> list:
+    data = await _get(f"/analysis/intraday-data/{ticker}", {"interval": interval})
+    if isinstance(data, list):
+        return data
+    return data.get("data", [])
 
-async def get_orderbook(ticker):
+async def get_orderbook(ticker: str) -> dict:
     try:
         return await _get(f"/analysis/order-book/{ticker}")
     except:
         return {}
 
-async def get_broker_summary(ticker):
+async def get_broker_summary(ticker: str) -> dict:
     try:
         return await _get(f"/analysis/inventory-chart/stock/{ticker}")
     except:
         return {}
 
-async def get_foreign_flow(ticker):
+async def get_foreign_flow(ticker: str) -> dict:
     try:
         return await _get(f"/analysis/intraday/{ticker}")
     except:
