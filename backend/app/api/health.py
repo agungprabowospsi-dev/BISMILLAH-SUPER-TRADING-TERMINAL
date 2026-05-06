@@ -20,3 +20,11 @@ async def health():
         "redis": redis_ok,
         "message": "BISMILLAH — Systems Online 🚀"
     }
+@router.get("/debug/data-module")
+async def debug_data_module():
+    import subprocess
+    result = subprocess.run(
+        ["cat", "/app/data/invesgo_connector.py"],
+        capture_output=True, text=True
+    )
+    return {"content": result.stdout, "error": result.stderr}
