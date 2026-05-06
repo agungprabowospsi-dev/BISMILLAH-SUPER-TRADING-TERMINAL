@@ -9,12 +9,10 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+RUN rm -rf /app/data
+
 COPY . .
 
-RUN cp data/invesgo_connector.py /app/data/invesgo_connector.py 2>/dev/null || true
-RUN cp data/data_processor.py /app/data/data_processor.py 2>/dev/null || true
-
-# Copy knowledge base books
 RUN mkdir -p /app/knowledge_base/books /app/knowledge_base/chroma_db
 
 EXPOSE 8000
