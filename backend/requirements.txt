@@ -13,3 +13,4 @@ beautifulsoup4==4.12.3
 pymupdf==1.24.3
 numpy==1.26.4
 python-multipart==0.0.9
+# force rebuild 1
