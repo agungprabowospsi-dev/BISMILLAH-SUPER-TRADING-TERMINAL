@@ -17,3 +17,4 @@ RUN mkdir -p /app/knowledge_base/books /app/knowledge_base/chroma_db
 EXPOSE 8000
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+ENV REBUILD=1778034079
