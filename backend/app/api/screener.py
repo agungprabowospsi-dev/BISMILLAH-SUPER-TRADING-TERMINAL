@@ -95,7 +95,7 @@ async def _analyze_stock(ticker: str, mode: str) -> dict:
         bandarm_score = bandarm.score if hasattr(bandarm, 'score') else 40.0
         bandarm_phase = bandarm.data.get("phase", "unknown") if hasattr(bandarm, 'data') else "unknown"
 
-        final_score = round((group1_score * 0.70) + (bandarm_score * 0.30), 2)
+        final_score = round(min(100.0, (group1_score * 0.70) + (bandarm_score * 0.30)), 2)
         consensus = group1.get("consensus", "neutral") if isinstance(group1, dict) else "neutral"
 
         if final_score > 65 and consensus == "bullish" and bandarm_phase in ["accumulation", "early_accumulation"]:
