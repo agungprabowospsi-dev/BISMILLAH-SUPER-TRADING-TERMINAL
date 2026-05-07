@@ -36,14 +36,16 @@ export async function checkHealth() {
 }
 
 export async function analyzeStock(ticker) {
-  return apiFetch(`/api/analytic/analyze/${ticker}`, {
-    method: "GET",
+  return apiFetch(`/api/analytic/analyze`, {
+    method: "POST",
+    body: JSON.stringify({ ticker }),
   });
 }
 
 export async function getMonitoring() {
   return apiFetch("/api/monitoring/status", {
-    method: "GET",
+    method: "POST",
+    body: JSON.stringify({ ticker }),
   });
 }
 
