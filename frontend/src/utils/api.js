@@ -34,3 +34,41 @@ export async function runScreener(mode = "swing") {
 export async function checkHealth() {
   return apiFetch("/health");
 }
+
+export async function analyzeStock(ticker) {
+  return apiFetch(`/api/analytic/analyze/${ticker}`, {
+    method: "GET",
+  });
+}
+
+export async function getMonitoring() {
+  return apiFetch("/api/monitoring/status", {
+    method: "GET",
+  });
+}
+
+export async function getMonitoringList() {
+  return apiFetch("/api/monitoring/list", { method: "GET" });
+}
+
+export async function startMonitoring(ticker) {
+  return apiFetch("/api/monitoring/start", {
+    method: "POST",
+    body: JSON.stringify({ ticker }),
+  });
+}
+
+export async function removeMonitoring(ticker) {
+  return apiFetch("/api/monitoring/remove", {
+    method: "POST",
+    body: JSON.stringify({ ticker }),
+  });
+}
+
+export async function getScalpingData(ticker) {
+  return apiFetch(`/api/scalping/data/${ticker}`, { method: "GET" });
+}
+
+export function getWsUrl() {
+  return BACKEND_URL.replace("https://", "wss://").replace("http://", "ws://");
+}

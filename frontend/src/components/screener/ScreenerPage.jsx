@@ -305,4 +305,4 @@ const styles = {
     border: "1px dashed #1a2a4a",
     borderRadius: 8,
   },
-};1,
+};
