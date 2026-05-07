@@ -112,7 +112,7 @@ export default function ScreenerPage() {
 
           {result.stocks.length === 0 ? (
             <div style={styles.emptyBox}>
-              <p>⚠️ Tidak ada saham tersaring.</p>
+              <p>⚠️ Tidak ada saham dengan score >70 hari ini.</p>
               <p style={{ fontSize: 12, marginTop: 8 }}>
                 Backend returned {result.total_scanned} stocks tapi tidak ada yang masuk filter.
               </p>
