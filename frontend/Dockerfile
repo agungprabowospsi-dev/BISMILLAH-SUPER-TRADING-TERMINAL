@@ -1,14 +1,12 @@
 FROM node:18-alpine AS builder
 WORKDIR /app
-ARG CACHEBUST=999
-RUN echo "BUST $CACHEBUST"
 COPY package*.json ./
-RUN npm install
+RUN npm install --force
 COPY . .
 RUN npm run build
 
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
-RUN echo "server { listen 3000; root /usr/share/nginx/html; index index.html; location / { try_files \$uri \$uri/ /index.html; } }" > /etc/nginx/conf.d/default.conf
+RUN printf 'server {\n  listen 3000;\n  root /usr/share/nginx/html;\n  index index.html;\n  location / {\n    try_files $uri $uri/ /index.html;\n  }\n}\n' > /etc/nginx/conf.d/default.conf
 EXPOSE 3000
 CMD ["nginx", "-g", "daemon off;"]
