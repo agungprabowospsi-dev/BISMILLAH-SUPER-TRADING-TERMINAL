@@ -28,3 +28,11 @@ async def debug_data_module():
         capture_output=True, text=True
     )
     return {"content": result.stdout, "error": result.stderr}
+
+@router.get("/debug/invesgo-count")
+async def debug_invesgo_count():
+    from app.core import invesgo
+    stocks = await invesgo.get_stock_list()
+    total = len(stocks)
+    sample = [s.get("code","") for s in stocks[:10]]
+    return {"total": total, "sample_10": sample}
