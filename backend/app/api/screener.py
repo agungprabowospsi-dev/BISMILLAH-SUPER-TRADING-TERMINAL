@@ -85,8 +85,10 @@ async def _analyze_stock(ticker: str, mode: str) -> dict:
         if not ohlcv or len(ohlcv) < 20:
             return {}
 
-        group1_task = run_group1(ticker, ohlcv, mode)
-        bandarm_task = _bandarmology.analyze(ticker, ohlcv, mode)
+        # Fix volume string to float
+        ohlcv_fixed = [{**c, "volume": float(c.get("volume", 0))} for c in ohlcv]
+        group1_task = run_group1(ticker, ohlcv_fixed, mode)
+        bandarm_task = _bandarmology.analyze(ticker, ohlcv_fixed, mode)
         group1, bandarm = await asyncio.gather(group1_task, bandarm_task, return_exceptions=True)
 
         group1_score = group1.get("group_score", 0) if isinstance(group1, dict) else 0
