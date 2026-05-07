@@ -35,16 +35,21 @@ async def run_screener(req: ScreenerRequest):
             if code and "-" not in code and len(code) <= 6:
                 tickers.append(code)
 
-        logger.info(f"Screener: {len(tickers)} tickers dari Invesgo")
+        logger.info(f"Screener: {len(tickers)} tickers akan di-scan")
 
         results = []
-        for i in range(0, len(tickers), 10):
-            batch = tickers[i:i+10]
-            batch_tasks = [_analyze_stock(t, req.mode) for t in batch]
+        # Batch 20 paralel untuk lebih cepat
+        for i in range(0, len(tickers), 20):
+            batch = tickers[i:i+20]
+            batch_tasks = [
+                asyncio.wait_for(_analyze_stock(t, req.mode), timeout=15.0)
+                for t in batch
+            ]
             batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
             for r in batch_results:
                 if isinstance(r, dict) and r.get("score", 0) > 0:
                     results.append(r)
+            logger.info(f"Progress: {min(i+20, len(tickers))}/{len(tickers)} scanned, {len(results)} valid")
 
         top5 = sorted(results, key=lambda x: x["score"], reverse=True)[:5]
 
@@ -53,6 +58,7 @@ async def run_screener(req: ScreenerRequest):
             "mode": req.mode,
             "top5_stocks": top5,
             "total_scanned": len(results),
+            "total_tickers": len(tickers),
         }
 
         await cache_set(cache_key, json.dumps(response), ttl=300)
@@ -78,7 +84,6 @@ async def _analyze_stock(ticker: str, mode: str) -> dict:
         if not ohlcv or len(ohlcv) < 20:
             return {}
 
-        # Jalankan Group1 (10 engines) + Bandarmology paralel
         group1_task = run_group1(ticker, ohlcv, mode)
         bandarm_task = _bandarmology.analyze(ticker, ohlcv, mode)
         group1, bandarm = await asyncio.gather(group1_task, bandarm_task, return_exceptions=True)
@@ -87,12 +92,9 @@ async def _analyze_stock(ticker: str, mode: str) -> dict:
         bandarm_score = bandarm.score if hasattr(bandarm, 'score') else 40.0
         bandarm_phase = bandarm.data.get("phase", "unknown") if hasattr(bandarm, 'data') else "unknown"
 
-        # IDX weighted score: Group1 70% + Bandarmology 30%
         final_score = round((group1_score * 0.70) + (bandarm_score * 0.30), 2)
-
         consensus = group1.get("consensus", "neutral") if isinstance(group1, dict) else "neutral"
 
-        # Signal logic dengan bandarmology filter
         if final_score > 65 and consensus == "bullish" and bandarm_phase in ["accumulation", "early_accumulation"]:
             signal = "BUY"
         elif final_score < 35 or bandarm_phase == "distribution":
@@ -121,6 +123,9 @@ async def _analyze_stock(ticker: str, mode: str) -> dict:
             "bullish_engines": group1.get("bullish_count", 0) if isinstance(group1, dict) else 0,
             "bearish_engines": group1.get("bearish_count", 0) if isinstance(group1, dict) else 0,
         }
+    except asyncio.TimeoutError:
+        logger.debug(f"Timeout: {ticker}")
+        return {}
     except Exception as e:
         logger.debug(f"Skip {ticker}: {e}")
         return {}
