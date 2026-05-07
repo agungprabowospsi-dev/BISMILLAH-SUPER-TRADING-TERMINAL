@@ -36,3 +36,18 @@ async def debug_invesgo_count():
     total = len(stocks)
     sample = [s.get("code","") for s in stocks[:10]]
     return {"total": total, "sample_10": sample}
+
+@router.get("/debug/invesgo-detail")
+async def debug_invesgo_detail():
+    from app.core import invesgo
+    stocks = await invesgo.get_stock_list()
+    total = len(stocks)
+    clean = [s.get("code","") for s in stocks if "-" not in s.get("code","") and len(s.get("code","")) <= 6]
+    warrant = [s.get("code","") for s in stocks if "-" in s.get("code","")]
+    return {
+        "total_all": total,
+        "total_clean": len(clean),
+        "total_warrant": len(warrant),
+        "sample_clean": clean[:10],
+        "sample_warrant": warrant[:5]
+    }
