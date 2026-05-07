@@ -26,7 +26,7 @@ export default function ScreenerPage() {
     } finally { setScreenerLoading(false) }
   }
 
-  const stocks = screenerResults?.top_stocks || screenerResults?.results || []
+  const stocks = screenerResults?.const stocks = screenerResults?.top5_stocks || screenerResults?.top_stocks || screenerResults?.results || [] 
 
   return (
     <div className="p-4 lg:p-6 max-w-7xl mx-auto animate-fade-in">
