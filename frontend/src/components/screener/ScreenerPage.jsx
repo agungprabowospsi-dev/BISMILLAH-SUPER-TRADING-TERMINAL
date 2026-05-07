@@ -20,7 +20,8 @@ export default function ScreenerPage() {
     setScreenerLoading(true); setScreenerError(null); setScreenerResults(null); setSelected(null)
     try {
       const res = await runScreener(screenerMode)
-      setScreenerResults(res.data)
+      alert(JSON.stringify(res.data).substring(0, 300))
+setScreenerResults(res.data)
     } catch(e) {
       setScreenerError(e?.response?.data?.detail || e.message || 'Gagal menjalankan screener')
     } finally { setScreenerLoading(false) }
