@@ -51,7 +51,7 @@ async def run_screener(req: ScreenerRequest):
                     results.append(r)
             logger.info(f"Progress: {min(i+20, len(tickers))}/{len(tickers)} scanned, {len(results)} valid")
 
-        filtered = [r for r in results if r["score"] > 70]
+        filtered = [r for r in results if r["score"] > 55]
         top5 = sorted(filtered, key=lambda x: x["score"], reverse=True)[:5]
 
         response = {
