@@ -6,10 +6,14 @@ from typing import Optional
 import asyncio
 from app.core import invesgo
 from app.core.redis_client import cache_get, cache_set
+from app.engines.group1_runner import run_group1
+from app.engines.smart_money_engines import BandarmologyEngine
 import logging
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+_bandarmology = BandarmologyEngine()
 
 class ScreenerRequest(BaseModel):
     mode: str = "swing"
@@ -26,14 +30,14 @@ async def run_screener(req: ScreenerRequest):
             raise HTTPException(500, "Failed to fetch stock list")
 
         tickers = []
-        for s in stocks[:100]:
+        for s in stocks:
             code = s.get("code", "")
-            if code and "-" not in code:
+            if code and "-" not in code and len(code) <= 6:
                 tickers.append(code)
 
-        tickers = tickers[:30]
-        results = []
+        logger.info(f"Screener: {len(tickers)} tickers dari Invesgo")
 
+        results = []
         for i in range(0, len(tickers), 10):
             batch = tickers[i:i+10]
             batch_tasks = [_analyze_stock(t, req.mode) for t in batch]
@@ -74,6 +78,28 @@ async def _analyze_stock(ticker: str, mode: str) -> dict:
         if not ohlcv or len(ohlcv) < 20:
             return {}
 
+        # Jalankan Group1 (10 engines) + Bandarmology paralel
+        group1_task = run_group1(ticker, ohlcv, mode)
+        bandarm_task = _bandarmology.analyze(ticker, ohlcv, mode)
+        group1, bandarm = await asyncio.gather(group1_task, bandarm_task, return_exceptions=True)
+
+        group1_score = group1.get("group_score", 0) if isinstance(group1, dict) else 0
+        bandarm_score = bandarm.score if hasattr(bandarm, 'score') else 40.0
+        bandarm_phase = bandarm.data.get("phase", "unknown") if hasattr(bandarm, 'data') else "unknown"
+
+        # IDX weighted score: Group1 70% + Bandarmology 30%
+        final_score = round((group1_score * 0.70) + (bandarm_score * 0.30), 2)
+
+        consensus = group1.get("consensus", "neutral") if isinstance(group1, dict) else "neutral"
+
+        # Signal logic dengan bandarmology filter
+        if final_score > 65 and consensus == "bullish" and bandarm_phase in ["accumulation", "early_accumulation"]:
+            signal = "BUY"
+        elif final_score < 35 or bandarm_phase == "distribution":
+            signal = "SELL"
+        else:
+            signal = "NEUTRAL"
+
         closes = []
         for candle in ohlcv:
             if isinstance(candle, dict):
@@ -81,46 +107,20 @@ async def _analyze_stock(ticker: str, mode: str) -> dict:
                 if c:
                     closes.append(float(c))
 
-        if len(closes) < 20:
-            return {}
-
-        score = _calculate_score(closes, mode)
+        last_price = closes[-1] if closes else 0
 
         return {
             "ticker": ticker,
-            "score": score,
-            "signal": "BUY" if score > 60 else "NEUTRAL",
-            "last_price": closes[-1],
+            "score": final_score,
+            "signal": signal,
+            "last_price": last_price,
+            "consensus": consensus,
+            "bandarm_phase": bandarm_phase,
+            "bandarm_score": round(bandarm_score, 2),
+            "group1_score": round(group1_score, 2),
+            "bullish_engines": group1.get("bullish_count", 0) if isinstance(group1, dict) else 0,
+            "bearish_engines": group1.get("bearish_count", 0) if isinstance(group1, dict) else 0,
         }
     except Exception as e:
         logger.debug(f"Skip {ticker}: {e}")
         return {}
-
-def _calculate_score(closes: list, mode: str) -> float:
-    score = 0.0
-    try:
-        ma20 = sum(closes[-20:]) / 20
-        ma5 = sum(closes[-5:]) / 5
-        last = closes[-1]
-
-        if last > ma20:
-            score += 30
-        if ma5 > ma20:
-            score += 20
-        if last > closes[-2]:
-            score += 10
-
-        change = (last - closes[-20]) / closes[-20] * 100
-        if mode == "swing" and 2 < change < 15:
-            score += 20
-        elif mode == "daytrading" and 0.5 < change < 5:
-            score += 20
-        elif mode == "scalping" and change > 0:
-            score += 20
-
-        if last > 0:
-            score += 20
-    except:
-        pass
-
-    return round(score, 2)
