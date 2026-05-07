@@ -2,6 +2,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm install
+ARG CACHEBUST=1
 COPY . .
 ARG VITE_BACKEND_URL=https://bismillah-super-trading-terminal-production.up.railway.app
 ENV VITE_BACKEND_URL=$VITE_BACKEND_URL
