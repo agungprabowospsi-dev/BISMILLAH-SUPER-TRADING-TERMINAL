@@ -1,26 +1,36 @@
-import axios from 'axios'
+export const BACKEND_URL =
+  import.meta.env.VITE_BACKEND_URL ||
+  "https://bismillah-super-trading-terminal-production.up.railway.app";
 
-const BACKEND_URL = 'https://bismillah-super-trading-terminal-production.up.railway.app'
+console.log("[API] BACKEND_URL:", BACKEND_URL);
 
-export const api = axios.create({
-  baseURL: BACKEND_URL,
-  timeout: 60000,
-  headers: { 'Content-Type': 'application/json' }
-})
+export async function apiFetch(path, options = {}) {
+  const url = `${BACKEND_URL}${path}`;
+  console.log("[API] Fetching:", url);
 
-api.interceptors.response.use(
-  (res) => res,
-  (err) => { console.error('[API]', err?.response?.data || err.message); return Promise.reject(err) }
-)
+  const res = await fetch(url, {
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+    ...options,
+  });
 
-export const checkHealth = () => api.get('/health')
-export const runScreener = (mode, filters={}) => api.post('/api/screener/run', { mode: mode.toLowerCase(), filters })
-export const analyzeStock = (ticker, mode) => api.post('/api/analytic/analyze', { ticker, mode: mode.toLowerCase() })
-export const startMonitoring = (data) => api.post('/api/monitoring/start', data)
-export const getMonitoringList = () => api.get('/api/monitoring/list')
-export const removeMonitoring = (ticker) => api.delete(`/api/monitoring/remove/${ticker}`)
-export const getScalpingData = (ticker) => api.get(`/api/scalping/data/${ticker}`)
-export const getWsUrl = (ticker) => {
-  return `wss://bismillah-super-trading-terminal-production.up.railway.app/ws/scalping/${ticker}`
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`HTTP ${res.status}: ${errText}`);
+  }
+
+  return res.json();
 }
-export default api
+
+export async function runScreener(mode = "swing") {
+  return apiFetch("/api/screener/run", {
+    method: "POST",
+    body: JSON.stringify({ mode: mode.toLowerCase() }),
+  });
+}
+
+export async function checkHealth() {
+  return apiFetch("/health");
+}
