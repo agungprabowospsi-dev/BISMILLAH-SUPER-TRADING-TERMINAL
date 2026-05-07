@@ -51,3 +51,9 @@ async def debug_invesgo_detail():
         "sample_clean": clean[:10],
         "sample_warrant": warrant[:5]
     }
+
+@router.get("/debug/ohlcv/{ticker}")
+async def debug_ohlcv(ticker: str):
+    from app.core import invesgo
+    data = await invesgo.get_ohlcv_daily(ticker)
+    return {"total_candles": len(data), "sample_3": data[:3] if data else []}
