@@ -8,6 +8,7 @@ from app.core import invesgo
 from app.core.redis_client import cache_get, cache_set
 from app.engines.group1_runner import run_group1
 from app.engines.smart_money_engines import BandarmologyEngine
+from app.knowledge_base import kb_service
 import logging
 
 router = APIRouter()
@@ -85,17 +86,32 @@ async def _analyze_stock(ticker: str, mode: str) -> dict:
         if not ohlcv or len(ohlcv) < 20:
             return {}
 
-        # Fix volume string to float
         ohlcv_fixed = [{**c, "volume": float(c.get("volume", 0))} for c in ohlcv]
         group1_task = run_group1(ticker, ohlcv_fixed, mode)
         bandarm_task = _bandarmology.analyze(ticker, ohlcv_fixed, mode)
         group1, bandarm = await asyncio.gather(group1_task, bandarm_task, return_exceptions=True)
 
         group1_score = group1.get("group_score", 0) if isinstance(group1, dict) else 0
-        bandarm_score = bandarm.score if hasattr(bandarm, 'score') else 40.0
-        bandarm_phase = bandarm.data.get("phase", "unknown") if hasattr(bandarm, 'data') else "unknown"
+        bandarm_score = bandarm.score if hasattr(bandarm, "score") else 40.0
+        bandarm_phase = bandarm.data.get("phase", "unknown") if hasattr(bandarm, "data") else "unknown"
 
-        final_score = round(min(100.0, (group1_score * 0.70) + (bandarm_score * 0.30)), 2)
+        kb_boost = 0.0
+        kb_context_summary = ""
+        try:
+            screener_engines = ["VolumeIntelligenceEngine","BandarmologyEngine","TrendStructureEngine"]
+            kb_contexts = []
+            for eng in screener_engines:
+                ctx = await kb_service.get_kb_context_for_engine(eng, ticker)
+                if ctx:
+                    kb_contexts.append(ctx)
+            if kb_contexts:
+                kb_boost = min(4.5, len(kb_contexts) * 1.5)
+                kb_context_summary = f"{len(kb_contexts)} KB refs"
+        except Exception as kb_err:
+            logger.debug(f"[RAG] KB skip {ticker}: {kb_err}")
+
+        base_score = min(100.0, (group1_score * 0.70) + (bandarm_score * 0.30))
+        final_score = round(min(100.0, base_score + kb_boost), 2)
         consensus = group1.get("consensus", "neutral") if isinstance(group1, dict) else "neutral"
 
         if final_score > 65 and consensus == "bullish" and bandarm_phase in ["accumulation", "early_accumulation"]:
@@ -111,7 +127,6 @@ async def _analyze_stock(ticker: str, mode: str) -> dict:
                 c = candle.get("close") or candle.get("c") or candle.get("Close")
                 if c:
                     closes.append(float(c))
-
         last_price = closes[-1] if closes else 0
 
         return {
@@ -123,6 +138,8 @@ async def _analyze_stock(ticker: str, mode: str) -> dict:
             "bandarm_phase": bandarm_phase,
             "bandarm_score": round(bandarm_score, 2),
             "group1_score": round(group1_score, 2),
+            "kb_boost": kb_boost,
+            "kb_context": kb_context_summary,
             "bullish_engines": group1.get("bullish_count", 0) if isinstance(group1, dict) else 0,
             "bearish_engines": group1.get("bearish_count", 0) if isinstance(group1, dict) else 0,
         }
