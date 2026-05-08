@@ -57,16 +57,16 @@ async def get_broker_summary(ticker: str) -> dict:
         return r.json()
 
 async def get_foreign_flow(ticker: str) -> dict:
-    """Net foreign buy/sell"""
+    """Net foreign buy/sell - dari price table"""
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/analysis/intraday/{ticker}", headers=_headers())
+        r = await client.get(f"{INVESGO_BASE_URL}/analysis/price-table/{ticker}", headers=_headers())
         r.raise_for_status()
         return r.json()
 
 async def get_tick(ticker: str) -> dict:
-    """Tick data realtime"""
+    """Tick data realtime - dari price table"""
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/analysis/intraday/{ticker}", headers=_headers())
+        r = await client.get(f"{INVESGO_BASE_URL}/analysis/price-table/{ticker}", headers=_headers())
         r.raise_for_status()
         return r.json()
 
