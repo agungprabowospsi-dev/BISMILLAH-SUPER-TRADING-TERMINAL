@@ -153,6 +153,85 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
         logger.error(f"Analytic error: {e}\n{traceback.format_exc()}")
         raise HTTPException(500, detail=f"{type(e).__name__}: {str(e)}")
 
+@router.get("/market-context/{ticker}")
+async def market_context(ticker: str):
+    """Fetch 4 box data: foreign flow, broker, company info, orderbook"""
+    import traceback
+    import json as _json
+
+    class NumpyEncoder(_json.JSONEncoder):
+        def default(self, obj):
+            if isinstance(obj, np.integer): return int(obj)
+            if isinstance(obj, np.floating): return float(obj)
+            if isinstance(obj, np.bool_): return bool(obj)
+            if isinstance(obj, np.ndarray): return obj.tolist()
+            return super().default(obj)
+
+    result = {}
+
+    # Box 1: Tick/realtime price
+    try:
+        tick = await invesgo.get_tick(ticker)
+        result["tick"] = {
+            "last_price": tick.get("last_price") or tick.get("close") or 0,
+            "change": tick.get("change") or 0,
+            "change_pct": tick.get("change_pct") or tick.get("pct") or 0,
+            "volume": tick.get("volume") or 0,
+            "value": tick.get("value") or 0,
+            "freq": tick.get("freq") or 0,
+        }
+    except Exception as e:
+        result["tick"] = {"error": str(e)}
+
+    # Box 2: Foreign flow
+    try:
+        ff = await invesgo.get_foreign_flow(ticker)
+        result["foreign_flow"] = {
+            "foreign_buy": ff.get("foreign_buy") or ff.get("foreign") or 0,
+            "foreign_sell": ff.get("foreign_sell") or 0,
+            "foreign_net": ff.get("foreign_net") or ff.get("net_foreign") or 0,
+            "bdm_buy": ff.get("bdm_buy") or ff.get("bdm") or 0,
+            "bdm_sell": ff.get("bdm_sell") or 0,
+            "ritel_buy": ff.get("ritel_buy") or ff.get("ritel") or 0,
+        }
+    except Exception as e:
+        result["foreign_flow"] = {"error": str(e)}
+
+    # Box 3: Company info
+    try:
+        info = await invesgo.get_company_info(ticker)
+        result["company"] = {
+            "name": info.get("company_name") or info.get("name") or ticker,
+            "sector": info.get("sector") or "-",
+            "market_cap": info.get("market_cap") or 0,
+            "pe_ratio": info.get("pe_ratio") or info.get("per") or 0,
+            "pbv": info.get("pbv") or 0,
+            "dividend_yield": info.get("dividend_yield") or 0,
+        }
+    except Exception as e:
+        result["company"] = {"error": str(e)}
+
+    # Box 4: Orderbook
+    try:
+        ob = await invesgo.get_orderbook(ticker)
+        bids = ob.get("bids") or ob.get("bid") or []
+        asks = ob.get("asks") or ob.get("offer") or []
+        best_bid = bids[0] if bids else {}
+        best_ask = asks[0] if asks else {}
+        result["orderbook"] = {
+            "best_bid_price": best_bid.get("price") or best_bid.get("p") or 0,
+            "best_bid_vol": best_bid.get("volume") or best_bid.get("v") or 0,
+            "best_ask_price": best_ask.get("price") or best_ask.get("p") or 0,
+            "best_ask_vol": best_ask.get("volume") or best_ask.get("v") or 0,
+            "total_bid": sum(b.get("volume", b.get("v", 0)) for b in bids[:5]),
+            "total_ask": sum(a.get("volume", a.get("v", 0)) for a in asks[:5]),
+        }
+    except Exception as e:
+        result["orderbook"] = {"error": str(e)}
+
+    return JSONResponse(content=_json.loads(_json.dumps(result, cls=NumpyEncoder)))
+
+
 def _calc_atr(ohlcv, period=14):
     import numpy as np
     trs = []
