@@ -30,6 +30,15 @@ _engines = [
 
 async def run_group1(ticker: str, ohlcv: list, mode: str, **kwargs) -> dict:
     """Jalankan semua 10 engines Group 1 secara paralel"""
+    # Fix: cast semua field numeric ke float agar numpy tidak error
+    ohlcv = [{
+        **c,
+        "open":   float(c.get("open",   0) or 0),
+        "high":   float(c.get("high",   0) or 0),
+        "low":    float(c.get("low",    0) or 0),
+        "close":  float(c.get("close",  0) or 0),
+        "volume": float(c.get("volume", 0) or 0),
+    } for c in ohlcv]
     tasks = [e.analyze(ticker, ohlcv, mode, **kwargs) for e in _engines]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
