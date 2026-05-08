@@ -11,9 +11,9 @@ class VolumeIntelligenceEngine(BaseEngine):
             if len(ohlcv) < 20:
                 return self._safe_result("Insufficient data")
 
-            closes  = np.array([c["close"]  for c in ohlcv])
-            volumes = np.array([c["volume"] for c in ohlcv])
-            opens   = np.array([c["open"]   for c in ohlcv])
+            closes  = np.array([float(c["close"])  for c in ohlcv])
+            volumes = np.array([float(c["volume"]) for c in ohlcv])
+            opens   = np.array([float(c["open"])   for c in ohlcv])
 
             avg_vol_20 = np.mean(volumes[-20:])
             last_vol   = volumes[-1]
@@ -89,12 +89,12 @@ Provide 2-sentence volume analysis indicating accumulation/distribution and trad
             return self._safe_result(str(e))
 
     def _calc_obv(self, closes, volumes):
-        obv = [0]
+        obv = [0.0]
         for i in range(1, len(closes)):
-            if closes[i] > closes[i-1]:
-                obv.append(obv[-1] + volumes[i])
-            elif closes[i] < closes[i-1]:
-                obv.append(obv[-1] - volumes[i])
+            if float(closes[i]) > float(closes[i-1]):
+                obv.append(obv[-1] + float(volumes[i]))
+            elif float(closes[i]) < float(closes[i-1]):
+                obv.append(obv[-1] - float(volumes[i]))
             else:
                 obv.append(obv[-1])
         return obv
@@ -107,9 +107,9 @@ Provide 2-sentence volume analysis indicating accumulation/distribution and trad
         return vpt
 
     def _calc_ad(self, ohlcv):
-        ad = [0]
+        ad = [0.0]
         for c in ohlcv[1:]:
-            h, l, cl, v = c["high"], c["low"], c["close"], c["volume"]
+            h, l, cl, v = float(c["high"]), float(c["low"]), float(c["close"]), float(c["volume"])
             mfm = ((cl - l) - (h - cl)) / (h - l) if (h - l) > 0 else 0
             ad.append(ad[-1] + mfm * v)
         return ad

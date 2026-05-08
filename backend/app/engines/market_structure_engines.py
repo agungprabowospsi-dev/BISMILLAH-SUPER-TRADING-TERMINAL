@@ -12,8 +12,8 @@ class RelativeVolumeEngine(BaseEngine):
         try:
             if len(ohlcv) < 20:
                 return self._safe_result("Insufficient data")
-            volumes = [c["volume"] for c in ohlcv]
-            closes  = [c["close"]  for c in ohlcv]
+            volumes = [float(c["volume"]) for c in ohlcv]
+            closes  = [float(c["close"])  for c in ohlcv]
 
             # RVOL = volume sekarang vs rata-rata jam/hari yang sama
             avg_10 = np.mean(volumes[-11:-1])
@@ -55,7 +55,7 @@ class MultiTimeframeEngine(BaseEngine):
         try:
             if len(ohlcv) < 60:
                 return self._safe_result("Insufficient data for MTF")
-            closes = [c["close"] for c in ohlcv]
+            closes = [float(c["close"]) for c in ohlcv]
 
             # Simulate multiple timeframes dari data harian
             # TF1: 5 bars (short), TF2: 20 bars (medium), TF3: 60 bars (long)
@@ -109,10 +109,10 @@ class OrderBlockEngine(BaseEngine):
             if len(ohlcv) < 20:
                 return self._safe_result("Insufficient data")
 
-            closes  = [c["close"]  for c in ohlcv]
-            highs   = [c["high"]   for c in ohlcv]
-            lows    = [c["low"]    for c in ohlcv]
-            volumes = [c["volume"] for c in ohlcv]
+            closes  = [float(c["close"])  for c in ohlcv]
+            highs   = [float(c["high"])   for c in ohlcv]
+            lows    = [float(c["low"])    for c in ohlcv]
+            volumes = [float(c["volume"]) for c in ohlcv]
             current = closes[-1]
 
             # Order block = candle sebelum big move dengan volume tinggi
@@ -172,10 +172,10 @@ class BreakOrderEngine(BaseEngine):
             if len(ohlcv) < 20:
                 return self._safe_result("Insufficient data")
 
-            closes  = [c["close"]  for c in ohlcv]
-            highs   = [c["high"]   for c in ohlcv]
-            lows    = [c["low"]    for c in ohlcv]
-            volumes = [c["volume"] for c in ohlcv]
+            closes  = [float(c["close"])  for c in ohlcv]
+            highs   = [float(c["high"])   for c in ohlcv]
+            lows    = [float(c["low"])    for c in ohlcv]
+            volumes = [float(c["volume"]) for c in ohlcv]
 
             # Deteksi breakout dari range 20 bar
             range_high = max(highs[-21:-1])
@@ -230,9 +230,9 @@ class FairValueGapEngine(BaseEngine):
             if len(ohlcv) < 10:
                 return self._safe_result("Insufficient data")
 
-            highs  = [c["high"]  for c in ohlcv]
-            lows   = [c["low"]   for c in ohlcv]
-            closes = [c["close"] for c in ohlcv]
+            highs  = [float(c["high"])  for c in ohlcv]
+            lows   = [float(c["low"])   for c in ohlcv]
+            closes = [float(c["close"]) for c in ohlcv]
             current = closes[-1]
 
             fvgs = []
@@ -282,10 +282,10 @@ class LiquidityEngine(BaseEngine):
             if len(ohlcv) < 20:
                 return self._safe_result("Insufficient data")
 
-            closes  = [c["close"]  for c in ohlcv]
-            volumes = [c["volume"] for c in ohlcv]
-            highs   = [c["high"]   for c in ohlcv]
-            lows    = [c["low"]    for c in ohlcv]
+            closes  = [float(c["close"])  for c in ohlcv]
+            volumes = [float(c["volume"]) for c in ohlcv]
+            highs   = [float(c["high"])   for c in ohlcv]
+            lows    = [float(c["low"])    for c in ohlcv]
 
             # Liquidity proxy: volume * price = value traded
             value_traded = [v * c for v, c in zip(volumes, closes)]
