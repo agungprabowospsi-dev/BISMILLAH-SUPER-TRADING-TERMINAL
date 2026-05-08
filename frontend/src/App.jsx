@@ -9,21 +9,17 @@ import { useStore } from './stores/useStore'
 export default function App() {
   const { activeTab } = useStore()
   return (
-    <div className="min-h-screen bg-bg-primary">
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-accent-green/3 rounded-full blur-3xl"/>
-        <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-accent-blue/3 rounded-full blur-3xl"/>
-      </div>
+    <div style={{ minHeight: '100vh', backgroundColor: '#f1f5f9', color: '#1e293b' }}>
       <Header/>
-      <main className="relative z-10">
+      <main style={{ position: 'relative', zIndex: 10 }}>
         {activeTab==='screener' && <ScreenerPage/>}
         {activeTab==='analytic' && <AnalyticPage/>}
         {activeTab==='monitoring' && <MonitoringPage/>}
         {activeTab==='scalping' && <ScalpingPage/>}
       </main>
-      <footer className="border-t border-border-dim mt-8 px-6 py-3 flex items-center justify-between">
-        <span className="font-mono text-xs text-slate-700">BISMILLAH SUPER TRADING TERMINAL v1.0</span>
-        <span className="font-mono text-xs text-slate-700">34 Engines · AI-Powered · IDX Market</span>
+      <footer style={{ borderTop: '1px solid #e2e8f0', marginTop: 32, padding: '12px 24px', display: 'flex', justifyContent: 'space-between' }}>
+        <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#94a3b8' }}>BISMILLAH SUPER TRADING TERMINAL v1.0</span>
+        <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#94a3b8' }}>34 Engines · AI-Powered · IDX Market</span>
       </footer>
     </div>
   )
