@@ -49,6 +49,14 @@ export default function AnalyticPage() {
     Object.entries(engines).filter(([k]) =>
       groupEngineKeys[grp]?.some(gk => k.toLowerCase().includes(gk.substring(0,6))))
 
+  // Hitung group score dari engines
+  const calcGroupScore = (grp) => {
+    const grpEngines = getGroupEngines(grp)
+    if (!grpEngines.length) return 0
+    const avg = grpEngines.reduce((sum,[,v]) => sum + (typeof v==='object'?(v.score??50):(v??50)), 0) / grpEngines.length
+    return Math.round(avg)
+  }
+
   return (
     <div className="p-4 lg:p-6 max-w-7xl mx-auto animate-fade-in">
       <div className="mb-6">
@@ -153,10 +161,11 @@ export default function AnalyticPage() {
             </div>
             <div className="mt-5 pt-4 border-t border-border-dim grid grid-cols-4 gap-3">
               {GROUPS.map(g => {
-                const gs = r.group_scores?.[g.key]
-                const score = typeof gs==='object'?gs?.score:gs
+                const score = calcGroupScore(g.key)
+                const pct = score
                 return <div key={g.key} className="text-center">
                   <ScoreGauge score={score||0} size={56} label={g.label.split(' ')[0]}/>
+                  <div className="font-mono text-xs font-bold mt-1" style={{color: score>=60?'#00FF88':score<=40?'#FF4444':'#FFB800'}}>{score}%</div>
                 </div>
               })}
             </div>
