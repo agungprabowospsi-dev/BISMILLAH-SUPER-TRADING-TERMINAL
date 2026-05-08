@@ -70,7 +70,7 @@ export default function AnalyticPage() {
             onChange={(e) => setAnalyticTicker(e.target.value.toUpperCase())}
             onKeyDown={(e) => e.key==='Enter' && handleAnalyze()}
             placeholder="TICKER (e.g. BBCA)" maxLength={10}
-            className="w-40 bg-bg-secondary border border-border-dim rounded px-3 py-2 font-mono text-sm text-white placeholder-slate-700 focus:border-accent-green focus:outline-none uppercase"/>
+            className="w-40 bg-white border border-slate-300 rounded px-3 py-2 font-mono text-sm text-slate-900 placeholder-slate-400 focus:border-accent-green focus:outline-none uppercase"/>
           <div className="flex gap-1.5">
             {MODES.map(m => (
               <button key={m} onClick={() => setAnalyticMode(m)}
