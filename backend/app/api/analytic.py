@@ -11,6 +11,23 @@ logger = logging.getLogger(__name__)
 
 router = _R()
 
+@router.get("/debug")
+async def debug():
+    try:
+        from app.core import invesgo
+        ohlcv = await invesgo.get_ohlcv_daily("BBCA")
+        if not ohlcv:
+            return {"error": "No OHLCV data"}
+        sample = ohlcv[-1]
+        return {
+            "ohlcv_count": len(ohlcv),
+            "last_candle": sample,
+            "types": {k: type(v).__name__ for k,v in sample.items()}
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "trace": traceback.format_exc()}
+
 class AnalyticRequest(BaseModel):
     ticker: str
     mode: str = "swing"
