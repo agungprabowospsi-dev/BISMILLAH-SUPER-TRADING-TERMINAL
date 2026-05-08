@@ -101,8 +101,9 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Analytic error: {e}")
-        raise HTTPException(500, str(e))
+        import traceback
+        logger.error(f"Analytic error: {e}\n{traceback.format_exc()}")
+        raise HTTPException(500, detail=f"{type(e).__name__}: {str(e)}")
 
 def _calc_atr(ohlcv, period=14):
     import numpy as np
