@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from app.core import invesgo
 from app.engines.group1_runner import run_group1
 from app.core.claude_client import ask_claude
+from app.knowledge_base import kb_service
 import logging
 
 logger = logging.getLogger(__name__)
@@ -36,18 +37,43 @@ async def analyze(req: AnalyticRequest):
         tp3   = round(entry + atr * sl_mult * 4.0, 0)
         rr    = round((tp1 - entry) / (entry - sl), 2) if entry != sl else 0
 
+        # ── RAG KB CONTEXT ──────────────────────────────────────────
+        kb_context = ""
+        try:
+            analytic_engines = [
+                "PriceActionEngine", "VolumeIntelligenceEngine",
+                "BandarmologyEngine", "TrendStructureEngine",
+                "RiskManagementEngine"
+            ]
+            kb_parts = []
+            for eng in analytic_engines:
+                ctx = await kb_service.get_kb_context_for_engine(eng, req.ticker)
+                if ctx:
+                    kb_parts.append(ctx)
+            if kb_parts:
+                kb_context = "\n\n=== REFERENSI KNOWLEDGE BASE ===\n" + "\n---\n".join(kb_parts[:4])
+                logger.info(f"[RAG] Analytic {req.ticker}: {len(kb_parts)} KB contexts injected")
+        except Exception as kb_err:
+            logger.debug(f"[RAG] analytic skip: {kb_err}")
+        # ────────────────────────────────────────────────────────────
+
         rationale = await ask_claude(
-            system="You are a professional IDX stock analyst. Give clear, actionable trading analysis.",
+            system="Kamu adalah analis saham IDX profesional. Berikan analisis trading yang jelas dan actionable dalam Bahasa Indonesia.",
             prompt=f"""
 Ticker: {req.ticker} | Mode: {req.mode}
 Score: {score:.1f}/100 | Signal: {group1['consensus']}
 Entry: {entry} | SL: {sl} | TP1: {tp1} | TP2: {tp2} | TP3: {tp3}
 R:R = {rr}
-Engine summary: {group1['bullish_count']} bullish, {group1['bearish_count']} bearish of 10 engines
+Engine: {group1['bullish_count']} bullish, {group1['bearish_count']} bearish dari 10 engines
+{kb_context}
 
-Write a 3-sentence trading analysis: market condition, entry rationale, risk management advice.
+Tulis analisis trading 3-4 kalimat dalam Bahasa Indonesia:
+1. Kondisi market saat ini
+2. Alasan entry dan level kunci
+3. Manajemen risiko (SL/TP)
+Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memperkuat analisis.
 """,
-            max_tokens=250
+            max_tokens=350
         )
 
         return {
