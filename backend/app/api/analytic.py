@@ -1,5 +1,7 @@
 # ─── ANALYTIC ─────────────────────────────────────────────────────────────────
 from fastapi import APIRouter as _R, HTTPException
+from fastapi.responses import JSONResponse
+import numpy as np
 from pydantic import BaseModel
 from app.core import invesgo
 from app.engines.group1_runner import run_group1
@@ -121,15 +123,21 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             max_tokens=350
         )
 
+        def _safe(v):
+            if isinstance(v, (np.integer,)): return int(v)
+            if isinstance(v, (np.floating,)): return float(v)
+            if isinstance(v, np.ndarray): return v.tolist()
+            return v
+
         return {
             "ticker": req.ticker,
             "mode": req.mode,
-            "entry": entry,
-            "stop_loss": sl,
-            "tp1": tp1, "tp2": tp2, "tp3": tp3,
-            "rr_ratio": rr,
-            "score": score,
-            "confidence": min(95, score),
+            "entry": _safe(entry),
+            "stop_loss": _safe(sl),
+            "tp1": _safe(tp1), "tp2": _safe(tp2), "tp3": _safe(tp3),
+            "rr_ratio": _safe(rr),
+            "score": _safe(score),
+            "confidence": _safe(min(95, score)),
             "signal": group1["consensus"],
             "rationale": rationale,
             "engines": group1,
