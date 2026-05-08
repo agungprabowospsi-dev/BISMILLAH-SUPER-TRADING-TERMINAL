@@ -18,13 +18,20 @@ export default function AnalyticPage() {
     analyticResult, setAnalyticResult, analyticLoading, setAnalyticLoading,
     analyticError, setAnalyticError, sendToMonitoring } = useStore()
   const [activeGroup, setActiveGroup] = useState('group1')
+  const [marketCtx, setMarketCtx] = useState(null)
 
   const handleAnalyze = async () => {
     if(!analyticTicker.trim()) return
-    setAnalyticLoading(true); setAnalyticError(null); setAnalyticResult(null)
+    setAnalyticLoading(true); setAnalyticError(null); setAnalyticResult(null); setMarketCtx(null)
     try {
       const res = await analyzeStock(analyticTicker.toUpperCase().trim(), analyticMode)
       setAnalyticResult(res)
+      // Fetch market context 4 box
+      try {
+        const ctx = await fetch(`${import.meta.env.VITE_BACKEND_URL || 'https://bismillah-super-trading-terminal-production.up.railway.app'}/api/analytic/market-context/${analyticTicker.toUpperCase().trim()}`)
+        const ctxData = await ctx.json()
+        setMarketCtx(ctxData)
+      } catch(e) { console.log('market ctx error:', e) }
     } catch(e) {
       setAnalyticError(e?.response?.data?.detail || e.message || 'Gagal menganalisis')
     } finally { setAnalyticLoading(false) }
@@ -88,6 +95,65 @@ export default function AnalyticPage() {
         </div>
       </div>
 
+      {/* 4 BOX MARKET CONTEXT */}
+      {marketCtx && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+          {/* Box 1: Price */}
+          <div className="card p-3">
+            <div className="label-xs mb-2">📈 HARGA</div>
+            <div className="font-mono font-bold text-lg text-slate-900">Rp {marketCtx.price?.last?.toLocaleString('id-ID')}</div>
+            <div className={`font-mono text-sm font-semibold ${marketCtx.price?.change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {marketCtx.price?.change >= 0 ? '+' : ''}{marketCtx.price?.change?.toLocaleString('id-ID')} ({marketCtx.price?.change_pct}%)
+            </div>
+            <div className="text-xs text-slate-500 mt-1">
+              H: {marketCtx.price?.high?.toLocaleString('id-ID')} | L: {marketCtx.price?.low?.toLocaleString('id-ID')}
+            </div>
+            <div className="text-xs text-slate-500">Open: {marketCtx.price?.open?.toLocaleString('id-ID')}</div>
+          </div>
+          {/* Box 2: Volume */}
+          <div className="card p-3">
+            <div className="label-xs mb-2">📊 VOLUME</div>
+            <div className="font-mono font-bold text-lg text-slate-900">{(marketCtx.volume?.last_volume/1000000).toFixed(1)}M</div>
+            <div className={`font-mono text-sm font-semibold ${
+              marketCtx.volume?.signal === 'HIGH' ? 'text-green-600' :
+              marketCtx.volume?.signal === 'MEDIUM' ? 'text-amber-600' : 'text-slate-500'}`}>
+              RVOL: {marketCtx.volume?.rvol}x — {marketCtx.volume?.signal}
+            </div>
+            <div className="text-xs text-slate-500 mt-1">Avg 20d: {(marketCtx.volume?.avg_volume_20/1000000).toFixed(1)}M</div>
+            <div className="text-xs text-slate-500">Trend: {marketCtx.volume?.vol_trend}</div>
+          </div>
+          {/* Box 3: Company */}
+          <div className="card p-3">
+            <div className="label-xs mb-2">🏢 PERUSAHAAN</div>
+            <div className="font-mono font-bold text-sm text-slate-900 truncate">{marketCtx.company?.name}</div>
+            <div className="text-xs text-slate-600 mt-1">{marketCtx.company?.sector}</div>
+            <div className="text-xs text-slate-500">{marketCtx.company?.subsector}</div>
+            <div className="text-xs text-slate-400 mt-1 truncate">{marketCtx.company?.activity}</div>
+          </div>
+          {/* Box 4: Technical */}
+          <div className="card p-3">
+            <div className="label-xs mb-2">📉 TECHNICAL</div>
+            <div className={`font-mono font-bold text-sm ${
+              marketCtx.technical?.trend === 'UPTREND' ? 'text-green-600' :
+              marketCtx.technical?.trend === 'DOWNTREND' ? 'text-red-600' : 'text-amber-600'}`}>
+              {marketCtx.technical?.trend}
+            </div>
+            <div className="text-xs text-slate-500 mt-1">52w High: {marketCtx.technical?.['52w_high']?.toLocaleString('id-ID')}</div>
+            <div className="text-xs text-slate-500">52w Low: {marketCtx.technical?.['52w_low']?.toLocaleString('id-ID')}</div>
+            <div className="text-xs text-slate-500">MA20: {marketCtx.technical?.ma20?.toLocaleString('id-ID')}</div>
+            <div className="text-xs text-slate-500">MA50: {marketCtx.technical?.ma50?.toLocaleString('id-ID')}</div>
+            <div className="text-xs mt-1">
+              <span className={`font-semibold ${marketCtx.technical?.above_ma20 ? 'text-green-600' : 'text-red-500'}`}>
+                {marketCtx.technical?.above_ma20 ? '✅' : '❌'} MA20
+              </span>
+              {' '}
+              <span className={`font-semibold ${marketCtx.technical?.above_ma50 ? 'text-green-600' : 'text-red-500'}`}>
+                {marketCtx.technical?.above_ma50 ? '✅' : '❌'} MA50
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
       {analyticLoading && <LoadingSpinner message={`Menganalisis ${analyticTicker}...`}/>}
       {analyticError && !analyticLoading && <ErrorBox message={analyticError} onRetry={handleAnalyze}/>}
 
