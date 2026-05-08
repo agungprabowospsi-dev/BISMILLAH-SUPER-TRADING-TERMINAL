@@ -175,7 +175,13 @@ export default function AnalyticPage() {
             <div className="card p-5">
               <p className="label-xs mb-3">🤖 AI Trading Rationale</p>
               <div className="bg-bg-secondary rounded p-4 border border-border-dim">
-                <p className="font-mono text-xs text-slate-400 leading-relaxed whitespace-pre-wrap">{r.rationale}</p>
+              <div className="font-mono text-xs text-slate-900 leading-relaxed"
+                dangerouslySetInnerHTML={{__html: r.rationale
+                  .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                  .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                  .replace(/##\s(.+)/g, '<div class="font-bold text-sm text-slate-900 mt-2 mb-1">$1</div>')
+                  .replace(/\n/g, '<br/>')
+                }} />
               </div>
             </div>
           )}
