@@ -13,20 +13,39 @@ router = _R()
 
 @router.get("/debug")
 async def debug():
+    import traceback
+    results = {}
     try:
         from app.core import invesgo
         ohlcv = await invesgo.get_ohlcv_daily("BBCA")
-        if not ohlcv:
-            return {"error": "No OHLCV data"}
-        sample = ohlcv[-1]
-        return {
-            "ohlcv_count": len(ohlcv),
-            "last_candle": sample,
-            "types": {k: type(v).__name__ for k,v in sample.items()}
-        }
+        results["step1_ohlcv"] = f"OK {len(ohlcv)} candles"
     except Exception as e:
-        import traceback
-        return {"error": str(e), "trace": traceback.format_exc()}
+        return {"failed_at": "step1_ohlcv", "error": str(e), "trace": traceback.format_exc()}
+    try:
+        from app.engines.group1_runner import run_group1
+        group1 = await run_group1("BBCA", ohlcv, "swing")
+        results["step2_group1"] = f"OK score={group1['group_score']}"
+    except Exception as e:
+        return {"failed_at": "step2_group1", "error": str(e), "trace": traceback.format_exc()}
+    try:
+        from app.api.analytic import _calc_atr
+        atr = _calc_atr(ohlcv)
+        results["step3_atr"] = f"OK atr={atr}"
+    except Exception as e:
+        return {"failed_at": "step3_atr", "error": str(e), "trace": traceback.format_exc()}
+    try:
+        from app.knowledge_base import kb_service
+        ctx = await kb_service.get_kb_context_for_engine("PriceActionEngine", "BBCA")
+        results["step4_rag"] = f"OK len={len(ctx)}"
+    except Exception as e:
+        return {"failed_at": "step4_rag", "error": str(e), "trace": traceback.format_exc()}
+    try:
+        from app.core.claude_client import ask_claude
+        r = await ask_claude(system="test", prompt="say OK", max_tokens=10)
+        results["step5_claude"] = f"OK: {r}"
+    except Exception as e:
+        return {"failed_at": "step5_claude", "error": str(e), "trace": traceback.format_exc()}
+    return {"all_ok": True, "results": results}
 
 class AnalyticRequest(BaseModel):
     ticker: str
