@@ -50,7 +50,7 @@ export default function Header() {
             {[...TICKERS,...TICKERS].map((t,i) => (
               <span key={i} className="inline-flex items-center gap-1.5 font-mono text-xs">
                 <span className="text-slate-400">{t.sym}</span>
-                <span className="text-white font-semibold">{t.price}</span>
+                <span className="text-slate-800 font-semibold">{t.price}</span>
                 <span className={t.up?'text-accent-green':'text-accent-red'}>{t.chg}</span>
               </span>
             ))}
@@ -79,7 +79,7 @@ export default function Header() {
             <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-accent-green rounded-full blink"/>
           </div>
           <div>
-            <div className="font-display font-bold text-white text-base tracking-wider leading-none">BISMILLAH</div>
+            <div className="font-display font-bold text-accent-green text-base tracking-wider leading-none">BISMILLAH</div>
             <div className="font-mono text-[9px] text-slate-500 tracking-widest uppercase leading-none mt-0.5">Super Trading Terminal</div>
           </div>
         </div>

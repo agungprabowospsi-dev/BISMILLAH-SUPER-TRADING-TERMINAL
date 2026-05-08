@@ -1,51 +1,161 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { BACKEND_URL } from "../../utils/api";
+
 const MODE_OPTIONS = ["swing", "intraday", "scalping"];
-const SIGNAL_COLOR = { BUY: "#16a34a", SELL: "#dc2626", HOLD: "#d97706", NEUTRAL: "#6b7280" };
+
+const SIGNAL_COLOR = {
+  BUY: "#16a34a",
+  SELL: "#dc2626",
+  HOLD: "#d97706",
+  NEUTRAL: "#6b7280",
+};
+
+const PROGRESS_MESSAGES = [
+  "Memuat daftar saham IDX...",
+  "Scanning 970 saham...",
+  "Menjalankan Price Action Engine...",
+  "Menjalankan Trend Structure Engine...",
+  "Menjalankan Volume Intelligence...",
+  "Menjalankan Order Block Engine...",
+  "Menjalankan Bandarmology Engine...",
+  "Menghitung composite score...",
+  "Memfilter saham score >70...",
+  "Menyiapkan hasil...",
+];
+
 export default function ScreenerPage() {
   const [mode, setMode] = useState("swing");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [rawResponse, setRawResponse] = useState(null);
+  const [progress, setProgress] = useState(0);
+  const [progressMsg, setProgressMsg] = useState("");
+  const progressRef = useRef(null);
+
+  const startProgress = () => {
+    setProgress(0);
+    setProgressMsg(PROGRESS_MESSAGES[0]);
+    let step = 0;
+    progressRef.current = setInterval(() => {
+      step += 1;
+      const pct = Math.min(90, step * 10);
+      setProgress(pct);
+      setProgressMsg(PROGRESS_MESSAGES[Math.min(step, PROGRESS_MESSAGES.length - 1)]);
+    }, 3000);
+  };
+
+  const stopProgress = () => {
+    if (progressRef.current) clearInterval(progressRef.current);
+    setProgress(100);
+    setProgressMsg("Selesai!");
+    setTimeout(() => { setProgress(0); setProgressMsg(""); }, 1500);
+  };
+
   const runScreener = async () => {
-    setLoading(true); setError(null); setResult(null); setRawResponse(null);
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    setRawResponse(null);
+    startProgress();
     try {
-      const res = await fetch(`${BACKEND_URL}/api/screener/run`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: mode.toLowerCase() }) });
+      const res = await fetch(`${BACKEND_URL}/api/screener/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: mode.toLowerCase() }),
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setRawResponse(data);
       const stocks = data?.top5_stocks || data?.top_stocks || data?.stocks || data?.results || [];
-      setResult({ session_id: data?.session_id || "N/A", mode: data?.mode || mode, stocks: Array.isArray(stocks) ? stocks : [], total_scanned: data?.total_scanned || 0 });
-    } catch (err) { setError(err.message || "Unknown error"); }
-    finally { setLoading(false); }
+      setResult({
+        session_id: data?.session_id || "N/A",
+        mode: data?.mode || mode,
+        stocks: Array.isArray(stocks) ? stocks : [],
+        total_scanned: data?.total_scanned || 0,
+      });
+    } catch (err) {
+      setError(err.message || "Unknown error");
+    } finally {
+      stopProgress();
+      setLoading(false);
+    }
   };
+
   return (
     <div style={S.container}>
-      <div style={S.header}><h1 style={S.title}>SCREENER</h1><p style={S.subtitle}>Bismillah Super Trading Terminal</p></div>
-      <div style={S.modeRow}>{MODE_OPTIONS.map((m) => (<button key={m} onClick={() => setMode(m)} style={{ ...S.modeBtn, ...(mode === m ? S.modeBtnActive : {}) }}>{m.toUpperCase()}</button>))}</div>
-      <button onClick={runScreener} disabled={loading} style={S.runBtn}>{loading ? "SCANNING..." : "RUN SCREENER"}</button>
+      <div style={S.header}>
+        <h1 style={S.title}>SCREENER</h1>
+        <p style={S.subtitle}>Bismillah Super Trading Terminal</p>
+      </div>
+      <div style={S.modeRow}>
+        {MODE_OPTIONS.map((m) => (
+          <button key={m} onClick={() => setMode(m)} style={{ ...S.modeBtn, ...(mode === m ? S.modeBtnActive : {}) }}>
+            {m.toUpperCase()}
+          </button>
+        ))}
+      </div>
+      <button onClick={runScreener} disabled={loading} style={S.runBtn}>
+        {loading ? "SCANNING..." : "RUN SCREENER"}
+      </button>
+
+      {loading && (
+        <div style={S.progressBox}>
+          <div style={S.progressHeader}>
+            <span style={S.progressMsg}>{progressMsg}</span>
+            <span style={S.progressPct}>{progress}%</span>
+          </div>
+          <div style={S.progressBg}>
+            <div style={{ ...S.progressFill, width: `${progress}%` }} />
+          </div>
+          <p style={S.progressSub}>Scanning 970 saham IDX dengan 11 engines...</p>
+        </div>
+      )}
+
       {error && <div style={S.errorBox}><strong>ERROR:</strong> {error}</div>}
-      {result && (
+
+      {result && !loading && (
         <div style={S.resultsSection}>
-          <div style={S.metaRow}><span style={S.metaBadge}>Mode: {result.mode.toUpperCase()}</span><span style={S.metaBadge}>Scanned: {result.total_scanned}</span><span style={S.metaBadge}>Session: {result.session_id}</span></div>
+          <div style={S.metaRow}>
+            <span style={S.metaBadge}>Mode: {result.mode.toUpperCase()}</span>
+            <span style={S.metaBadge}>Scanned: {result.total_scanned}</span>
+            <span style={S.metaBadge}>Session: {result.session_id}</span>
+          </div>
           {result.stocks.length === 0 ? (
-            <div style={S.emptyBox}><p>Tidak ada saham score lebih dari 70 hari ini.</p>{rawResponse && <pre style={S.debugPre}>{JSON.stringify(rawResponse, null, 2)}</pre>}</div>
+            <div style={S.emptyBox}>
+              <p>Tidak ada saham dengan score lebih dari 70 hari ini.</p>
+              <p style={{ fontSize: 12, marginTop: 8 }}>Backend returned {result.total_scanned} stocks tapi tidak ada yang masuk filter.</p>
+              {rawResponse && <pre style={S.debugPre}>{JSON.stringify(rawResponse, null, 2)}</pre>}
+            </div>
           ) : (
-            <div style={S.stockGrid}>{result.stocks.map((stock, idx) => (<StockCard key={stock.ticker || idx} stock={stock} rank={idx + 1} />))}</div>
+            <div style={S.stockGrid}>
+              {result.stocks.map((stock, idx) => (
+                <StockCard key={stock.ticker || idx} stock={stock} rank={idx + 1} />
+              ))}
+            </div>
           )}
         </div>
       )}
-      {!result && !loading && !error && <div style={S.initialBox}><p style={{ color: "#6b7280" }}>Pilih mode dan klik RUN SCREENER untuk mulai scanning.</p></div>}
+
+      {!result && !loading && !error && (
+        <div style={S.initialBox}>
+          <p style={{ color: "#6b7280" }}>Pilih mode dan klik RUN SCREENER untuk mulai scanning saham IDX.</p>
+        </div>
+      )}
     </div>
   );
 }
+
 function StockCard({ stock, rank }) {
   const signal = (stock.signal || "NEUTRAL").toUpperCase();
   const sc = SIGNAL_COLOR[signal] || SIGNAL_COLOR.NEUTRAL;
   return (
     <div style={S.card}>
-      <div style={S.cardHeader}><span style={S.rank}>#{rank}</span><span style={S.ticker}>{stock.ticker}</span><span style={{ ...S.signalBadge, backgroundColor: sc + "22", color: sc, border: "1px solid " + sc }}>{signal}</span></div>
+      <div style={S.cardHeader}>
+        <span style={S.rank}>#{rank}</span>
+        <span style={S.ticker}>{stock.ticker}</span>
+        <span style={{ ...S.signalBadge, backgroundColor: sc + "22", color: sc, border: "1px solid " + sc }}>{signal}</span>
+      </div>
       <div style={S.cardBody}>
         <div style={S.scoreRow}><span style={S.scoreLabel}>Score</span><span style={S.scoreValue}>{Number(stock.score || 0).toFixed(1)}</span></div>
         <div style={S.priceRow}><span style={S.priceLabel}>Last Price</span><span style={S.priceValue}>Rp {Number(stock.last_price || 0).toLocaleString("id-ID")}</span></div>
@@ -54,6 +164,7 @@ function StockCard({ stock, rank }) {
     </div>
   );
 }
+
 const S = {
   container: { fontFamily: "Arial, sans-serif", backgroundColor: "#f1f5f9", minHeight: "100vh", padding: "24px 16px", color: "#1e293b" },
   header: { textAlign: "center", marginBottom: 24, borderBottom: "2px solid #e2e8f0", paddingBottom: 16 },
@@ -63,6 +174,13 @@ const S = {
   modeBtn: { padding: "8px 20px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", color: "#64748b", cursor: "pointer", borderRadius: 6, fontSize: 12, fontWeight: "600" },
   modeBtnActive: { borderColor: "#0ea5e9", color: "#0ea5e9", backgroundColor: "#e0f2fe" },
   runBtn: { display: "block", width: "100%", maxWidth: 320, margin: "0 auto 24px", padding: "14px 0", backgroundColor: "#0ea5e9", color: "#ffffff", border: "none", borderRadius: 6, fontSize: 14, fontWeight: "bold", cursor: "pointer" },
+  progressBox: { backgroundColor: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 20, marginBottom: 20, boxShadow: "0 2px 8px rgba(0,0,0,0.06)" },
+  progressHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+  progressMsg: { fontSize: 13, color: "#0ea5e9", fontWeight: "600" },
+  progressPct: { fontSize: 20, fontWeight: "bold", color: "#0ea5e9" },
+  progressBg: { backgroundColor: "#e2e8f0", height: 10, borderRadius: 5, overflow: "hidden", marginBottom: 8 },
+  progressFill: { height: "100%", backgroundColor: "#0ea5e9", borderRadius: 5, transition: "width 0.5s ease", backgroundImage: "linear-gradient(90deg, #0ea5e9, #16a34a)" },
+  progressSub: { fontSize: 11, color: "#94a3b8", margin: 0 },
   errorBox: { backgroundColor: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: 16, color: "#dc2626", marginBottom: 16, fontSize: 13 },
   resultsSection: { marginTop: 8 },
   metaRow: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 },
