@@ -123,25 +123,28 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             max_tokens=350
         )
 
-        def _safe(v):
-            if isinstance(v, (np.integer,)): return int(v)
-            if isinstance(v, (np.floating,)): return float(v)
-            if isinstance(v, np.ndarray): return v.tolist()
-            return v
+        import json as _json
+        class NumpyEncoder(_json.JSONEncoder):
+            def default(self, obj):
+                if isinstance(obj, np.integer): return int(obj)
+                if isinstance(obj, np.floating): return float(obj)
+                if isinstance(obj, np.ndarray): return obj.tolist()
+                return super().default(obj)
 
-        return {
+        result = {
             "ticker": req.ticker,
             "mode": req.mode,
-            "entry": _safe(entry),
-            "stop_loss": _safe(sl),
-            "tp1": _safe(tp1), "tp2": _safe(tp2), "tp3": _safe(tp3),
-            "rr_ratio": _safe(rr),
-            "score": _safe(score),
-            "confidence": _safe(min(95, score)),
+            "entry": float(entry) if entry else 0,
+            "stop_loss": float(sl) if sl else 0,
+            "tp1": float(tp1), "tp2": float(tp2), "tp3": float(tp3),
+            "rr_ratio": float(rr),
+            "score": float(score),
+            "confidence": float(min(95, score)),
             "signal": group1["consensus"],
             "rationale": rationale,
             "engines": group1,
         }
+        return JSONResponse(content=_json.loads(_json.dumps(result, cls=NumpyEncoder)))
     except HTTPException:
         raise
     except Exception as e:
