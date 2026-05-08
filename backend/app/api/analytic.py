@@ -47,6 +47,19 @@ async def debug():
         results["step5_claude"] = f"OK: {r}"
     except Exception as e:
         return {"failed_at": "step5_claude", "error": str(e), "trace": traceback.format_exc()}
+    # Test invesgo endpoints
+    for name, coro in [
+        ("price_table", invesgo.get_price_table("BBCA")),
+        ("orderbook", invesgo.get_orderbook("BBCA")),
+        ("broker", invesgo.get_broker_summary("BBCA")),
+        ("company", invesgo.get_company_info("BBCA")),
+    ]:
+        try:
+            data = await coro
+            k = list(data.keys())[:5] if isinstance(data, dict) else f"list[{len(data)}]"
+            results[f"step_{name}"] = f"OK keys={k}"
+        except Exception as e:
+            results[f"step_{name}"] = f"ERROR: {str(e)[:80]}"
     return {"all_ok": True, "results": results}
 
 class AnalyticRequest(BaseModel):
