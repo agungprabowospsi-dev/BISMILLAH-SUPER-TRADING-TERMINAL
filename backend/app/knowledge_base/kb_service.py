@@ -326,23 +326,17 @@ async def get_document_scores(document_id: int) -> Dict:
 async def search_chunks_for_engine(engine_name: str, query: str, limit: int = 5) -> List[Dict]:
     conn = await get_db_conn()
     try:
-        words = query.split()[:5]
-        search_term = " ".join(words)
+        # Ambil 1 chunk per dokumen agar merata dari semua 7 buku
         rows = await conn.fetch("""
-            SELECT c.id, c.content, c.page_number, c.chunk_index,
+            SELECT DISTINCT ON (c.document_id)
+                   c.id, c.content, c.page_number, c.chunk_index,
                    d.original_name as source_document
             FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id
-            WHERE c.engine_tags::text LIKE $1 AND c.content ILIKE $2
-            ORDER BY c.id DESC LIMIT $3
-        """, f'%{engine_name}%', f'%{search_term[:50]}%', limit)
-
-        if not rows:
-            rows = await conn.fetch("""
-                SELECT c.id, c.content, c.page_number, c.chunk_index,
-                       d.original_name as source_document
-                FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id
-                WHERE c.engine_tags::text LIKE $1 ORDER BY c.id DESC LIMIT $2
-            """, f'%{engine_name}%', limit)
+            WHERE c.engine_tags::text LIKE $1
+              AND d.status = 'analyzed'
+            ORDER BY c.document_id, c.id
+            LIMIT $2
+        """, f'%{engine_name}%', limit)
 
         return [dict(r) for r in rows]
     finally:
