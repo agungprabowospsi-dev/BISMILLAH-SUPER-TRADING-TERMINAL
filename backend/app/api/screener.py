@@ -20,6 +20,52 @@ class ScreenerRequest(BaseModel):
     mode: str = "swing"
     filters: Optional[dict] = {}
 
+@router.get("/market-overview")
+async def market_overview():
+    """IHSG proxy + sector rotation"""
+    result = {}
+
+    # Sector rotation
+    try:
+        sectors = await invesgo.get_sector_rotation()
+        if isinstance(sectors, list) and sectors:
+            sorted_s = sorted(sectors, key=lambda x: float(x.get("change_pct") or x.get("pct") or 0), reverse=True)
+            result["sectors"] = [{"name": s.get("sector") or s.get("name") or "-",
+                "change_pct": round(float(s.get("change_pct") or s.get("pct") or 0), 2),
+                "signal": "UP" if float(s.get("change_pct") or s.get("pct") or 0) > 0 else "DOWN"
+            } for s in sorted_s[:10]]
+            result["strongest"] = result["sectors"][0] if result["sectors"] else {}
+            result["weakest"] = result["sectors"][-1] if result["sectors"] else {}
+        else:
+            result["sectors"] = []
+            result["sectors_raw"] = str(sectors)[:200]
+    except Exception as e:
+        result["sectors"] = []
+        result["sector_error"] = str(e)[:100]
+
+    # Market proxy dari blue chip
+    try:
+        changes = []
+        for ticker in ["BBCA","BBRI","TLKM","ASII","BMRI"]:
+            try:
+                ohlcv = await invesgo.get_ohlcv_daily(ticker)
+                if ohlcv and len(ohlcv) >= 2:
+                    last = float(ohlcv[-1].get("close",0) or 0)
+                    prev = float(ohlcv[-2].get("close",0) or 0)
+                    if prev > 0: changes.append((last-prev)/prev*100)
+            except: pass
+        avg = round(sum(changes)/len(changes), 2) if changes else 0
+        result["market"] = {
+            "proxy": "Blue Chip IDX",
+            "avg_change_pct": avg,
+            "sentiment": "BULLISH" if avg > 0.3 else "BEARISH" if avg < -0.3 else "SIDEWAYS",
+        }
+    except Exception as e:
+        result["market"] = {"error": str(e)[:100]}
+
+    return result
+
+
 @router.post("/run")
 async def run_screener(req: ScreenerRequest):
     session_id = str(uuid.uuid4())[:8]
