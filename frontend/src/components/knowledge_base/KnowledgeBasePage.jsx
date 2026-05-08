@@ -169,42 +169,61 @@ export default function KnowledgeBasePage() {
       setError('Hanya file PDF yang didukung'); return
     }
     setUploading(true); setError(null); setUploadResult(null)
-
-    const steps = [
-      'Membaca PDF...',
-      'Mengekstrak teks...',
-      'Chunking konten...',
-      'Claude menganalisis relevansi ke 34 engines...',
-      'Batch 1-10: Group Technical & SMC...',
-      'Batch 11-20: Bandarmology & Quant...',
-      'Batch 21-34: Macro, Decision & Risk...',
-      'Menyimpan ke database...',
-      'Finalisasi...',
-    ]
-    let si = 0
-    const iv = setInterval(() => {
-      if (si < steps.length) { setUploadProgress(steps[si]); si++ }
-    }, 2500)
-
+    setUploadProgress('Mengirim file ke server...')
     try {
       const form = new FormData()
       form.append('file', file)
       if (description) form.append('description', description)
-
       const r = await fetch(`${API}/api/kb/upload`, { method: 'POST', body: form })
       const d = await r.json()
-      clearInterval(iv)
-
       if (!r.ok) { setError(d.detail || 'Upload gagal'); setUploading(false); return }
-
-      setUploadResult(d)
-      setUploadProgress('')
-      setDescription('')
-      await loadDocuments()
-      await loadStats()
-      setSelectedDocId(d.document_id)
-    } catch (e) {
+      const jobId = d.job_id
+      if (!jobId) { setError('Tidak ada job_id dari server'); setUploading(false); return }
+      const pollSteps = [
+        'File diterima ✓ — ekstrak teks...',
+        'Chunking konten PDF...',
+        'Claude analisis engines 1-10...',
+        'Claude analisis engines 11-20...',
+        'Claude analisis engines 21-34...',
+        'Menyimpan ke database...',
+        'Hampir selesai...',
+      ]
+      let si = 0
+      const iv = setInterval(() => {
+        if (si < pollSteps.length) { setUploadProgress(pollSteps[si]); si++ }
+      }, 5000)
+      for (let attempt = 0; attempt < 120; attempt++) {
+        await new Promise(res => setTimeout(res, 3000))
+        try {
+          const jr = await fetch(`${API}/api/kb/jobs/${jobId}`)
+          const jd = await jr.json()
+          if (jd.status === 'completed' || jd.status === 'done') {
+            clearInterval(iv)
+            const res = jd.result || jd
+            setUploadResult({
+              message: res.message || 'Upload berhasil!',
+              document_id: res.document_id,
+              total_pages: res.total_pages,
+              total_chunks: res.total_chunks,
+              approved_count: res.approved_count,
+            })
+            setUploadProgress('')
+            setDescription('')
+            await loadDocuments(); await loadStats()
+            if (res.document_id) setSelectedDocId(res.document_id)
+            setUploading(false); return
+          }
+          if (jd.status === 'failed') {
+            clearInterval(iv)
+            setError('Proses gagal: ' + (jd.error || 'Unknown'))
+            setUploading(false); return
+          }
+          if (jd.progress) setUploadProgress(jd.progress)
+        } catch {}
+      }
       clearInterval(iv)
+      setError('Timeout. Cek tab Buku Tersimpan!')
+    } catch (e) {
       setError('Network error: ' + e.message)
     }
     setUploading(false)
