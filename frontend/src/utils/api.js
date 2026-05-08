@@ -35,10 +35,10 @@ export async function checkHealth() {
   return apiFetch("/health");
 }
 
-export async function analyzeStock(ticker) {
+export async function analyzeStock(ticker, mode = "swing") {
   return apiFetch(`/api/analytic/analyze`, {
     method: "POST",
-    body: JSON.stringify({ ticker }),
+    body: JSON.stringify({ ticker, mode: mode.toLowerCase() }),
   });
 }
 

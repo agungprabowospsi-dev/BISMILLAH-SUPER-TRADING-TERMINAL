@@ -24,7 +24,7 @@ export default function AnalyticPage() {
     setAnalyticLoading(true); setAnalyticError(null); setAnalyticResult(null)
     try {
       const res = await analyzeStock(analyticTicker.toUpperCase().trim(), analyticMode)
-      setAnalyticResult(res.data)
+      setAnalyticResult(res)
     } catch(e) {
       setAnalyticError(e?.response?.data?.detail || e.message || 'Gagal menganalisis')
     } finally { setAnalyticLoading(false) }
