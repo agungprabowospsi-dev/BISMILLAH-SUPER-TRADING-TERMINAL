@@ -98,7 +98,7 @@ async def _analyze_stock(ticker: str, mode: str) -> dict:
         kb_boost = 0.0
         kb_context_summary = ""
         try:
-            screener_engines = ["VolumeIntelligenceEngine","BandarmologyEngine","TrendStructureEngine"]
+            screener_engines = ["VolumeIntelligenceEngine","BandarmologyEngine","TrendStructureEngine","FibonacciEngine","LiquidityQualityEngine"]
             kb_contexts = []
             for eng in screener_engines:
                 ctx = await kb_service.get_kb_context_for_engine(eng, ticker)
