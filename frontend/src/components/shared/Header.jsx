@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Activity, TrendingUp, BarChart2, Zap, Wifi, WifiOff } from 'lucide-react'
+import { Activity, TrendingUp, BarChart2, Zap, Wifi, WifiOff, BookOpen } from 'lucide-react'
 import { useStore } from '../../stores/useStore'
 import { checkHealth } from '../../utils/api'
 import clsx from 'clsx'
@@ -9,6 +9,7 @@ const TABS = [
   { id:'analytic', label:'Analytic', icon:BarChart2 },
   { id:'monitoring', label:'Monitoring', icon:Activity },
   { id:'scalping', label:'Scalping', icon:Zap },
+  { id:'kb', label:'Knowledge Base', icon:BookOpen },
 ]
 
 const TICKERS = [
