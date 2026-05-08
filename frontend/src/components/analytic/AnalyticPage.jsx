@@ -31,7 +31,12 @@ export default function AnalyticPage() {
   }
 
   const r = analyticResult
-  const engines = r?.engine_scores || r?.engines || {}
+  // Backend returns engines as array [{engine, score, signal, ...}]
+  // Convert to object {engineName: {score, signal, ...}} for UI
+  const enginesRaw = r?.engines?.engines || r?.engine_scores || []
+  const engines = Array.isArray(enginesRaw)
+    ? Object.fromEntries(enginesRaw.map(e => [e.engine, e]))
+    : enginesRaw
 
   const groupEngineKeys = {
     group1:['price_action','trend','support','volume','relative_vol','multi_time','order_block','break_order','fair_value','liquidity'],
