@@ -4,22 +4,33 @@ router = APIRouter()
 
 @router.get("/health")
 async def health():
-    from app.core.knowledge_base import _collections
     from app.core.redis_client import _redis_client
-    kb_loaded = all(c.count() > 0 for c in _collections.values()) if _collections else False
     redis_ok = False
     try:
         await _redis_client.ping()
         redis_ok = True
     except:
         pass
+
+    # Cek KB via PostgreSQL
+    kb_loaded = False
+    try:
+        from app.knowledge_base.kb_service import get_db_conn
+        conn = await get_db_conn()
+        count = await conn.fetchval("SELECT COUNT(*) FROM kb_documents WHERE status = 'analyzed'")
+        await conn.close()
+        kb_loaded = count > 0
+    except:
+        kb_loaded = False
+
     return {
         "status": "ok",
-        "engines": 10,
+        "engines": 34,
         "kb_loaded": kb_loaded,
         "redis": redis_ok,
         "message": "BISMILLAH — Systems Online 🚀"
     }
+
 @router.get("/debug/data-module")
 async def debug_data_module():
     import subprocess
