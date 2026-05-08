@@ -38,8 +38,8 @@ export default function Header() {
   }, [])
 
   const isOpen = () => {
-    const m = time.getHours()*60+time.getMinutes()
-    return m>=570 && m<=900
+    const now = new Date(); const wib = new Date(now.getTime() + 7*60*60*1000); const m = wib.getUTCHours()*60+wib.getUTCMinutes()
+    return m>=540 && m<=960
   }
 
   return (
