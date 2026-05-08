@@ -22,6 +22,15 @@ async def analyze(req: AnalyticRequest):
         if not ohlcv or len(ohlcv) < 20:
             raise HTTPException(400, "Insufficient OHLCV data")
 
+        # Cast OHLCV ke float
+        ohlcv = [{
+            **c,
+            "open":   float(c.get("open",   0) or 0),
+            "high":   float(c.get("high",   0) or 0),
+            "low":    float(c.get("low",    0) or 0),
+            "close":  float(c.get("close",  0) or 0),
+            "volume": float(c.get("volume", 0) or 0),
+        } for c in ohlcv]
         group1 = await run_group1(req.ticker, ohlcv, req.mode)
         current = ohlcv[-1]["close"]
         score   = group1["group_score"]
