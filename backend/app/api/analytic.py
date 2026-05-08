@@ -168,8 +168,7 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
 
 @router.get("/market-context/{ticker}")
 async def market_context(ticker: str):
-    """Fetch 4 box data: foreign flow, broker, company info, orderbook"""
-    import traceback
+    """4 box: price, volume, company, technical"""
     import json as _json
 
     class NumpyEncoder(_json.JSONEncoder):
@@ -181,66 +180,87 @@ async def market_context(ticker: str):
             return super().default(obj)
 
     result = {}
+    ohlcv = []
 
-    # Box 1: Tick/realtime price
+    # OHLCV untuk box 1, 2, 4
     try:
-        tick = await invesgo.get_tick(ticker)
-        result["tick"] = {
-            "last_price": tick.get("last_price") or tick.get("close") or 0,
-            "change": tick.get("change") or 0,
-            "change_pct": tick.get("change_pct") or tick.get("pct") or 0,
-            "volume": tick.get("volume") or 0,
-            "value": tick.get("value") or 0,
-            "freq": tick.get("freq") or 0,
-        }
+        raw = await invesgo.get_ohlcv_daily(ticker)
+        ohlcv = [{**c,
+            "open": float(c.get("open",0) or 0),
+            "high": float(c.get("high",0) or 0),
+            "low": float(c.get("low",0) or 0),
+            "close": float(c.get("close",0) or 0),
+            "volume": float(c.get("volume",0) or 0),
+        } for c in raw]
     except Exception as e:
-        result["tick"] = {"error": str(e)}
+        ohlcv = []
 
-    # Box 2: Foreign flow
+    # Box 1: Price
     try:
-        ff = await invesgo.get_foreign_flow(ticker)
-        result["foreign_flow"] = {
-            "foreign_buy": ff.get("foreign_buy") or ff.get("foreign") or 0,
-            "foreign_sell": ff.get("foreign_sell") or 0,
-            "foreign_net": ff.get("foreign_net") or ff.get("net_foreign") or 0,
-            "bdm_buy": ff.get("bdm_buy") or ff.get("bdm") or 0,
-            "bdm_sell": ff.get("bdm_sell") or 0,
-            "ritel_buy": ff.get("ritel_buy") or ff.get("ritel") or 0,
+        last = ohlcv[-1]; prev = ohlcv[-2]
+        change = last["close"] - prev["close"]
+        change_pct = round(change/prev["close"]*100, 2) if prev["close"] > 0 else 0
+        result["price"] = {
+            "last": last["close"], "change": round(change,0),
+            "change_pct": change_pct, "high": last["high"],
+            "low": last["low"], "open": last["open"],
         }
-    except Exception as e:
-        result["foreign_flow"] = {"error": str(e)}
+    except:
+        result["price"] = {"error": "No data"}
+
+    # Box 2: Volume
+    try:
+        vols = [c["volume"] for c in ohlcv[-20:]]
+        avg_vol = sum(vols)/len(vols) if vols else 1
+        last_vol = ohlcv[-1]["volume"]
+        rvol = round(last_vol/avg_vol, 2) if avg_vol > 0 else 1
+        vol_5 = sum(c["volume"] for c in ohlcv[-5:])/5
+        result["volume"] = {
+            "last_volume": int(last_vol),
+            "avg_volume_20": int(avg_vol),
+            "rvol": rvol,
+            "vol_trend": "NAIK" if vol_5 > avg_vol*1.2 else "TURUN" if vol_5 < avg_vol*0.8 else "NORMAL",
+            "signal": "HIGH" if rvol > 2 else "MEDIUM" if rvol > 1.3 else "NORMAL" if rvol > 0.7 else "LOW",
+        }
+    except:
+        result["volume"] = {"error": "No data"}
 
     # Box 3: Company info
     try:
         info = await invesgo.get_company_info(ticker)
         result["company"] = {
             "name": info.get("company_name") or info.get("name") or ticker,
-            "sector": info.get("sector") or "-",
-            "market_cap": info.get("market_cap") or 0,
-            "pe_ratio": info.get("pe_ratio") or info.get("per") or 0,
-            "pbv": info.get("pbv") or 0,
-            "dividend_yield": info.get("dividend_yield") or 0,
+            "sector": info.get("sector") or info.get("industry") or "-",
+            "subsector": info.get("subsindustry") or "-",
+            "activity": info.get("activity") or "-",
+            "code": info.get("code") or ticker,
         }
     except Exception as e:
         result["company"] = {"error": str(e)}
 
-    # Box 4: Orderbook
+    # Box 4: Technical summary
     try:
-        ob = await invesgo.get_orderbook(ticker)
-        bids = ob.get("bids") or ob.get("bid") or []
-        asks = ob.get("asks") or ob.get("offer") or []
-        best_bid = bids[0] if bids else {}
-        best_ask = asks[0] if asks else {}
-        result["orderbook"] = {
-            "best_bid_price": best_bid.get("price") or best_bid.get("p") or 0,
-            "best_bid_vol": best_bid.get("volume") or best_bid.get("v") or 0,
-            "best_ask_price": best_ask.get("price") or best_ask.get("p") or 0,
-            "best_ask_vol": best_ask.get("volume") or best_ask.get("v") or 0,
-            "total_bid": sum(b.get("volume", b.get("v", 0)) for b in bids[:5]),
-            "total_ask": sum(a.get("volume", a.get("v", 0)) for a in asks[:5]),
+        closes = [c["close"] for c in ohlcv]
+        highs = [c["high"] for c in ohlcv]
+        lows = [c["low"] for c in ohlcv]
+        current = closes[-1]
+        w52_high = max(highs[-252:]) if len(highs)>=252 else max(highs)
+        w52_low = min(lows[-252:]) if len(lows)>=252 else min(lows)
+        ma20 = sum(closes[-20:])/20
+        ma50 = sum(closes[-50:])/50 if len(closes)>=50 else ma20
+        result["technical"] = {
+            "52w_high": w52_high,
+            "52w_low": w52_low,
+            "pct_from_high": round((current-w52_high)/w52_high*100, 2),
+            "pct_from_low": round((current-w52_low)/w52_low*100, 2),
+            "ma20": round(ma20, 0),
+            "ma50": round(ma50, 0),
+            "above_ma20": bool(current > ma20),
+            "above_ma50": bool(current > ma50),
+            "trend": "UPTREND" if current>ma20>ma50 else "DOWNTREND" if current<ma20<ma50 else "SIDEWAYS",
         }
-    except Exception as e:
-        result["orderbook"] = {"error": str(e)}
+    except:
+        result["technical"] = {"error": "No data"}
 
     return JSONResponse(content=_json.loads(_json.dumps(result, cls=NumpyEncoder)))
 
