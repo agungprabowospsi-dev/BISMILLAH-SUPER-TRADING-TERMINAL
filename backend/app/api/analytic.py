@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 import numpy as np
 from pydantic import BaseModel
 from app.core import invesgo
-from app.engines.group1_runner import run_group1
+from app.engines.master_runner import run_all_engines
 from app.core.claude_client import ask_claude
 from app.knowledge_base import kb_service
 import logging
@@ -24,11 +24,11 @@ async def debug():
     except Exception as e:
         return {"failed_at": "step1_ohlcv", "error": str(e), "trace": traceback.format_exc()}
     try:
-        from app.engines.group1_runner import run_group1
-        group1 = await run_group1("BBCA", ohlcv, "swing")
-        results["step2_group1"] = f"OK score={group1['group_score']}"
+        from app.engines.master_runner import run_all_engines
+        all_eng = await run_all_engines("BBCA", ohlcv, "swing")
+        results["step2_engines"] = f"OK score={all_eng['composite_score']} engines={all_eng['total_engines']}"
     except Exception as e:
-        return {"failed_at": "step2_group1", "error": str(e), "trace": traceback.format_exc()}
+        return {"failed_at": "step2_engines", "error": str(e), "trace": traceback.format_exc()}
     try:
         from app.api.analytic import _calc_atr
         atr = _calc_atr(ohlcv)
@@ -69,9 +69,9 @@ async def analyze(req: AnalyticRequest):
             "close":  float(c.get("close",  0) or 0),
             "volume": float(c.get("volume", 0) or 0),
         } for c in ohlcv]
-        group1 = await run_group1(req.ticker, ohlcv, req.mode)
+        all_engines = await run_all_engines(req.ticker, ohlcv, req.mode)
         current = ohlcv[-1]["close"]
-        score   = group1["group_score"]
+        score   = all_engines["composite_score"]
 
         # Hitung SL/TP sederhana
         atr = _calc_atr(ohlcv)
@@ -108,10 +108,10 @@ async def analyze(req: AnalyticRequest):
             system="Kamu adalah analis saham IDX profesional. Berikan analisis trading yang jelas dan actionable dalam Bahasa Indonesia.",
             prompt=f"""
 Ticker: {req.ticker} | Mode: {req.mode}
-Score: {score:.1f}/100 | Signal: {group1['consensus']}
+Score: {score:.1f}/100 | Signal: {all_engines['signal']}
 Entry: {entry} | SL: {sl} | TP1: {tp1} | TP2: {tp2} | TP3: {tp3}
 R:R = {rr}
-Engine: {group1['bullish_count']} bullish, {group1['bearish_count']} bearish dari 10 engines
+Engine: {all_engines.get('bullish_count', 0)} bullish, {all_engines.get('bearish_count', 0)} bearish dari 10 engines
 {kb_context}
 
 Tulis analisis trading 3-4 kalimat dalam Bahasa Indonesia:
@@ -141,9 +141,9 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "rr_ratio": float(rr),
             "score": float(score),
             "confidence": float(min(95, score)),
-            "signal": group1["consensus"],
+            "signal": all_engines['signal'],
             "rationale": rationale,
-            "engines": group1,
+            "engines": all_engines,
         }
         return JSONResponse(content=_json.loads(_json.dumps(result, cls=NumpyEncoder)))
     except HTTPException:
