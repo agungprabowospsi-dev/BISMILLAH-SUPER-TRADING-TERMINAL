@@ -110,11 +110,11 @@ export default function AnalyticPage() {
             <div className="card p-5 space-y-3">
               <p className="label-xs">Trade Setup</p>
               {[
-                ['Entry Price', r.entry_price, 'text-accent-green'],
-                ['Stop Loss', r.stop_loss, 'text-accent-red'],
-                ['Take Profit 1', r.take_profit_1||r.take_profit, 'text-accent-gold'],
-                ['Take Profit 2', r.take_profit_2, 'text-accent-gold'],
-                ['Take Profit 3', r.take_profit_3, 'text-accent-gold'],
+                ['Entry Price', r.entry, 'text-accent-green'],
+                ['Stop Loss', r.stop_loss||r.sl, 'text-accent-red'],
+                ['Take Profit 1', r.tp1, 'text-accent-gold'],
+                ['Take Profit 2', r.tp2, 'text-accent-gold'],
+                ['Take Profit 3', r.tp3, 'text-accent-gold'],
                 ['Risk:Reward', r.risk_reward ? `1:${Number(r.risk_reward).toFixed(2)}` : null, 'text-accent-blue'],
               ].filter(([,v]) => v).map(([k,v,c]) => (
                 <div key={k} className="flex justify-between items-center py-1.5 border-b border-border-dim last:border-0">
@@ -126,9 +126,9 @@ export default function AnalyticPage() {
               ))}
               <button onClick={() => sendToMonitoring({
                 ticker:r.ticker||analyticTicker,
-                entry_price:r.entry_price, stop_loss:r.stop_loss,
-                take_profit_1:r.take_profit_1||r.take_profit,
-                take_profit_2:r.take_profit_2, take_profit_3:r.take_profit_3,
+                entry_price:r.entry, stop_loss:r.stop_loss||r.sl||r.sl,
+                take_profit_1:r.tp1,
+                take_profit_2:r.tp2, take_profit_3:r.tp3,
                 mode:analyticMode
               })} className="btn-primary w-full flex items-center justify-center gap-2 mt-2">
                 Monitor Posisi<ArrowRight className="w-4 h-4"/>
