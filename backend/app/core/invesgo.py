@@ -90,3 +90,38 @@ async def get_sector_rotation() -> dict:
         r = await client.get(f"{INVESGO_BASE_URL}/analysis/sector/rotation", headers=_headers())
         r.raise_for_status()
         return r.json()
+
+async def get_market_summary() -> dict:
+    """Market summary / IHSG"""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(f"{INVESGO_BASE_URL}/analysis/market/summary", headers=_headers())
+        r.raise_for_status()
+        return r.json()
+
+async def get_top_gainer() -> list:
+    """Top gainer saham IDX"""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(f"{INVESGO_BASE_URL}/analysis/market/top-gainer", headers=_headers())
+        r.raise_for_status()
+        return r.json()
+
+async def get_top_loser() -> list:
+    """Top loser saham IDX"""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(f"{INVESGO_BASE_URL}/analysis/market/top-loser", headers=_headers())
+        r.raise_for_status()
+        return r.json()
+
+async def get_chart_composite() -> list:
+    """IHSG composite chart"""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(f"{INVESGO_BASE_URL}/analysis/chart/composite", headers=_headers())
+        r.raise_for_status()
+        return r.json()
+
+async def get_foreign_net() -> list:
+    """Net foreign buy/sell list"""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(f"{INVESGO_BASE_URL}/analysis/market/foreign-net", headers=_headers())
+        r.raise_for_status()
+        return r.json()

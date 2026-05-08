@@ -20,6 +20,29 @@ class ScreenerRequest(BaseModel):
     mode: str = "swing"
     filters: Optional[dict] = {}
 
+@router.get("/test-endpoints")
+async def test_endpoints():
+    """Test semua endpoint Invesgo"""
+    results = {}
+    tests = [
+        ("market_summary", invesgo.get_market_summary()),
+        ("top_gainer", invesgo.get_top_gainer()),
+        ("top_loser", invesgo.get_top_loser()),
+        ("chart_composite", invesgo.get_chart_composite()),
+        ("foreign_net", invesgo.get_foreign_net()),
+    ]
+    for name, coro in tests:
+        try:
+            data = await coro
+            if isinstance(data, list):
+                results[name] = f"OK list[{len(data)}] sample={str(data[0])[:100] if data else 'empty'}"
+            else:
+                results[name] = f"OK dict keys={list(data.keys())[:5]}"
+        except Exception as e:
+            results[name] = f"ERROR: {str(e)[:100]}"
+    return results
+
+
 @router.post("/run")
 async def run_screener(req: ScreenerRequest):
     session_id = str(uuid.uuid4())[:8]
