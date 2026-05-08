@@ -328,13 +328,12 @@ async def search_chunks_for_engine(engine_name: str, query: str, limit: int = 5)
     try:
         # Ambil 1 chunk per dokumen agar merata dari semua 7 buku
         rows = await conn.fetch("""
-            SELECT DISTINCT ON (c.document_id)
-                   c.id, c.content, c.page_number, c.chunk_index,
+            SELECT c.id, c.content, c.page_number, c.chunk_index,
                    d.original_name as source_document
             FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id
             WHERE c.engine_tags::text LIKE $1
               AND d.status = 'analyzed'
-            ORDER BY c.document_id, c.id
+            ORDER BY RANDOM()
             LIMIT $2
         """, f'%{engine_name}%', limit)
 
