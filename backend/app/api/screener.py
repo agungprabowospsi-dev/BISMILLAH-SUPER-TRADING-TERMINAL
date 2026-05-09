@@ -262,6 +262,39 @@ async def invesgo_call(method_name: str, *args: Any, **kwargs: Any) -> Any:
 
 # ===== Phase 1: Universe Filter =====
 
+
+DEFAULT_UNIVERSE_TICKERS = [
+    # Big banks / liquid blue chips
+    "BBCA", "BBRI", "BMRI", "BBNI", "BRIS", "BDMN", "BNGA", "BTPS", "NISP",
+    # Telco / tech
+    "TLKM", "EXCL", "ISAT", "MTEL", "TOWR", "GOTO", "BUKA", "WIFI",
+    # Conglomerates / consumer / retail
+    "ASII", "UNVR", "ICBP", "INDF", "MYOR", "SIDO", "MAPI", "ACES", "AMRT",
+    # Energy / coal / oil gas
+    "ADRO", "AADI", "PTBA", "ITMG", "HRUM", "UNTR", "MEDC", "AKRA", "PGAS", "ELSA",
+    # Basic materials / metals
+    "ANTM", "INCO", "MDKA", "BRMS", "TINS", "AMMN", "ESSA", "SMGR", "INTP",
+    # Property / infra / construction
+    "BSDE", "CTRA", "PWON", "SMRA", "WIKA", "WSKT", "PTPP", "JSMR",
+    # Healthcare / pharma
+    "KLBF", "MIKA", "HEAL", "SILO", "TSPC",
+    # Popular liquid second liners
+    "ARTO", "EMTK", "SCMA", "ERAA", "MDIY", "RAJA", "CUAN", "BREN", "PTRO", "TOBA",
+]
+
+def fallback_stock_universe() -> List[Dict[str, Any]]:
+    return [
+        {
+            "ticker": ticker,
+            "code": ticker,
+            "name": ticker,
+            "sector": "",
+            "logo": None,
+            "raw": {"source": "fallback_universe"},
+        }
+        for ticker in DEFAULT_UNIVERSE_TICKERS
+    ]
+
 async def get_stock_list_safe() -> List[Dict[str, Any]]:
     raw = await invesgo_call("get_stock_list")
     if raw is None:
@@ -303,6 +336,8 @@ def sector_allowed(mode: Mode, sector: str) -> bool:
 
 async def build_universe(mode: Mode) -> List[Dict[str, Any]]:
     stocks = await get_stock_list_safe()
+    if not stocks:
+        stocks = fallback_stock_universe()
     return [s for s in stocks if sector_allowed(mode, s.get("sector", ""))]
 
 
