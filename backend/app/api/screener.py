@@ -63,7 +63,7 @@ except Exception:
     kb_service = None
 
 
-router = APIRouter(prefix="/api/screener", tags=["screener"])
+router = APIRouter(tags=["screener"])
 
 
 # ===== Request / config =====
