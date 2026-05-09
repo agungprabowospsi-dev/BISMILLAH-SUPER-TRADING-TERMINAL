@@ -71,7 +71,13 @@ export default function ScreenerPage() {
       setResult({
         session_id: data?.session_id || "N/A",
         mode: data?.mode || mode,
-        stocks: Array.isArray(stocks) ? stocks : [],
+        stocks: Array.isArray(stocks)
+          ? stocks.map((x) => ({
+              ...x,
+              score: x.final_score ?? x.score ?? 0,
+              last_price: x.price ?? x.last_price ?? 0,
+            }))
+          : [],
         total_scanned: data?.universe_count || data?.total_scanned || 0,
       });
     } catch (err) {
