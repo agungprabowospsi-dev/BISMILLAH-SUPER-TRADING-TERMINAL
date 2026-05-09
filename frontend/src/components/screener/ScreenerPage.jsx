@@ -157,9 +157,9 @@ function StockCard({ stock, rank }) {
         <span style={{ ...S.signalBadge, backgroundColor: sc + "22", color: sc, border: "1px solid " + sc }}>{signal}</span>
       </div>
       <div style={S.cardBody}>
-        <div style={S.scoreRow}><span style={S.scoreLabel}>Score</span><span style={S.scoreValue}>{Number(stock.score || 0).toFixed(1)}</span></div>
-        <div style={S.priceRow}><span style={S.priceLabel}>Last Price</span><span style={S.priceValue}>Rp {Number(stock.last_price || 0).toLocaleString("id-ID")}</span></div>
-        <div style={S.barBg}><div style={{ ...S.barFill, width: Math.min(100, stock.score || 0) + "%", backgroundColor: sc }} /></div>
+        <div style={S.scoreRow}><span style={S.scoreLabel}>Score</span><span style={S.scoreValue}>{Number(stock.final_score || stock.score || 0).toFixed(1)}</span></div>
+        <div style={S.priceRow}><span style={S.priceLabel}>Last Price</span><span style={S.priceValue}>Rp {Number(stock.price || stock.last_price || 0).toLocaleString("id-ID")}</span></div>
+        <div style={S.barBg}><div style={{ ...S.barFill, width: Math.min(100, stock.final_score || stock.score || 0) + "%", backgroundColor: sc }} /></div>
       </div>
     </div>
   );
