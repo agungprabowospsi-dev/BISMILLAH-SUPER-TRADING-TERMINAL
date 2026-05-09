@@ -62,17 +62,17 @@ export default function ScreenerPage() {
       const res = await fetch(`${BACKEND_URL}/api/screener/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: mode.toLowerCase() }),
+        body: JSON.stringify({ mode: mode.toLowerCase(), limit: 5, include_debug: false }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setRawResponse(data);
-      const stocks = data?.top5_stocks || data?.top_stocks || data?.stocks || data?.results || [];
+      const stocks = data?.top_5 || data?.top5_stocks || data?.top_stocks || data?.stocks || data?.results || [];
       setResult({
         session_id: data?.session_id || "N/A",
         mode: data?.mode || mode,
         stocks: Array.isArray(stocks) ? stocks : [],
-        total_scanned: data?.total_scanned || 0,
+        total_scanned: data?.universe_count || data?.total_scanned || 0,
       });
     } catch (err) {
       setError(err.message || "Unknown error");
