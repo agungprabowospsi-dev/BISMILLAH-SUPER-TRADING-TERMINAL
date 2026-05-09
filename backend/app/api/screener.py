@@ -33,13 +33,9 @@ from pydantic import BaseModel, Field
 # ===== Defensive imports for existing project structure =====
 
 try:
-    from app.core.invesgo import invesgo_client as invesgo
+    from app.core import invesgo
 except Exception:
-    try:
-        from app.core.invesgo import InvesgoClient
-        invesgo = InvesgoClient()
-    except Exception:
-        invesgo = None
+    invesgo = None
 
 try:
     from app.core.redis_client import cache_get, cache_set
