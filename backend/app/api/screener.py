@@ -149,3 +149,40 @@ async def _analyze_stock(ticker: str, mode: str) -> dict:
     except Exception as e:
         logger.debug(f"Skip {ticker}: {e}")
         return {}
+
+@router.get("/test-endpoints")
+async def test_endpoints():
+    results = {}
+    
+    try:
+        r = await invesgo.get_top_gainer()
+        results["top_gainer"] = f"OK: {len(r)} items, sample={r[0] if r else 'empty'}"
+    except Exception as e:
+        results["top_gainer"] = f"ERROR: {str(e)[:100]}"
+
+    try:
+        r = await invesgo.get_top_loser()
+        results["top_loser"] = f"OK: {len(r)} items, sample={r[0] if r else 'empty'}"
+    except Exception as e:
+        results["top_loser"] = f"ERROR: {str(e)[:100]}"
+
+    try:
+        r = await invesgo.get_foreign_net()
+        results["foreign_net"] = f"OK: {len(r)} items, sample={r[0] if r else 'empty'}"
+    except Exception as e:
+        results["foreign_net"] = f"ERROR: {str(e)[:100]}"
+
+    try:
+        r = await invesgo.get_market_summary()
+        results["market_summary"] = f"OK: {r}"
+    except Exception as e:
+        results["market_summary"] = f"ERROR: {str(e)[:100]}"
+
+    try:
+        r = await invesgo.get_stock_list()
+        sample = r[0] if r else {}
+        results["stock_list"] = f"OK: {len(r)} items, fields={list(sample.keys())}"
+    except Exception as e:
+        results["stock_list"] = f"ERROR: {str(e)[:100]}"
+
+    return {"results": results}
