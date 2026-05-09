@@ -334,7 +334,8 @@ async def build_universe(mode: Mode) -> List[Dict[str, Any]]:
     stocks = await get_stock_list_safe()
     if not stocks:
         stocks = fallback_stock_universe()
-    return [s for s in stocks if sector_allowed(mode, s.get("sector", ""))]
+    filtered = [s for s in stocks if sector_allowed(mode, s.get("sector", ""))]
+    return filtered[:200]
 
 
 # ===== Phase 2: OHLCV Pre-filter =====
