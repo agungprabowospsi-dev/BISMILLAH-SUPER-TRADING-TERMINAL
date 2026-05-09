@@ -1208,6 +1208,28 @@ async def test_endpoints() -> Dict[str, Any]:
                 "error": str(exc),
                 "duration_ms": round((time.time() - started) * 1000, 2),
             }
+    # Extra OHLCV diagnostics for market holiday / fallback validation
+    tests["ohlcv_bbca"] = {}
+    started = time.time()
+    try:
+        raw = await invesgo_call("get_ohlcv_daily", "BBCA")
+        normalized = normalize_ohlcv(raw)
+        tests["ohlcv_bbca"] = {
+            "status": "OK",
+            "raw_type": str(type(raw)),
+            "raw_keys": list(raw.keys())[:10] if isinstance(raw, dict) else None,
+            "raw_count": len(raw) if isinstance(raw, list) else None,
+            "normalized_count": len(normalized),
+            "last_candle": normalized[-1] if normalized else None,
+            "duration_ms": round((time.time() - started) * 1000, 2),
+        }
+    except Exception as exc:
+        tests["ohlcv_bbca"] = {
+            "status": "ERROR",
+            "error": str(exc),
+            "duration_ms": round((time.time() - started) * 1000, 2),
+        }
+
     return tests
 
 
