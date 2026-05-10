@@ -39,80 +39,40 @@ export default function MonitoringPage() {
   }, [loadPositions])
 
   const handleAdd = async () => {
-    if(!form.ticker||!form.entry_price||!form.stop_loss) return
-    setLoading(true)
-    try {
-      const payload = {
-        ticker:form.ticker.toUpperCase(),
-        entry_price:Number(form.entry_price),
-        stop_loss:Number(form.stop_loss),
-        take_profit:Number(form.take_profit_1)||null,
-        take_profit_1:Number(form.take_profit_1)||null,
-        take_profit_2:Number(form.take_profit_2)||null,
-        take_profit_3:Number(form.take_profit_3)||null,
-        mode:form.mode.toLowerCase(),
-      }
+    if(!form.ticker || !form.entry_price || !form.stop_loss) return
 
-      const tempId = Date.now()
-
-      const optimisticPos = {
-        ...payload,
-        id: tempId,
-        monitoring_id: `manual_${payload.ticker}_${tempId}`,
-        current_price: payload.entry_price,
-        status: "HOLD",
-        position: "hold",
-        pnl: 0,
-        pnl_pct: 0,
-        alerts: [],
-        institutional_alerts: [{
-          level: "LOW",
-          type: "LOCAL_POSITION_ADDED",
-          message: "Position added locally. Engine context loading..."
-        }]
-      }
-
-      setMonitoringPositions([optimisticPos, ...monitoringPositions])
-
-      const created = await startMonitoring(payload)
-      const checked = await checkMonitoring(payload)
-
-      const hydratedPos = {
-        ...optimisticPos,
-        ...checked,
-        id: created?.monitoring_id || tempId,
-        monitoring_id: created?.monitoring_id || optimisticPos.monitoring_id,
-      }
-
-      setMonitoringPositions([hydratedPos, ...monitoringPositions])
-
-      if (monitoringInput) {
-        useStore.setState({ monitoringInput: null })
-      }
-    } catch (err) {
-      const newPos = {
-        ticker:form.ticker.toUpperCase(),
-        entry_price:Number(form.entry_price),
-        stop_loss:Number(form.stop_loss),
-        take_profit_1:Number(form.take_profit_1)||null,
-        current_price:Number(form.entry_price),
-        mode:form.mode,
-        status:'HOLD',
-        pnl:0,
-        pnl_pct:0,
-        id:Date.now(),
-        institutional_alerts:[{
-          level:'MEDIUM',
-          type:'MONITORING_CHECK_FAILED',
-          message: err?.message || 'Monitoring engine check failed'
-        }]
-      }
-      setMonitoringPositions([...monitoringPositions, newPos])
-    } finally {
-      setLoading(false)
-      setShowForm(false)
-      setForm({ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'DAYTRADING'})
+    const payload = {
+      ticker: form.ticker.toUpperCase(),
+      entry_price: Number(form.entry_price),
+      stop_loss: Number(form.stop_loss),
+      take_profit: Number(form.take_profit_1) || null,
+      take_profit_1: Number(form.take_profit_1) || null,
+      take_profit_2: Number(form.take_profit_2) || null,
+      take_profit_3: Number(form.take_profit_3) || null,
+      mode: form.mode,
     }
+
+    const newPos = {
+      ...payload,
+      id: Date.now(),
+      monitoring_id: `manual_${payload.ticker}_${Date.now()}`,
+      current_price: payload.entry_price,
+      status: 'HOLD',
+      position: 'hold',
+      pnl: 0,
+      pnl_pct: 0,
+      institutional_alerts: [{
+        level: 'LOW',
+        type: 'LOCAL_POSITION_ADDED',
+        message: 'Manual position added successfully.'
+      }]
+    }
+
+    setMonitoringPositions([newPos, ...monitoringPositions])
+    useStore.setState({ monitoringInput: null })
+
+    setShowForm(false)
+    setForm({ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'DAYTRADING'})
   }
 
   const handleRemove = async (ticker) => {
