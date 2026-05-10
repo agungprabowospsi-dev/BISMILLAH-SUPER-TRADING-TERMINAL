@@ -5,7 +5,8 @@ import { startMonitoring, getMonitoringList, removeMonitoring, checkMonitoring }
 import clsx from 'clsx'
 
 export default function MonitoringPage() {
-  const { monitoringInput, monitoringPositions, setMonitoringPositions } = useStore()
+  const { monitoringInput } = useStore()
+  const [monitoringPositions, setMonitoringPositions] = useState([])
   const [showForm, setShowForm] = useState(false)
   const [loading, setLoading] = useState(false)
   const [form, setForm] = useState({ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'DAYTRADING'})
