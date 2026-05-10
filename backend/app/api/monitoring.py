@@ -58,5 +58,29 @@ async def get_status(monitoring_id: str):
         "take_profit": pos["take_profit"],
         "position": position_status,
         "pnl_pct": round((current - pos["entry_price"]) / pos["entry_price"] * 100, 2),
+        "rr": calculate_rr(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
         "warnings": warnings,
+    }
+
+
+# ─── ADDITIVE MONITORING HELPERS — RR TRACKING ────────────────────────────────
+def calculate_rr(entry_price: float, stop_loss: float, take_profit: float, current_price: float):
+    risk = abs(entry_price - stop_loss)
+
+    if risk == 0:
+        return {
+            "rr_current": 0,
+            "rr_target": 0,
+            "risk_per_share": 0,
+            "reward_per_share": 0,
+        }
+
+    rr_current = round((current_price - entry_price) / risk, 2)
+    rr_target = round((take_profit - entry_price) / risk, 2)
+
+    return {
+        "rr_current": rr_current,
+        "rr_target": rr_target,
+        "risk_per_share": risk,
+        "reward_per_share": abs(take_profit - entry_price),
     }
