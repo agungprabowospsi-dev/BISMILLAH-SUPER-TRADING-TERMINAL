@@ -60,6 +60,7 @@ async def get_status(monitoring_id: str):
         "pnl_pct": round((current - pos["entry_price"]) / pos["entry_price"] * 100, 2),
         "rr": calculate_rr(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
         "smart_trailing_stop": calculate_smart_trailing_stop(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
+        "institutional_alerts": generate_institutional_alerts(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
         "warnings": warnings,
     }
 
@@ -181,3 +182,63 @@ def calculate_smart_trailing_stop(entry_price: float, stop_loss: float, take_pro
         "lock_profit": round(suggested_sl - entry_price, 2),
         "trailing_stage": stage,
     }
+
+
+# ─── ADDITIVE INSTITUTIONAL ALERT ENGINE ──────────────────────────────────────
+
+def generate_institutional_alerts(entry_price: float, stop_loss: float, take_profit: float, current_price: float):
+    alerts = []
+    risk = abs(entry_price - stop_loss)
+
+    if risk == 0:
+        return [{
+            "level": "HIGH",
+            "type": "INVALID_RISK",
+            "message": "Invalid risk structure: entry and stop loss are equal.",
+        }]
+
+    rr_current = round((current_price - entry_price) / risk, 2)
+
+    if current_price <= stop_loss:
+        alerts.append({
+            "level": "HIGH",
+            "type": "STOP_LOSS_HIT",
+            "message": "Stop loss hit. Exit position immediately.",
+        })
+
+    if current_price >= take_profit:
+        alerts.append({
+            "level": "HIGH",
+            "type": "TAKE_PROFIT_HIT",
+            "message": "Take profit hit. Secure realized profit.",
+        })
+
+    if rr_current < -0.5:
+        alerts.append({
+            "level": "MEDIUM",
+            "type": "RR_DETERIORATION",
+            "message": "RR deteriorating. Price is moving against the setup.",
+        })
+
+    if rr_current >= 1:
+        alerts.append({
+            "level": "MEDIUM",
+            "type": "PROFIT_PROTECTION",
+            "message": "Position has reached at least 1R. Consider trailing stop protection.",
+        })
+
+    if rr_current >= 2:
+        alerts.append({
+            "level": "HIGH",
+            "type": "STRONG_PROFIT_ZONE",
+            "message": "Position is in strong profit zone. Protect gains aggressively.",
+        })
+
+    if not alerts:
+        alerts.append({
+            "level": "LOW",
+            "type": "NORMAL_MONITORING",
+            "message": "Position condition normal. Continue monitoring.",
+        })
+
+    return alerts
