@@ -59,6 +59,7 @@ async def get_status(monitoring_id: str):
         "position": position_status,
         "pnl_pct": round((current - pos["entry_price"]) / pos["entry_price"] * 100, 2),
         "rr": calculate_rr(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
+        "smart_trailing_stop": calculate_smart_trailing_stop(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
         "warnings": warnings,
     }
 
@@ -138,4 +139,45 @@ async def portfolio_risk_summary():
         "total_reward_value": total_reward_value,
         "portfolio_rr": portfolio_rr,
         "positions": positions,
+    }
+
+
+# ─── ADDITIVE SMART TRAILING STOP ENGINE ──────────────────────────────────────
+
+def calculate_smart_trailing_stop(entry_price: float, stop_loss: float, take_profit: float, current_price: float):
+    risk = abs(entry_price - stop_loss)
+
+    if risk == 0:
+        return {
+            "active": False,
+            "suggested_stop_loss": stop_loss,
+            "lock_profit": 0,
+            "trailing_stage": "invalid_risk",
+        }
+
+    rr_current = round((current_price - entry_price) / risk, 2)
+
+    if rr_current < 1:
+        return {
+            "active": False,
+            "suggested_stop_loss": stop_loss,
+            "lock_profit": 0,
+            "trailing_stage": "not_activated",
+        }
+
+    if rr_current >= 1 and rr_current < 1.5:
+        suggested_sl = entry_price
+        stage = "breakeven_lock"
+    elif rr_current >= 1.5 and rr_current < 2:
+        suggested_sl = entry_price + (risk * 0.5)
+        stage = "half_risk_profit_lock"
+    else:
+        suggested_sl = entry_price + risk
+        stage = "one_risk_profit_lock"
+
+    return {
+        "active": True,
+        "suggested_stop_loss": round(suggested_sl, 2),
+        "lock_profit": round(suggested_sl - entry_price, 2),
+        "trailing_stage": stage,
     }
