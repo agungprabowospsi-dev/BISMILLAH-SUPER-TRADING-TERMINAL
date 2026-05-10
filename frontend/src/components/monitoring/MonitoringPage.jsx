@@ -65,14 +65,23 @@ export default function MonitoringPage() {
       }
 
       setMonitoringPositions([newPos, ...monitoringPositions])
-    } catch {
+    } catch (err) {
       const newPos = {
         ticker:form.ticker.toUpperCase(),
         entry_price:Number(form.entry_price),
         stop_loss:Number(form.stop_loss),
         take_profit_1:Number(form.take_profit_1)||null,
         current_price:Number(form.entry_price),
-        mode:form.mode, status:'HOLD', pnl:0, pnl_pct:0, id:Date.now()
+        mode:form.mode,
+        status:'HOLD',
+        pnl:0,
+        pnl_pct:0,
+        id:Date.now(),
+        institutional_alerts:[{
+          level:'MEDIUM',
+          type:'MONITORING_CHECK_FAILED',
+          message: err?.message || 'Monitoring engine check failed'
+        }]
       }
       setMonitoringPositions([...monitoringPositions, newPos])
     } finally {
