@@ -28,7 +28,7 @@ export default function MonitoringPage() {
   const loadPositions = useCallback(async () => {
     try {
       const res = await getMonitoringList()
-      setMonitoringPositions(res.data?.positions||res.data||[])
+      setMonitoringPositions(res?.monitors || res?.positions || res?.data?.monitors || res?.data?.positions || res?.data || [])
     } catch {}
   }, [])
 
@@ -46,10 +46,11 @@ export default function MonitoringPage() {
         ticker:form.ticker.toUpperCase(),
         entry_price:Number(form.entry_price),
         stop_loss:Number(form.stop_loss),
+        take_profit:Number(form.take_profit_1)||null,
         take_profit_1:Number(form.take_profit_1)||null,
         take_profit_2:Number(form.take_profit_2)||null,
         take_profit_3:Number(form.take_profit_3)||null,
-        mode:form.mode,
+        mode:form.mode.toLowerCase(),
       })
       await loadPositions()
     } catch {

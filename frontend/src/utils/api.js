@@ -50,13 +50,13 @@ export async function getMonitoring() {
 }
 
 export async function getMonitoringList() {
-  return apiFetch("/api/monitoring/list", { method: "GET" });
+  return apiFetch("/api/monitoring/active", { method: "GET" });
 }
 
-export async function startMonitoring(ticker) {
+export async function startMonitoring(payload) {
   return apiFetch("/api/monitoring/start", {
     method: "POST",
-    body: JSON.stringify({ ticker }),
+    body: JSON.stringify(payload),
   });
 }
 
