@@ -65,6 +65,10 @@ export default function MonitoringPage() {
       }
 
       setMonitoringPositions([newPos, ...monitoringPositions])
+
+      if (monitoringInput) {
+        useStore.setState({ monitoringInput: null })
+      }
     } catch (err) {
       const newPos = {
         ticker:form.ticker.toUpperCase(),
