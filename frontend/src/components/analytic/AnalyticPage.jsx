@@ -54,6 +54,22 @@ export default function AnalyticPage() {
     ? Object.fromEntries(enginesRaw.map(e => [e.engine, e]))
     : enginesRaw
 
+  const engineList = Array.isArray(enginesRaw) ? enginesRaw : Object.entries(enginesRaw || {}).map(([engine, data]) => ({ engine, ...(typeof data === 'object' ? data : { score: data }) }))
+  const bullishEngines = engineList.filter(e => String(e.signal || '').toLowerCase().includes('bullish') || Number(e.score || 0) >= 70)
+  const bearishEngines = engineList.filter(e => String(e.signal || '').toLowerCase().includes('bearish') || Number(e.score || 0) <= 40)
+  const neutralEngines = engineList.filter(e => !bullishEngines.includes(e) && !bearishEngines.includes(e))
+  const topBullishEngines = [...bullishEngines].sort((a,b) => Number(b.score || 0) - Number(a.score || 0)).slice(0, 6)
+  const topRiskEngines = [...bearishEngines, ...neutralEngines.filter(e => Number(e.score || 0) < 55)]
+    .sort((a,b) => Number(a.score || 0) - Number(b.score || 0))
+    .slice(0, 6)
+  const groupScores = r?.engines?.group_scores || {}
+  const confidenceDrivers = [
+    ['Market Structure', groupScores.market_structure],
+    ['Smart Money', groupScores.smart_money],
+    ['Execution', groupScores.execution],
+    ['Decision Control', groupScores.decision],
+  ].filter(([,v]) => v !== undefined && v !== null)
+
   const groupEngineKeys = {
     group1:['price_action','trend','support','volume','relative_vol','multi_time','order_block','break_order','fair_value','liquidity'],
     group2:['bandarmology','inventory','flow','intraday','foreign'],
@@ -243,6 +259,98 @@ export default function AnalyticPage() {
                   <div className="font-mono text-xs font-bold mt-1" style={{color: score>=60?'#00FF88':score<=40?'#FF4444':'#FFB800'}}>{score}%</div>
                 </div>
               })}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+            <div className="card p-5">
+              <p className="label-xs mb-3">🚀 Bullish Confirmation Engines</p>
+
+              <div className="space-y-2">
+                {topBullishEngines.map((e, idx) => (
+                  <div key={idx} className="flex items-center justify-between border-b border-border-dim pb-2">
+                    <div>
+                      <div className="font-mono text-xs text-slate-900 font-bold">
+                        {String(e.engine || '').replace(/Engine/g,'')}
+                      </div>
+                      <div className="text-[11px] text-green-600 uppercase">
+                        {e.signal || 'bullish'}
+                      </div>
+                    </div>
+
+                    <div className="text-green-600 font-mono font-bold">
+                      {Number(e.score || 0).toFixed(1)}
+                    </div>
+                  </div>
+                ))}
+
+                {topBullishEngines.length === 0 && (
+                  <div className="text-xs text-slate-500">
+                    Tidak ada bullish confirmation kuat
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="card p-5">
+              <p className="label-xs mb-3">⚠️ Risk / Weak Engines</p>
+
+              <div className="space-y-2">
+                {topRiskEngines.map((e, idx) => (
+                  <div key={idx} className="flex items-center justify-between border-b border-border-dim pb-2">
+                    <div>
+                      <div className="font-mono text-xs text-slate-900 font-bold">
+                        {String(e.engine || '').replace(/Engine/g,'')}
+                      </div>
+                      <div className="text-[11px] text-red-500 uppercase">
+                        {e.signal || 'weak'}
+                      </div>
+                    </div>
+
+                    <div className="text-red-500 font-mono font-bold">
+                      {Number(e.score || 0).toFixed(1)}
+                    </div>
+                  </div>
+                ))}
+
+                {topRiskEngines.length === 0 && (
+                  <div className="text-xs text-slate-500">
+                    Tidak ada major risk engine
+                  </div>
+                )}
+              </div>
+            </div>
+
+          </div>
+
+          <div className="card p-5">
+            <p className="label-xs mb-4">🧠 Institutional Confidence Breakdown</p>
+
+            <div className="space-y-4">
+              {confidenceDrivers.map(([name,val]) => (
+                <div key={name}>
+                  <div className="flex justify-between text-xs font-mono mb-1">
+                    <span>{name}</span>
+                    <span>{Number(val || 0).toFixed(1)}%</span>
+                  </div>
+
+                  <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${Math.min(100, Number(val || 0))}%`,
+                        background:
+                          Number(val || 0) >= 70
+                            ? '#22c55e'
+                            : Number(val || 0) >= 50
+                            ? '#f59e0b'
+                            : '#ef4444'
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
