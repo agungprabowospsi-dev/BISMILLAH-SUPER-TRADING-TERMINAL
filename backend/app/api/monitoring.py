@@ -84,3 +84,58 @@ def calculate_rr(entry_price: float, stop_loss: float, take_profit: float, curre
         "risk_per_share": risk,
         "reward_per_share": abs(take_profit - entry_price),
     }
+
+
+# ─── ADDITIVE MULTI-POSITION MONITORING ENDPOINTS ─────────────────────────────
+
+@router.get("/active")
+async def list_active_monitors():
+    return {
+        "count": len(_active_monitors),
+        "monitors": [
+            {
+                "monitoring_id": monitoring_id,
+                "ticker": data.get("ticker"),
+                "entry_price": data.get("entry_price"),
+                "stop_loss": data.get("stop_loss"),
+                "take_profit": data.get("take_profit"),
+                "mode": data.get("mode"),
+            }
+            for monitoring_id, data in _active_monitors.items()
+        ],
+    }
+
+
+@router.get("/portfolio-risk")
+async def portfolio_risk_summary():
+    total_positions = len(_active_monitors)
+    total_risk_value = 0
+    total_reward_value = 0
+    positions = []
+
+    for monitoring_id, pos in _active_monitors.items():
+        risk = abs(pos["entry_price"] - pos["stop_loss"])
+        reward = abs(pos["take_profit"] - pos["entry_price"])
+        rr_target = round(reward / risk, 2) if risk else 0
+
+        total_risk_value += risk
+        total_reward_value += reward
+
+        positions.append({
+            "monitoring_id": monitoring_id,
+            "ticker": pos["ticker"],
+            "mode": pos.get("mode", "swing"),
+            "risk_per_share": risk,
+            "reward_per_share": reward,
+            "rr_target": rr_target,
+        })
+
+    portfolio_rr = round(total_reward_value / total_risk_value, 2) if total_risk_value else 0
+
+    return {
+        "total_positions": total_positions,
+        "total_risk_value": total_risk_value,
+        "total_reward_value": total_reward_value,
+        "portfolio_rr": portfolio_rr,
+        "positions": positions,
+    }
