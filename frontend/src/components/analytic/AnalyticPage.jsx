@@ -208,6 +208,22 @@ export default function AnalyticPage() {
                 <p className="font-mono text-xs text-slate-500 mt-0.5">{r.mode||analyticMode} MODE</p>
               </div>
               {r.signal && <SignalBadge signal={r.signal}/>}
+
+              {r.setup_type && (
+                <div className="mt-1 rounded-xl border border-accent-blue/30 bg-accent-blue/10 px-3 py-2 text-center">
+                  <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
+                    Setup Type
+                  </p>
+                  <p className="font-display text-sm font-bold uppercase text-accent-blue">
+                    {String(r.setup_type).replace(/_/g, ' ')}
+                  </p>
+                  {r.setup_quality && (
+                    <p className="mt-1 font-mono text-xs text-accent-gold">
+                      Quality: {r.setup_quality}
+                    </p>
+                  )}
+                </div>
+              )}
               <div className="w-full">
                 <p className="label-xs mb-1.5">AI Confidence</p>
                 <ConfidenceBar value={r.confidence||r.ai_confidence||0}/>
