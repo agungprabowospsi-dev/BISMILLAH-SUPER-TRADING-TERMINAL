@@ -66,7 +66,6 @@ export default function MonitoringPage() {
       }
 
       setMonitoringPositions([newPos, ...monitoringPositions])
-      await loadPositions()
     } catch {
       const newPos = {
         ticker:form.ticker.toUpperCase(),
