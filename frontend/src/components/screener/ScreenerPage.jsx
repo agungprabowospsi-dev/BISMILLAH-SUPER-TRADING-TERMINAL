@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { BACKEND_URL } from "../../utils/api";
+import { useStore } from "../../stores/useStore";
 
 const MODE_OPTIONS = ["swing", "intraday", "scalping"];
 
@@ -32,6 +33,7 @@ export default function ScreenerPage() {
   const [progress, setProgress] = useState(0);
   const [progressMsg, setProgressMsg] = useState("");
   const progressRef = useRef(null);
+  const { sendToAnalytic } = useStore();
 
   const startProgress = () => {
     setProgress(0);
@@ -136,7 +138,7 @@ export default function ScreenerPage() {
           ) : (
             <div style={S.stockGrid}>
               {result.stocks.map((stock, idx) => (
-                <StockCard key={stock.ticker || idx} stock={stock} rank={idx + 1} />
+                <StockCard key={stock.ticker || idx} stock={stock} rank={idx + 1} onClick={() => sendToAnalytic(stock.ticker)} />
               ))}
             </div>
           )}
@@ -152,11 +154,11 @@ export default function ScreenerPage() {
   );
 }
 
-function StockCard({ stock, rank }) {
+function StockCard({ stock, rank, onClick }) {
   const signal = (stock.signal || "NEUTRAL").toUpperCase();
   const sc = SIGNAL_COLOR[signal] || SIGNAL_COLOR.NEUTRAL;
   return (
-    <div style={S.card}>
+    <div style={{ ...S.card, cursor: "pointer" }} onClick={onClick} title={`Analyze ${stock.ticker}`}>
       <div style={S.cardHeader}>
         <span style={S.rank}>#{rank}</span>
         <span style={S.ticker}>{stock.ticker}</span>

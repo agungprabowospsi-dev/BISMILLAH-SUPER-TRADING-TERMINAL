@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { BarChart2, ChevronRight, RefreshCw, ArrowRight } from 'lucide-react'
 import { useStore } from '../../stores/useStore'
 import { analyzeStock } from '../../utils/api'
@@ -19,6 +19,7 @@ export default function AnalyticPage() {
     analyticError, setAnalyticError, sendToMonitoring } = useStore()
   const [activeGroup, setActiveGroup] = useState('group1')
   const [marketCtx, setMarketCtx] = useState(null)
+  const lastAutoAnalyzeRef = useRef('')
 
   const handleAnalyze = async () => {
     if(!analyticTicker.trim()) return
@@ -36,6 +37,14 @@ export default function AnalyticPage() {
       setAnalyticError(e?.response?.data?.detail || e.message || 'Gagal menganalisis')
     } finally { setAnalyticLoading(false) }
   }
+
+  useEffect(() => {
+    const ticker = analyticTicker?.trim()?.toUpperCase()
+    if (!ticker) return
+    if (lastAutoAnalyzeRef.current === ticker) return
+    lastAutoAnalyzeRef.current = ticker
+    handleAnalyze()
+  }, [analyticTicker])
 
   const r = analyticResult
   // Backend returns engines as array [{engine, score, signal, ...}]
