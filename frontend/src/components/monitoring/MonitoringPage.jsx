@@ -33,9 +33,9 @@ export default function MonitoringPage() {
   }, [])
 
   useEffect(() => {
-    loadPositions()
-    const iv = setInterval(loadPositions, 15000)
-    return () => clearInterval(iv)
+    // Disabled auto-load because production /active can overwrite local manual positions
+    // const iv = setInterval(loadPositions, 15000)
+    // return () => clearInterval(iv)
   }, [loadPositions])
 
   const handleAdd = async () => {
