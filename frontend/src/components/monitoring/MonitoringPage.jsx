@@ -53,18 +53,38 @@ export default function MonitoringPage() {
         mode:form.mode.toLowerCase(),
       }
 
-      const created = await startMonitoring(payload)
+      const tempId = Date.now()
 
-      const checked = await checkMonitoring(payload)
-
-      const newPos = {
+      const optimisticPos = {
         ...payload,
-        ...checked,
-        id: created?.monitoring_id || Date.now(),
-        monitoring_id: created?.monitoring_id,
+        id: tempId,
+        monitoring_id: `manual_${payload.ticker}_${tempId}`,
+        current_price: payload.entry_price,
+        status: "HOLD",
+        position: "hold",
+        pnl: 0,
+        pnl_pct: 0,
+        alerts: [],
+        institutional_alerts: [{
+          level: "LOW",
+          type: "LOCAL_POSITION_ADDED",
+          message: "Position added locally. Engine context loading..."
+        }]
       }
 
-      setMonitoringPositions([newPos, ...monitoringPositions])
+      setMonitoringPositions([optimisticPos, ...monitoringPositions])
+
+      const created = await startMonitoring(payload)
+      const checked = await checkMonitoring(payload)
+
+      const hydratedPos = {
+        ...optimisticPos,
+        ...checked,
+        id: created?.monitoring_id || tempId,
+        monitoring_id: created?.monitoring_id || optimisticPos.monitoring_id,
+      }
+
+      setMonitoringPositions([hydratedPos, ...monitoringPositions])
 
       if (monitoringInput) {
         useStore.setState({ monitoringInput: null })
