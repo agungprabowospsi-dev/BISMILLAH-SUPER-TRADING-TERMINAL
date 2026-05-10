@@ -11,6 +11,15 @@ const SIGNAL_COLOR = {
   NEUTRAL: "#6b7280",
 };
 
+const getInstitutionalRank = (score = 0) => {
+  const n = Number(score || 0);
+  if (n >= 85) return { grade: "A+", label: "Elite Institutional Setup", color: "#16a34a" };
+  if (n >= 75) return { grade: "A", label: "Strong Institutional Setup", color: "#22c55e" };
+  if (n >= 65) return { grade: "B+", label: "Early Accumulation Setup", color: "#d97706" };
+  if (n >= 55) return { grade: "B", label: "Watchlist Setup", color: "#f59e0b" };
+  return { grade: "C", label: "Low Conviction", color: "#6b7280" };
+};
+
 const PROGRESS_MESSAGES = [
   "Memuat daftar saham IDX...",
   "Scanning 970 saham...",
@@ -157,6 +166,7 @@ export default function ScreenerPage() {
 function StockCard({ stock, rank, onClick }) {
   const signal = (stock.signal || "NEUTRAL").toUpperCase();
   const sc = SIGNAL_COLOR[signal] || SIGNAL_COLOR.NEUTRAL;
+  const institutionalRank = getInstitutionalRank(stock.final_score || stock.score || 0);
   return (
     <div style={{ ...S.card, cursor: "pointer" }} onClick={onClick} title={`Analyze ${stock.ticker}`}>
       <div style={S.cardHeader}>
@@ -165,6 +175,25 @@ function StockCard({ stock, rank, onClick }) {
         <span style={{ ...S.signalBadge, backgroundColor: sc + "22", color: sc, border: "1px solid " + sc }}>{signal}</span>
       </div>
       <div style={S.cardBody}>
+
+        <div
+          style={{
+            background: institutionalRank.color + "22",
+            border: "1px solid " + institutionalRank.color,
+            color: institutionalRank.color,
+            borderRadius: 8,
+            padding: "8px 10px",
+            marginBottom: 10,
+          }}
+        >
+          <div style={{ fontSize: 18, fontWeight: "bold" }}>
+            {institutionalRank.grade}
+          </div>
+
+          <div style={{ fontSize: 11 }}>
+            {institutionalRank.label}
+          </div>
+        </div>
         <div style={S.scoreRow}><span style={S.scoreLabel}>Score</span><span style={S.scoreValue}>{Number(stock.final_score || stock.score || 0).toFixed(1)}</span></div>
         <div style={S.priceRow}><span style={S.priceLabel}>Last Price</span><span style={S.priceValue}>Rp {Number(stock.price || stock.last_price || 0).toLocaleString("id-ID")}</span></div>
         <div style={S.barBg}><div style={{ ...S.barFill, width: Math.min(100, stock.final_score || stock.score || 0) + "%", backgroundColor: sc }} /></div>
