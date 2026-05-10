@@ -157,6 +157,11 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "signal": all_engines['signal'],
             "rationale": rationale,
             "engines": all_engines,
+
+            # RAG / Knowledge Base validation metadata
+            "rag_used": bool(kb_context),
+            "rag_context_count": len(kb_parts) if "kb_parts" in locals() else 0,
+            "rag_engines": analytic_engines if "analytic_engines" in locals() else [],
         }
         return JSONResponse(content=_json.loads(_json.dumps(result, cls=NumpyEncoder)))
     except HTTPException:

@@ -70,6 +70,22 @@ export default function AnalyticPage() {
     ['Decision Control', groupScores.decision],
   ].filter(([,v]) => v !== undefined && v !== null)
 
+  const decisionTree = {
+    whyBuy: [
+      Number(r?.score || r?.composite_score || 0) >= 60 && `Composite score valid di atas 60`,
+      bullishEngines.length >= 2 && `${bullishEngines.length} engine memberi konfirmasi bullish`,
+      Number(groupScores.market_structure || 0) >= 60 && `Market structure mendukung`,
+      Number(groupScores.smart_money || 0) >= 60 && `Smart money flow mendukung`,
+      r?.signal && `Signal utama: ${String(r.signal).toUpperCase()}`,
+    ].filter(Boolean),
+    whyNotFullSize: [
+      Number(r?.rr_ratio || r?.risk_reward || 0) > 0 && Number(r?.rr_ratio || r?.risk_reward || 0) < 2 && `Risk reward belum ideal untuk full size`,
+      topRiskEngines.length > 0 && `${topRiskEngines.length} engine masih lemah / berisiko`,
+      Number(groupScores.execution || 0) < 60 && `Execution layer belum cukup kuat`,
+      Number(groupScores.decision || 0) < 60 && `Decision control masih perlu konfirmasi`,
+    ].filter(Boolean),
+  }
+
   const groupEngineKeys = {
     group1:['price_action','trend','support','volume','relative_vol','multi_time','order_block','break_order','fair_value','liquidity'],
     group2:['bandarmology','inventory','flow','intraday','foreign'],
@@ -227,6 +243,35 @@ export default function AnalyticPage() {
             </div>
           </div>
 
+          {r?.rag_used && (
+            <div className="card p-4 border border-emerald-500/30 bg-emerald-500/10">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-display font-bold text-sm text-emerald-300">
+                    RAG Knowledge Base Active
+                  </p>
+                  <p className="font-mono text-xs text-slate-400 mt-1">
+                    {r.rag_context_count || 0} knowledge references injected into AI rationale
+                  </p>
+                </div>
+                <span className="rounded-full bg-emerald-500/20 px-3 py-1 font-mono text-xs font-bold text-emerald-300">
+                  ACTIVE
+                </span>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(r.rag_engines || []).map((eng) => (
+                  <span
+                    key={eng}
+                    className="rounded-lg bg-slate-900/70 px-2 py-1 font-mono text-[11px] text-slate-300"
+                  >
+                    {eng}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="card p-5">
             <p className="label-xs mb-3">Engine Scores — 34 Engines</p>
             <div className="flex gap-2 mb-4 flex-wrap">
@@ -317,6 +362,48 @@ export default function AnalyticPage() {
                 {topRiskEngines.length === 0 && (
                   <div className="text-xs text-slate-500">
                     Tidak ada major risk engine
+                  </div>
+                )}
+              </div>
+            </div>
+
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+            <div className="card p-5">
+              <p className="label-xs mb-4">✅ WHY BUY?</p>
+
+              <div className="space-y-2">
+                {decisionTree.whyBuy.map((x, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-start gap-2 text-sm border-b border-border-dim pb-2"
+                  >
+                    <span className="text-green-500 font-bold">✔</span>
+                    <span className="text-slate-900">{x}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="card p-5">
+              <p className="label-xs mb-4">⚠ WHY NOT FULL SIZE?</p>
+
+              <div className="space-y-2">
+                {decisionTree.whyNotFullSize.map((x, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-start gap-2 text-sm border-b border-border-dim pb-2"
+                  >
+                    <span className="text-red-500 font-bold">⚠</span>
+                    <span className="text-slate-900">{x}</span>
+                  </div>
+                ))}
+
+                {decisionTree.whyNotFullSize.length === 0 && (
+                  <div className="text-green-600 text-sm">
+                    Tidak ada major warning
                   </div>
                 )}
               </div>
