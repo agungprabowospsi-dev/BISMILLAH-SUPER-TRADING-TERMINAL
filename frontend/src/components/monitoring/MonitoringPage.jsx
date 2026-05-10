@@ -254,6 +254,10 @@ export default function MonitoringPage() {
                   </div>
                 ))}
 
+                <pre className="text-[9px] text-slate-500 overflow-auto max-h-40 bg-black/20 p-2 rounded">
+{JSON.stringify(pos, null, 2)}
+                </pre>
+
                 {pos.alerts?.length>0 && pos.alerts.slice(0,2).map((a,j) => (
                   <div key={j} className="flex items-center gap-2 text-xs font-mono text-accent-gold bg-accent-gold/5 border border-accent-gold/20 rounded px-2 py-1">
                     <AlertTriangle className="w-3 h-3 shrink-0"/>{a.message||a}
