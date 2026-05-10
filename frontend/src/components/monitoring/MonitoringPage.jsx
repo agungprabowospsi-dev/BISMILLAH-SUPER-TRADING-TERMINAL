@@ -125,7 +125,7 @@ export default function MonitoringPage() {
             </div>
           </div>
           <div className="flex gap-2 mt-4">
-            <button onClick={() => alert("BUTTON HIDUP")} disabled={loading} className="btn-primary flex items-center gap-2 disabled:opacity-50">
+            <button onClick={handleAdd} disabled={loading} className="btn-primary flex items-center gap-2 disabled:opacity-50">
               {loading?<RefreshCw className="w-4 h-4 animate-spin"/>:<Plus className="w-4 h-4"/>}
               {loading?'Adding...':'Add to Monitor'}
             </button>
