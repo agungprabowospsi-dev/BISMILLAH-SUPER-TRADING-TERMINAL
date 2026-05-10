@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { Activity, Plus, Trash2, RefreshCw, AlertTriangle } from 'lucide-react'
 import { useStore } from '../../stores/useStore'
-import { startMonitoring, getMonitoringList, removeMonitoring } from '../../utils/api'
+import { startMonitoring, getMonitoringList, removeMonitoring, checkMonitoring } from '../../utils/api'
 import clsx from 'clsx'
 
 export default function MonitoringPage() {
@@ -55,14 +55,13 @@ export default function MonitoringPage() {
 
       const created = await startMonitoring(payload)
 
+      const checked = await checkMonitoring(payload)
+
       const newPos = {
         ...payload,
+        ...checked,
         id: created?.monitoring_id || Date.now(),
         monitoring_id: created?.monitoring_id,
-        current_price: payload.entry_price,
-        status: "HOLD",
-        pnl: 0,
-        pnl_pct: 0,
       }
 
       setMonitoringPositions([newPos, ...monitoringPositions])

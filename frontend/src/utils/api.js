@@ -74,3 +74,10 @@ export async function getScalpingData(ticker) {
 export function getWsUrl() {
   return BACKEND_URL.replace("https://", "wss://").replace("http://", "ws://");
 }
+
+export async function checkMonitoring(payload) {
+  return apiFetch("/api/monitoring/check", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
