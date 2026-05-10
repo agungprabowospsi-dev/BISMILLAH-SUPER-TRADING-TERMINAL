@@ -42,7 +42,7 @@ export default function MonitoringPage() {
     if(!form.ticker||!form.entry_price||!form.stop_loss) return
     setLoading(true)
     try {
-      await startMonitoring({
+      const payload = {
         ticker:form.ticker.toUpperCase(),
         entry_price:Number(form.entry_price),
         stop_loss:Number(form.stop_loss),
@@ -51,7 +51,21 @@ export default function MonitoringPage() {
         take_profit_2:Number(form.take_profit_2)||null,
         take_profit_3:Number(form.take_profit_3)||null,
         mode:form.mode.toLowerCase(),
-      })
+      }
+
+      const created = await startMonitoring(payload)
+
+      const newPos = {
+        ...payload,
+        id: created?.monitoring_id || Date.now(),
+        monitoring_id: created?.monitoring_id,
+        current_price: payload.entry_price,
+        status: "HOLD",
+        pnl: 0,
+        pnl_pct: 0,
+      }
+
+      setMonitoringPositions([newPos, ...monitoringPositions])
       await loadPositions()
     } catch {
       const newPos = {
