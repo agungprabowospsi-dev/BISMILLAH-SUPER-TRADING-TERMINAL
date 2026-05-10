@@ -150,6 +150,12 @@ export default function MonitoringPage() {
         </div>
       )}
 
+      {monitoringPositions.length>0 && (
+        <div className="mb-4 p-3 border border-red-500 text-red-400 text-xs font-mono overflow-auto max-h-80 bg-black/20 rounded">
+          <pre>{JSON.stringify(monitoringPositions, null, 2)}</pre>
+        </div>
+      )}
+
       {monitoringPositions.length>0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
           {monitoringPositions.map((pos,i) => {
