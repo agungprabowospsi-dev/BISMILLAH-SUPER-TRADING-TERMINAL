@@ -86,6 +86,56 @@ async def analyze(req: AnalyticRequest):
         current = ohlcv[-1]["close"]
         score   = all_engines["composite_score"]
 
+        # ── Setup Type Detector (additive) ─────────────────────────
+        closes = [c["close"] for c in ohlcv]
+        highs = [c["high"] for c in ohlcv]
+        lows = [c["low"] for c in ohlcv]
+        volumes = [c["volume"] for c in ohlcv]
+
+        ma20 = sum(closes[-20:]) / 20 if len(closes) >= 20 else current
+        ma50 = sum(closes[-50:]) / 50 if len(closes) >= 50 else ma20
+        range_high_20 = max(highs[-20:]) if len(highs) >= 20 else current
+        range_low_20 = min(lows[-20:]) if len(lows) >= 20 else current
+        avg_vol_20 = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else max(volumes[-1], 1)
+        rvol = volumes[-1] / avg_vol_20 if avg_vol_20 else 1
+
+        trend_up = current >= ma20 >= ma50
+        trend_down = current <= ma20 <= ma50
+        near_low = current <= range_low_20 * 1.03
+        near_high = current >= range_high_20 * 0.97
+        breakout_up = current >= range_high_20 and rvol >= 1.3
+        breakdown_down = current <= range_low_20 and rvol >= 1.3
+
+        setup_type = "neutral"
+        setup_reason = "Belum ada pola setup dominan."
+
+        if breakout_up:
+            setup_type = "bullish_breakout"
+            setup_reason = "Harga menembus range high 20 hari dengan volume relatif kuat."
+        elif breakdown_down:
+            setup_type = "bearish_breakdown"
+            setup_reason = "Harga menembus range low 20 hari dengan volume relatif kuat."
+        elif trend_up and near_high:
+            setup_type = "bullish_continuation"
+            setup_reason = "Trend naik dan harga berada dekat area high, mengarah ke continuation."
+        elif trend_up and current <= ma20 * 1.02:
+            setup_type = "bullish_pullback"
+            setup_reason = "Trend naik namun harga pullback dekat MA20."
+        elif trend_down and near_low and score >= 55:
+            setup_type = "bullish_reversal"
+            setup_reason = "Harga berada dekat range low dalam downtrend, tetapi score mulai membaik."
+        elif trend_down:
+            setup_type = "bearish_continuation"
+            setup_reason = "Trend turun masih dominan dan belum ada reversal kuat."
+        elif near_low and score >= 55:
+            setup_type = "bullish_reversal"
+            setup_reason = "Harga dekat support/range low dengan score positif."
+        elif near_high and score <= 45:
+            setup_type = "bearish_reversal"
+            setup_reason = "Harga dekat resistance/range high dengan score lemah."
+
+        # ───────────────────────────────────────────────────────────
+
         # Hitung SL/TP sederhana
         atr = _calc_atr(ohlcv)
         sl_mult = {"swing": 2.0, "daytrading": 1.5, "scalping": 1.0}.get(req.mode, 1.5)
@@ -124,13 +174,16 @@ Ticker: {req.ticker} | Mode: {req.mode}
 Score: {score:.1f}/100 | Signal: {all_engines['signal']}
 Entry: {entry} | SL: {sl} | TP1: {tp1} | TP2: {tp2} | TP3: {tp3}
 R:R = {rr}
+Setup Type: {setup_type}
+Setup Reason: {setup_reason}
 Engine: {all_engines.get('bullish_count', 0)} bullish, {all_engines.get('bearish_count', 0)} bearish dari 10 engines
 {kb_context}
 
 Tulis analisis trading 3-4 kalimat dalam Bahasa Indonesia:
 1. Kondisi market saat ini
-2. Alasan entry dan level kunci
-3. Manajemen risiko (SL/TP)
+2. Jenis setup berdasarkan Setup Type, jangan otomatis menyebut continuation jika Setup Type bukan continuation
+3. Alasan entry dan level kunci
+4. Manajemen risiko (SL/TP)
 Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memperkuat analisis.
 """,
             max_tokens=350
@@ -155,6 +208,19 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "score": float(score),
             "confidence": float(min(95, score)),
             "signal": all_engines['signal'],
+            "setup_type": setup_type,
+            "setup_reason": setup_reason,
+            "setup_metrics": {
+                "ma20": float(ma20),
+                "ma50": float(ma50),
+                "range_high_20": float(range_high_20),
+                "range_low_20": float(range_low_20),
+                "rvol": float(round(rvol, 2)),
+                "trend_up": bool(trend_up),
+                "trend_down": bool(trend_down),
+                "near_low": bool(near_low),
+                "near_high": bool(near_high),
+            },
             "rationale": rationale,
             "engines": all_engines,
 
