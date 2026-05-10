@@ -4,6 +4,8 @@ from typing import Optional
 import asyncio
 import json
 from app.core import invesgo
+from app.engines.master_runner import run_all_engines
+from app.knowledge_base import kb_service
 import logging
 
 logger = logging.getLogger(__name__)
@@ -49,6 +51,8 @@ async def get_status(monitoring_id: str):
     elif current <= pos["entry_price"] * 0.97:
         warnings.append({"level": "medium", "msg": "Price down 3% from entry — monitor closely"})
 
+    engine_context = await get_monitoring_engine_context(pos["ticker"], pos.get("mode", "swing"))
+
     return {
         "monitoring_id": monitoring_id,
         "ticker": pos["ticker"],
@@ -61,6 +65,7 @@ async def get_status(monitoring_id: str):
         "rr": calculate_rr(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
         "smart_trailing_stop": calculate_smart_trailing_stop(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
         "institutional_alerts": generate_institutional_alerts(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
+        "engine_context": engine_context,
         "warnings": warnings,
     }
 
@@ -242,3 +247,67 @@ def generate_institutional_alerts(entry_price: float, stop_loss: float, take_pro
         })
 
     return alerts
+
+
+# ─── ADDITIVE MONITORING ENGINE BRIDGE — 34 ENGINES + RAG ─────────────────────
+
+async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
+    try:
+        ohlcv = await invesgo.get_ohlcv_daily(ticker)
+
+        if not ohlcv or len(ohlcv) < 20:
+            return {
+                "engines_used": False,
+                "rag_used": False,
+                "reason": "Insufficient OHLCV data for monitoring engine context.",
+            }
+
+        normalized_ohlcv = [{
+            **c,
+            "open": float(c.get("open", 0) or 0),
+            "high": float(c.get("high", 0) or 0),
+            "low": float(c.get("low", 0) or 0),
+            "close": float(c.get("close", 0) or 0),
+            "volume": float(c.get("volume", 0) or 0),
+        } for c in ohlcv]
+
+        engine_result = await run_all_engines(ticker, normalized_ohlcv, mode)
+
+        rag_engines = [
+            "PriceActionEngine",
+            "VolumeIntelligenceEngine",
+            "BandarmologyEngine",
+            "TrendStructureEngine",
+            "RiskManagementEngine",
+        ]
+
+        rag_count = 0
+        for engine_name in rag_engines:
+            try:
+                ctx = await kb_service.get_kb_context_for_engine(engine_name, ticker)
+                if ctx:
+                    rag_count += 1
+            except Exception:
+                continue
+
+        return {
+            "engines_used": True,
+            "engine_scope": "monitoring_bridge",
+            "total_engines": engine_result.get("total_engines"),
+            "composite_score": engine_result.get("composite_score"),
+            "signal": engine_result.get("signal"),
+            "bullish_count": engine_result.get("bullish_count"),
+            "bearish_count": engine_result.get("bearish_count"),
+            "rag_used": rag_count > 0,
+            "rag_context_count": rag_count,
+            "rag_engines": rag_engines,
+            "bandarmology_included": "BandarmologyEngine" in rag_engines,
+        }
+
+    except Exception as e:
+        logger.warning(f"[MONITORING_ENGINE_BRIDGE] skipped for {ticker}: {e}")
+        return {
+            "engines_used": False,
+            "rag_used": False,
+            "reason": str(e),
+        }
