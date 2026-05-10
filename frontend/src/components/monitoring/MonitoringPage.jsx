@@ -203,6 +203,49 @@ export default function MonitoringPage() {
                     </div>
                   ))}
                 </div>
+                {pos.engine_context && (
+                  <div className="bg-bg-secondary border border-border-dim rounded p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="label-xs">INSTITUTIONAL ENGINE CONTEXT</p>
+                      <span className="text-[10px] font-mono text-accent-green border border-accent-green/30 bg-accent-green/5 px-2 py-0.5 rounded">
+                        {pos.engine_context.total_engines || 34} ENGINES
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                      <div>
+                        <p className="text-slate-600">Score</p>
+                        <p className="text-white font-bold">
+                          {pos.engine_context.composite_score ?? '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-slate-600">Signal</p>
+                        <p className="text-white font-bold uppercase">
+                          {pos.engine_context.signal || '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-slate-600">RAG</p>
+                        <p className={pos.engine_context.rag_used ? 'text-accent-green font-bold' : 'text-slate-500'}>
+                          {pos.engine_context.rag_used ? `ACTIVE (${pos.engine_context.rag_context_count || 0})` : 'OFF'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-slate-600">Bandarmology</p>
+                        <p className={pos.engine_context.bandarmology_included ? 'text-accent-green font-bold' : 'text-slate-500'}>
+                          {pos.engine_context.bandarmology_included ? 'ACTIVE' : 'OFF'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {pos.institutional_alerts?.length>0 && pos.institutional_alerts.slice(0,2).map((a,j) => (
+                  <div key={`inst-${j}`} className="flex items-center gap-2 text-xs font-mono text-accent-gold bg-accent-gold/5 border border-accent-gold/20 rounded px-2 py-1">
+                    <AlertTriangle className="w-3 h-3 shrink-0"/>{a.message||a}
+                  </div>
+                ))}
+
                 {pos.alerts?.length>0 && pos.alerts.slice(0,2).map((a,j) => (
                   <div key={j} className="flex items-center gap-2 text-xs font-mono text-accent-gold bg-accent-gold/5 border border-accent-gold/20 rounded px-2 py-1">
                     <AlertTriangle className="w-3 h-3 shrink-0"/>{a.message||a}
