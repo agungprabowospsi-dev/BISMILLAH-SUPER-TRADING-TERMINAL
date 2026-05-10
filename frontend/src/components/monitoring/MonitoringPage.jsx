@@ -68,8 +68,11 @@ export default function MonitoringPage() {
       }]
     }
 
-    setMonitoringPositions([newPos, ...monitoringPositions])
-    useStore.setState({ monitoringInput: null })
+    const currentPositions = useStore.getState().monitoringPositions || []
+    useStore.setState({
+      monitoringPositions: [newPos, ...currentPositions],
+      monitoringInput: null
+    })
 
     setShowForm(false)
     setForm({ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'DAYTRADING'})
