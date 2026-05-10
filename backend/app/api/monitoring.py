@@ -311,3 +311,44 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
             "rag_used": False,
             "reason": str(e),
         }
+
+
+# ─── ADDITIVE STATELESS MONITORING CHECK ──────────────────────────────────────
+
+@router.post("/check")
+async def stateless_monitoring_check(req: MonitoringRequest):
+    try:
+        tick = await invesgo.get_tick(req.ticker)
+        current = tick.get("last_price", req.entry_price)
+    except Exception:
+        current = req.entry_price
+
+    warnings = []
+    position_status = "hold"
+
+    if current <= req.stop_loss:
+        position_status = "exit"
+        warnings.append({"level": "high", "msg": f"STOP LOSS HIT at {current}"})
+    elif current >= req.take_profit:
+        position_status = "exit"
+        warnings.append({"level": "high", "msg": f"TAKE PROFIT HIT at {current}"})
+    elif current <= req.entry_price * 0.97:
+        warnings.append({"level": "medium", "msg": "Price down 3% from entry — monitor closely"})
+
+    engine_context = await get_monitoring_engine_context(req.ticker, req.mode)
+
+    return {
+        "ticker": req.ticker,
+        "mode": req.mode,
+        "current_price": current,
+        "entry_price": req.entry_price,
+        "stop_loss": req.stop_loss,
+        "take_profit": req.take_profit,
+        "position": position_status,
+        "pnl_pct": round((current - req.entry_price) / req.entry_price * 100, 2),
+        "rr": calculate_rr(req.entry_price, req.stop_loss, req.take_profit, current),
+        "smart_trailing_stop": calculate_smart_trailing_stop(req.entry_price, req.stop_loss, req.take_profit, current),
+        "institutional_alerts": generate_institutional_alerts(req.entry_price, req.stop_loss, req.take_profit, current),
+        "engine_context": engine_context,
+        "warnings": warnings,
+    }
