@@ -596,7 +596,7 @@ async def save_bandar_score(ticker: str, score: float) -> None:
         return
     today = date.today().strftime("%Y-%m-%d")
     key = f"bandar_history:{ticker}:{today}"
-    ttl = 90 * 24 * 3600
+    ttl = 4 * 3600  # 4 jam — realtime trading
     try:
         await call_maybe_async(cache_set, key, str(float(score)), ttl=ttl)
     except TypeError:

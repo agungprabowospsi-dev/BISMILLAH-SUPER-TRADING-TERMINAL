@@ -21,7 +21,7 @@ async def get_stock_list() -> list:
         r.raise_for_status()
         return r.json()
 
-async def get_ohlcv_daily(ticker: str, period: str = "1y") -> list:
+async def get_ohlcv_daily(ticker: str, period: str = "3mo") -> list:
     """OHLCV harian"""
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.get(
