@@ -272,6 +272,8 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
         } for c in ohlcv]
 
         engine_result = await run_all_engines(ticker, normalized_ohlcv, mode)
+        logger.warning(f"[DEBUG] engine_result keys: {list(engine_result.keys()) if engine_result else None}")
+        logger.warning(f"[DEBUG] engines count: {len(engine_result.get('engines', []))}")
 
         rag_engines = [
             "PriceActionEngine",
@@ -303,6 +305,7 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
             "rag_engines": rag_engines,
             "bandarmology_included": "BandarmologyEngine" in rag_engines,
             "engine_details": {e["engine"]: e for e in engine_result.get("engines", [])},
+            "raw_engines": engine_result.get("engines", []),
         }
 
     except Exception as e:
