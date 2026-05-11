@@ -1,104 +1,156 @@
-import React, { useEffect, useState, useCallback } from 'react'
-import { Activity, Plus, Trash2, RefreshCw, AlertTriangle } from 'lucide-react'
-import { useStore } from '../../stores/useStore'
-import { startMonitoring, getMonitoringList, removeMonitoring, checkMonitoring } from '../../utils/api'
+import React, { useState, useEffect, useRef } from 'react'
+import { Activity, Plus, Trash2, AlertTriangle, Wifi, WifiOff } from 'lucide-react'
 import clsx from 'clsx'
 
-export default function MonitoringPage() {
-  const { monitoringInput } = useStore()
-  const [monitoringPositions, setMonitoringPositions] = useState([])
-  const [showForm, setShowForm] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [form, setForm] = useState({ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'DAYTRADING'})
+const BACKEND = 'https://bismillah-super-trading-terminal-production.up.railway.app'
+const POLL_INTERVAL = 15000
 
-  useEffect(() => {
-    if(monitoringInput) {
-      setForm({
-        ticker:monitoringInput.ticker||'',
-        entry_price:monitoringInput.entry_price||'',
-        stop_loss:monitoringInput.stop_loss||'',
-        take_profit_1:monitoringInput.take_profit_1||monitoringInput.take_profit||'',
-        take_profit_2:monitoringInput.take_profit_2||'',
-        take_profit_3:monitoringInput.take_profit_3||'',
-        mode:monitoringInput.mode||'DAYTRADING',
-      })
-      setShowForm(true)
+async function fetchMarketData(ticker) {
+  try {
+    const res = await fetch(`${BACKEND}/api/analytic/market-context/${ticker}`)
+    if (!res.ok) return null
+    const data = await res.json()
+    return {
+      price: data?.price?.last || null,
+      name: data?.company?.name || ticker,
+      change: data?.price?.change || 0,
+      change_pct: data?.price?.change_pct || 0,
+      volume_signal: data?.volume?.signal || null,
+      trend: data?.technical?.trend || null,
     }
-  }, [monitoringInput])
+  } catch { return null }
+}
 
-  const loadPositions = useCallback(async () => {
-    try {
-      const res = await getMonitoringList()
-      setMonitoringPositions(res?.monitors || res?.positions || res?.data?.monitors || res?.data?.positions || res?.data || [])
-    } catch {}
+async function fetchEngineData(pos) {
+  try {
+    const res = await fetch(`${BACKEND}/api/monitoring/check`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ticker: pos.ticker,
+        entry_price: pos.entry_price,
+        stop_loss: pos.stop_loss,
+        take_profit: pos.take_profit_1 || pos.entry_price,
+        mode: pos.mode
+      })
+    })
+    if (!res.ok) return null
+    return res.json()
+  } catch { return null }
+}
+
+export default function MonitoringPage() {
+  const [positions, setPositions] = useState([])
+  const [showForm, setShowForm] = useState(false)
+  const [backendOnline, setBackendOnline] = useState(null)
+  const [form, setForm] = useState({
+    ticker: '', entry_price: '', stop_loss: '',
+    take_profit_1: '', take_profit_2: '', take_profit_3: '', mode: 'DAYTRADING'
+  })
+  const positionsRef = useRef([])
+
+  // Keep ref in sync
+  useEffect(() => { positionsRef.current = positions }, [positions])
+
+  const refreshOne = async (pos) => {
+    const [market, engine] = await Promise.all([
+      fetchMarketData(pos.ticker),
+      fetchEngineData(pos)
+    ])
+    const price = market?.price || pos.current_price || pos.entry_price
+    const pnlAmt = price - pos.entry_price
+    const pnlPct = (pnlAmt / pos.entry_price) * 100
+    let status = 'HOLD'
+    if (price <= pos.stop_loss) status = 'EXIT'
+    else if (pos.take_profit_1 && price >= pos.take_profit_1) status = 'TP HIT'
+    else if (engine?.position === 'warning') status = 'WARNING'
+    if (market) setBackendOnline(true)
+    return {
+      ...pos,
+      current_price: price,
+      name: market?.name || pos.name || pos.ticker,
+      trend: market?.trend || pos.trend,
+      volume_signal: market?.volume_signal || pos.volume_signal,
+      pnl: pnlAmt,
+      pnl_pct: pnlPct,
+      status,
+      institutional_alerts: engine?.institutional_alerts ?? pos.institutional_alerts,
+      engine_context: engine?.engine_context ?? pos.engine_context,
+      smart_trailing_stop: engine?.smart_trailing_stop ?? pos.smart_trailing_stop,
+      warnings: engine?.warnings ?? pos.warnings,
+      rr: engine?.rr ?? pos.rr,
+    }
+  }
+
+  // Polling pakai ref — tidak ada closure problem
+  useEffect(() => {
+    const poll = setInterval(async () => {
+      const current = positionsRef.current
+      if (!current.length) return
+      const updated = await Promise.all(current.map(refreshOne))
+      setPositions(updated)
+    }, POLL_INTERVAL)
+    return () => clearInterval(poll)
   }, [])
 
-  useEffect(() => {
-    // Disabled auto-load because production /active can overwrite local manual positions
-    // const iv = setInterval(loadPositions, 15000)
-    // return () => clearInterval(iv)
-  }, [loadPositions])
-
   const handleAdd = async () => {
-    if(!form.ticker || !form.entry_price || !form.stop_loss) return
-
-    const payload = {
-      ticker: form.ticker.toUpperCase(),
-      entry_price: Number(form.entry_price),
-      stop_loss: Number(form.stop_loss),
-      take_profit: Number(form.take_profit_1) || null,
-      take_profit_1: Number(form.take_profit_1) || null,
-      take_profit_2: Number(form.take_profit_2) || null,
-      take_profit_3: Number(form.take_profit_3) || null,
-      mode: form.mode,
+    const ticker = form.ticker.trim().toUpperCase()
+    const entry = parseFloat(form.entry_price)
+    const sl = parseFloat(form.stop_loss)
+    if (!ticker || isNaN(entry) || isNaN(sl)) {
+      alert('Ticker, Entry Price, dan Stop Loss wajib diisi!')
+      return
     }
-
     const newPos = {
-      ...payload,
       id: Date.now(),
-      monitoring_id: `manual_${payload.ticker}_${Date.now()}`,
-      current_price: payload.entry_price,
+      ticker,
+      entry_price: entry,
+      stop_loss: sl,
+      take_profit_1: parseFloat(form.take_profit_1) || null,
+      take_profit_2: parseFloat(form.take_profit_2) || null,
+      take_profit_3: parseFloat(form.take_profit_3) || null,
+      mode: form.mode,
+      current_price: entry,
+      name: ticker,
       status: 'HOLD',
-      position: 'hold',
-      pnl: 0,
-      pnl_pct: 0,
-      institutional_alerts: [{
-        level: 'LOW',
-        type: 'LOCAL_POSITION_ADDED',
-        message: 'Manual position added successfully.'
-      }]
+      pnl: 0, pnl_pct: 0,
+      institutional_alerts: [], engine_context: null, warnings: [], rr: null,
     }
-
-    const currentPositions = useStore.getState().monitoringPositions || []
-    useStore.setState({
-      monitoringPositions: [newPos, ...currentPositions],
-      monitoringInput: null
-    })
-
     setShowForm(false)
-    setForm({ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'DAYTRADING'})
+    setForm({ ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'DAYTRADING' })
+    // Langsung refresh setelah add
+    const enriched = await refreshOne(newPos)
+    setPositions(prev => [enriched, ...prev])
   }
 
-  const handleRemove = async (ticker) => {
-    try { await removeMonitoring(ticker) } catch {}
-    setMonitoringPositions(monitoringPositions.filter(p => p.ticker!==ticker))
-  }
+  const handleRemove = (id) => setPositions(prev => prev.filter(p => p.id !== id))
 
   return (
     <div className="p-4 lg:p-6 max-w-7xl mx-auto animate-fade-in">
       <div className="flex items-start justify-between mb-6">
         <div>
           <h1 className="font-display font-bold text-2xl text-white tracking-wide">MONITORING TOOL</h1>
-          <p className="text-slate-500 text-sm font-mono mt-0.5">Real-time P&L · Alert otomatis · Re-analysis</p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <p className="text-slate-500 text-sm font-mono">Real-time P&L · Alert otomatis · Re-analysis</p>
+            {backendOnline === true && (
+              <span className="flex items-center gap-1.5 text-[10px] font-mono text-accent-green">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-accent-green"></span>
+                </span>
+                LIVE
+              </span>
+            )}
+            {backendOnline === false && (
+              <span className="flex items-center gap-1 text-[10px] font-mono text-accent-red">
+                <WifiOff className="w-3 h-3"/>OFFLINE
+              </span>
+            )}
+          </div>
         </div>
-        <div className="flex gap-2">
-          <button onClick={loadPositions} className="btn-ghost flex items-center gap-2">
-            <RefreshCw className="w-4 h-4"/>Refresh
-          </button>
-          <button onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center gap-2">
-            <Plus className="w-4 h-4"/>Add Position
-          </button>
-        </div>
+        <button onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center gap-2">
+          <Plus className="w-4 h-4"/>Add Position
+        </button>
       </div>
 
       {showForm && (
@@ -107,11 +159,11 @@ export default function MonitoringPage() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             {[
               ['Ticker *','ticker','text','BBCA'],
-              ['Entry Price *','entry_price','number','9450'],
-              ['Stop Loss *','stop_loss','number','9200'],
-              ['Take Profit 1','take_profit_1','number','9700'],
-              ['Take Profit 2','take_profit_2','number','9950'],
-              ['Take Profit 3','take_profit_3','number','10200'],
+              ['Entry Price *','entry_price','text','6125'],
+              ['Stop Loss *','stop_loss','text','5900'],
+              ['Take Profit 1','take_profit_1','text','6400'],
+              ['Take Profit 2','take_profit_2','text','6700'],
+              ['Take Profit 3','take_profit_3','text','7000'],
             ].map(([label,key,type,ph]) => (
               <div key={key}>
                 <label className="label-xs block mb-1.5">{label}</label>
@@ -129,62 +181,73 @@ export default function MonitoringPage() {
             </div>
           </div>
           <div className="flex gap-2 mt-4">
-            <button onClick={handleAdd} disabled={loading} className="btn-primary flex items-center gap-2 disabled:opacity-50">
-              {loading?<RefreshCw className="w-4 h-4 animate-spin"/>:<Plus className="w-4 h-4"/>}
-              {loading?'Adding...':'Add to Monitor'}
+            <button onClick={handleAdd} className="btn-primary flex items-center gap-2">
+              <Plus className="w-4 h-4"/>Add to Monitor
             </button>
             <button onClick={() => setShowForm(false)} className="btn-ghost">Cancel</button>
           </div>
         </div>
       )}
 
-      {monitoringPositions.length>0 && (
-        <div className="mb-4 p-3 border border-red-500 text-red-400 text-xs font-mono overflow-auto max-h-80 bg-black/20 rounded">
-          <pre>{JSON.stringify(monitoringPositions, null, 2)}</pre>
-        </div>
-      )}
-
-      {monitoringPositions.length>0 ? (
+      {positions.length > 0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-          {monitoringPositions.map((pos,i) => {
-            const pnl = pos.pnl||pos.unrealized_pnl||0
-            const pnlPct = pos.pnl_pct||pos.pnl_percent||0
-            const current = pos.current_price||pos.last_price||pos.entry_price
-            const status = pos.status||'HOLD'
-            const pnlColor = pnl>0?'text-accent-green':pnl<0?'text-accent-red':'text-slate-400'
-            const entry=pos.entry_price, sl=pos.stop_loss, tp=pos.take_profit_1
-            const range = tp&&sl?tp-sl:1
-            const progress = tp&&sl?Math.max(0,Math.min(100,((current-sl)/range)*100)):50
+          {positions.map((pos, i) => {
+            const pnl = pos.pnl || 0
+            const pnlPct = pos.pnl_pct || 0
+            const current = pos.current_price || pos.entry_price
+            const status = pos.status || 'HOLD'
+            const pnlColor = pnl > 0 ? 'text-accent-green' : pnl < 0 ? 'text-accent-red' : 'text-slate-400'
+            const sl = pos.stop_loss, tp = pos.take_profit_1, entry = pos.entry_price
+            const range = tp && sl ? tp - sl : 1
+            const progress = tp && sl ? Math.max(0, Math.min(100, ((current - sl) / range) * 100)) : 50
+
             return (
-              <div key={pos.id||pos.ticker||i} className={clsx('card p-4 space-y-3',
-                status==='WARNING'&&'border-accent-gold/30', status==='EXIT'&&'border-accent-red/30')}>
+              <div key={pos.id || i} className={clsx('card p-4 space-y-3',
+                status==='WARNING'&&'border-accent-gold/30',
+                status==='EXIT'&&'border-accent-red/30',
+                status==='TP HIT'&&'border-accent-green/30')}>
+
+                {/* Header */}
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-display font-bold text-lg text-white">{pos.ticker}</span>
-                    <span className={clsx('text-xs font-mono font-semibold px-2 py-0.5 rounded border',
-                      status==='HOLD'?'text-slate-400 border-slate-600/30 bg-slate-600/5':
-                      status==='EXIT'?'text-accent-red border-accent-red/30 bg-accent-red/5':
-                      status==='WARNING'?'text-accent-gold border-accent-gold/30 bg-accent-gold/5':
-                      'text-accent-green border-accent-green/30 bg-accent-green/5')}>{status}</span>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-display font-bold text-lg text-white">{pos.ticker}</span>
+                      <span className={clsx('text-xs font-mono font-semibold px-2 py-0.5 rounded border',
+                        status==='HOLD'?'text-slate-400 border-slate-600/30 bg-slate-600/5':
+                        status==='EXIT'?'text-accent-red border-accent-red/30 bg-accent-red/5':
+                        status==='TP HIT'?'text-accent-green border-accent-green/30 bg-accent-green/5':
+                        status==='WARNING'?'text-accent-gold border-accent-gold/30 bg-accent-gold/5':
+                        'text-slate-400 border-slate-600/30 bg-slate-600/5')}>{status}</span>
+                    </div>
+                    {pos.name && pos.name !== pos.ticker && (
+                      <p className="text-[10px] font-mono text-slate-500 mt-0.5">{pos.name}</p>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="label-xs">{pos.mode}</span>
-                    <button onClick={() => handleRemove(pos.ticker)} className="p-1 text-slate-700 hover:text-accent-red transition-colors">
+                    <button onClick={() => handleRemove(pos.id)} className="p-1 text-slate-700 hover:text-accent-red transition-colors">
                       <Trash2 className="w-3.5 h-3.5"/>
                     </button>
                   </div>
                 </div>
+
+                {/* Price & PnL */}
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="label-xs">Current Price</p>
-                    <p className="font-mono font-bold text-xl text-white">Rp {Number(current).toLocaleString('id-ID')}</p>
+                    <p className="font-mono font-bold text-xl text-accent-green">Rp {Number(current).toLocaleString('id-ID')}</p>
+                    {pos.trend && <p className="text-[10px] font-mono text-slate-500 mt-0.5">{pos.trend}</p>}
                   </div>
                   <div className="text-right">
                     <p className="label-xs">Unrealized P&L</p>
-                    <p className={clsx('font-mono font-bold text-xl',pnlColor)}>{pnl>=0?'+':''}{Number(pnl).toLocaleString('id-ID')}</p>
+                    <p className={clsx('font-mono font-bold text-xl',pnlColor)}>
+                      {pnl >= 0 ? '+' : ''}{Number(pnl).toLocaleString('id-ID')}
+                    </p>
                     <p className={clsx('font-mono text-xs',pnlColor)}>{pnlPct>=0?'+':''}{Number(pnlPct).toFixed(2)}%</p>
                   </div>
                 </div>
+
+                {/* Progress Bar */}
                 <div className="space-y-1">
                   <div className="flex justify-between text-[10px] font-mono text-slate-600">
                     <span>SL {Number(sl||0).toLocaleString('id-ID')}</span>
@@ -197,6 +260,8 @@ export default function MonitoringPage() {
                     <div className="absolute top-0 h-full w-0.5 bg-white transition-all duration-500" style={{left:`${progress}%`}}/>
                   </div>
                 </div>
+
+                {/* Entry/SL/TP Cards */}
                 <div className="grid grid-cols-3 gap-2">
                   {[['Entry',pos.entry_price,'text-slate-300'],['SL',pos.stop_loss,'text-accent-red'],['TP1',pos.take_profit_1,'text-accent-green']].map(([lbl,val,c]) => (
                     <div key={lbl} className="bg-bg-secondary rounded p-2 text-center">
@@ -205,58 +270,75 @@ export default function MonitoringPage() {
                     </div>
                   ))}
                 </div>
-                {pos.engine_context && (
-                  <div className="bg-bg-secondary border border-border-dim rounded p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="label-xs">INSTITUTIONAL ENGINE CONTEXT</p>
-                      <span className="text-[10px] font-mono text-accent-green border border-accent-green/30 bg-accent-green/5 px-2 py-0.5 rounded">
-                        {pos.engine_context.total_engines || 34} ENGINES
-                      </span>
+
+                {/* R:R */}
+                {pos.rr && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-bg-secondary rounded p-2 text-center">
+                      <p className="label-xs mb-0.5">R:R Target</p>
+                      <p className="font-mono text-xs font-bold text-white">1:{Number(pos.rr.rr_target||0).toFixed(1)}</p>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                      <div>
-                        <p className="text-slate-600">Score</p>
-                        <p className="text-white font-bold">
-                          {pos.engine_context.composite_score ?? '—'}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-slate-600">Signal</p>
-                        <p className="text-white font-bold uppercase">
-                          {pos.engine_context.signal || '—'}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-slate-600">RAG</p>
-                        <p className={pos.engine_context.rag_used ? 'text-accent-green font-bold' : 'text-slate-500'}>
-                          {pos.engine_context.rag_used ? `ACTIVE (${pos.engine_context.rag_context_count || 0})` : 'OFF'}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-slate-600">Bandarmology</p>
-                        <p className={pos.engine_context.bandarmology_included ? 'text-accent-green font-bold' : 'text-slate-500'}>
-                          {pos.engine_context.bandarmology_included ? 'ACTIVE' : 'OFF'}
-                        </p>
-                      </div>
+                    <div className="bg-bg-secondary rounded p-2 text-center">
+                      <p className="label-xs mb-0.5">R:R Current</p>
+                      <p className={clsx('font-mono text-xs font-bold',pos.rr.rr_current>0?'text-accent-green':'text-slate-400')}>
+                        {Number(pos.rr.rr_current||0).toFixed(2)}
+                      </p>
                     </div>
                   </div>
                 )}
 
-                {pos.institutional_alerts?.length>0 && pos.institutional_alerts.slice(0,2).map((a,j) => (
-                  <div key={`inst-${j}`} className="flex items-center gap-2 text-xs font-mono text-accent-gold bg-accent-gold/5 border border-accent-gold/20 rounded px-2 py-1">
+                {/* Engine Context */}
+                {pos.engine_context && (
+                  <div className="bg-bg-secondary border border-border-dim rounded p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="label-xs">34 ENGINE CONTEXT</p>
+                      <span className="text-[10px] font-mono text-accent-green border border-accent-green/30 bg-accent-green/5 px-2 py-0.5 rounded">
+                        Score: {Number(pos.engine_context.composite_score||0).toFixed(1)}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                      <div><p className="text-slate-600">Signal</p><p className="text-white font-bold uppercase">{pos.engine_context.signal||'—'}</p></div>
+                      <div><p className="text-slate-600">RAG</p>
+                        <p className={pos.engine_context.rag_used?'text-accent-green font-bold':'text-slate-500'}>
+                          {pos.engine_context.rag_used?`ACTIVE (${pos.engine_context.rag_context_count||0})`:'OFF'}
+                        </p>
+                      </div>
+                      <div><p className="text-slate-600">Bandarmology</p>
+                        <p className={pos.engine_context.bandarmology_included?'text-accent-green font-bold':'text-slate-500'}>
+                          {pos.engine_context.bandarmology_included?'ACTIVE':'OFF'}
+                        </p>
+                      </div>
+                      <div><p className="text-slate-600">Engines</p><p className="text-white font-bold">{pos.engine_context.total_engines||34}</p></div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Smart Trailing Stop */}
+                {pos.smart_trailing_stop?.active && (
+                  <div className="bg-accent-green/5 border border-accent-green/20 rounded p-2 text-xs font-mono">
+                    <p className="text-accent-green font-bold mb-1">🔒 SMART TRAILING STOP ACTIVE</p>
+                    <p className="text-slate-400">Suggested SL: <span className="text-white">{Number(pos.smart_trailing_stop.suggested_stop_loss).toLocaleString('id-ID')}</span></p>
+                    <p className="text-slate-400">Stage: <span className="text-white uppercase">{pos.smart_trailing_stop.trailing_stage}</span></p>
+                  </div>
+                )}
+
+                {/* Warnings */}
+                {pos.warnings?.length > 0 && pos.warnings.map((w,j) => (
+                  <div key={j} className="flex items-center gap-2 text-xs font-mono text-accent-red bg-accent-red/5 border border-accent-red/20 rounded px-2 py-1">
+                    <AlertTriangle className="w-3 h-3 shrink-0"/>{w.message||w}
+                  </div>
+                ))}
+
+                {/* Institutional Alerts */}
+                {pos.institutional_alerts?.length > 0 && pos.institutional_alerts.slice(0,2).map((a,j) => (
+                  <div key={j} className={clsx('flex items-center gap-2 text-xs font-mono rounded px-2 py-1',
+                    a.level==='HIGH'?'text-accent-red bg-accent-red/5 border border-accent-red/20':
+                    a.level==='MEDIUM'?'text-accent-gold bg-accent-gold/5 border border-accent-gold/20':
+                    'text-slate-400 bg-slate-600/5 border border-slate-600/20')}>
                     <AlertTriangle className="w-3 h-3 shrink-0"/>{a.message||a}
                   </div>
                 ))}
 
-                <pre className="text-[9px] text-slate-500 overflow-auto max-h-40 bg-black/20 p-2 rounded">
-{JSON.stringify(pos, null, 2)}
-                </pre>
-
-                {pos.alerts?.length>0 && pos.alerts.slice(0,2).map((a,j) => (
-                  <div key={j} className="flex items-center gap-2 text-xs font-mono text-accent-gold bg-accent-gold/5 border border-accent-gold/20 rounded px-2 py-1">
-                    <AlertTriangle className="w-3 h-3 shrink-0"/>{a.message||a}
-                  </div>
-                ))}
               </div>
             )
           })}

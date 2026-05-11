@@ -4,8 +4,6 @@ from typing import Optional
 import asyncio
 import json
 from app.core import invesgo
-from app.engines.master_runner import run_all_engines
-from app.knowledge_base import kb_service
 import logging
 
 logger = logging.getLogger(__name__)
@@ -51,8 +49,6 @@ async def get_status(monitoring_id: str):
     elif current <= pos["entry_price"] * 0.97:
         warnings.append({"level": "medium", "msg": "Price down 3% from entry — monitor closely"})
 
-    engine_context = await get_monitoring_engine_context(pos["ticker"], pos.get("mode", "swing"))
-
     return {
         "monitoring_id": monitoring_id,
         "ticker": pos["ticker"],
@@ -65,7 +61,6 @@ async def get_status(monitoring_id: str):
         "rr": calculate_rr(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
         "smart_trailing_stop": calculate_smart_trailing_stop(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
         "institutional_alerts": generate_institutional_alerts(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
-        "engine_context": engine_context,
         "warnings": warnings,
     }
 
@@ -247,159 +242,3 @@ def generate_institutional_alerts(entry_price: float, stop_loss: float, take_pro
         })
 
     return alerts
-
-
-# ─── ADDITIVE MONITORING ENGINE BRIDGE — 34 ENGINES + RAG ─────────────────────
-
-async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
-    try:
-        ohlcv = await invesgo.get_ohlcv_daily(ticker)
-
-        if not ohlcv or len(ohlcv) < 20:
-            return {
-                "engines_used": False,
-                "rag_used": False,
-                "reason": "Insufficient OHLCV data for monitoring engine context.",
-            }
-
-        normalized_ohlcv = [{
-            **c,
-            "open": float(c.get("open", 0) or 0),
-            "high": float(c.get("high", 0) or 0),
-            "low": float(c.get("low", 0) or 0),
-            "close": float(c.get("close", 0) or 0),
-            "volume": float(c.get("volume", 0) or 0),
-        } for c in ohlcv]
-
-        engine_result = await run_all_engines(ticker, normalized_ohlcv, mode)
-
-        rag_engines = [
-            "PriceActionEngine",
-            "VolumeIntelligenceEngine",
-            "BandarmologyEngine",
-            "TrendStructureEngine",
-            "RiskManagementEngine",
-        ]
-
-        rag_count = 0
-        for engine_name in rag_engines:
-            try:
-                ctx = await kb_service.get_kb_context_for_engine(engine_name, ticker)
-                if ctx:
-                    rag_count += 1
-            except Exception:
-                continue
-
-        return {
-            "engines_used": True,
-            "engine_scope": "monitoring_bridge",
-            "total_engines": engine_result.get("total_engines"),
-            "composite_score": engine_result.get("composite_score"),
-            "signal": engine_result.get("signal"),
-            "bullish_count": engine_result.get("bullish_count"),
-            "bearish_count": engine_result.get("bearish_count"),
-            "rag_used": rag_count > 0,
-            "rag_context_count": rag_count,
-            "rag_engines": rag_engines,
-            "bandarmology_included": "BandarmologyEngine" in rag_engines,
-            "engine_details": {e["engine"]: e for e in engine_result.get("engines", [])},
-        }
-
-    except Exception as e:
-        logger.warning(f"[MONITORING_ENGINE_BRIDGE] skipped for {ticker}: {e}")
-        return {
-            "engines_used": False,
-            "rag_used": False,
-            "reason": str(e),
-        }
-
-
-# ─── ADDITIVE STATELESS MONITORING CHECK ──────────────────────────────────────
-
-@router.post("/check")
-async def stateless_monitoring_check(req: MonitoringRequest):
-    try:
-        tick = await invesgo.get_tick(req.ticker)
-        current = tick.get("last_price", req.entry_price)
-    except Exception:
-        current = req.entry_price
-
-    warnings = []
-    position_status = "hold"
-
-    if current <= req.stop_loss:
-        position_status = "exit"
-        warnings.append({"level": "high", "msg": f"STOP LOSS HIT at {current}"})
-    elif current >= req.take_profit:
-        position_status = "exit"
-        warnings.append({"level": "high", "msg": f"TAKE PROFIT HIT at {current}"})
-    elif current <= req.entry_price * 0.97:
-        warnings.append({"level": "medium", "msg": "Price down 3% from entry — monitor closely"})
-
-    engine_context = await get_monitoring_engine_context(req.ticker, req.mode)
-    early_warnings = extract_early_warnings(engine_context)
-    warnings = warnings + early_warnings
-
-    return {
-        "ticker": req.ticker,
-        "mode": req.mode,
-        "current_price": current,
-        "entry_price": req.entry_price,
-        "stop_loss": req.stop_loss,
-        "take_profit": req.take_profit,
-        "position": position_status,
-        "pnl_pct": round((current - req.entry_price) / req.entry_price * 100, 2),
-        "rr": calculate_rr(req.entry_price, req.stop_loss, req.take_profit, current),
-        "smart_trailing_stop": calculate_smart_trailing_stop(req.entry_price, req.stop_loss, req.take_profit, current),
-        "institutional_alerts": generate_institutional_alerts(req.entry_price, req.stop_loss, req.take_profit, current),
-        "engine_context": engine_context,
-        "warnings": warnings,
-    }
-
-
-# ─── ADDITIVE EARLY WARNING SYSTEM ────────────────────────────────────────────
-
-def extract_early_warnings(engine_context: dict) -> list:
-    warnings = []
-    if not engine_context or not engine_context.get("engines_used"):
-        return warnings
-
-    engine_details = engine_context.get("engine_details") or {}
-
-    # ── Volume Warning ──────────────────────────────────────────────────────
-    vol = engine_details.get("VolumeIntelligenceEngine", {})
-    vol_data = vol.get("data", {})
-    vol_ratio = vol_data.get("volume_ratio", 1.0)
-    obv_trend = vol_data.get("obv_trend", "")
-    ad_trend  = vol_data.get("ad_trend", "")
-
-    if vol_ratio >= 3.0:
-        warnings.append({"level": "HIGH", "type": "VOLUME_SPIKE", "message": f"Volume spike ekstrem: {vol_ratio:.1f}x rata-rata 20 hari. Waspadai pergerakan besar."})
-    elif vol_ratio >= 2.0:
-        warnings.append({"level": "HIGH", "type": "VOLUME_SURGE", "message": f"Volume surge: {vol_ratio:.1f}x rata-rata. Konfirmasi arah sebelum tambah posisi."})
-    elif vol_ratio >= 1.5:
-        warnings.append({"level": "MEDIUM", "type": "VOLUME_ELEVATED", "message": f"Volume di atas normal: {vol_ratio:.1f}x. Perhatikan price action."})
-    elif vol_ratio < 0.5:
-        warnings.append({"level": "LOW", "type": "VOLUME_DRY", "message": f"Volume sangat rendah: {vol_ratio:.1f}x. Likuiditas tipis."})
-    elif vol_ratio < 0.7:
-        warnings.append({"level": "LOW", "type": "VOLUME_LOW", "message": f"Volume di bawah normal: {vol_ratio:.1f}x. Sinyal lemah."})
-
-    if obv_trend == "falling" and ad_trend == "distribution":
-        warnings.append({"level": "MEDIUM", "type": "VOLUME_DISTRIBUTION", "message": "OBV turun + A/D distribution — tekanan jual institusi terdeteksi."})
-
-    # ── Bandarmology Warning ────────────────────────────────────────────────
-    bandar = engine_details.get("BandarmologyEngine", {})
-    bandar_data = bandar.get("data", {})
-    phase     = bandar_data.get("phase", "")
-    big_up    = bandar_data.get("big_vol_up_days", 0)
-    big_down  = bandar_data.get("big_vol_down_days", 0)
-    bandar_score = bandar.get("score", 50)
-
-    if phase == "distribution":
-        warnings.append({"level": "HIGH", "type": "BANDAR_DISTRIBUSI", "message": f"⚠️ GUYURAN BANDAR terdeteksi! Big vol down {big_down} hari vs up {big_up} hari. Waspadai exit paksa."})
-    elif phase == "accumulation" and bandar_score >= 75:
-        warnings.append({"level": "MEDIUM", "type": "BANDAR_AKUMULASI", "message": f"Bandar akumulasi aktif ({big_up} hari big vol naik). Posisi aligned dengan smart money."})
-    elif phase == "early_accumulation":
-        warnings.append({"level": "LOW", "type": "BANDAR_EARLY_AKUMULASI", "message": "Sinyal awal akumulasi bandar. Monitor volume besar hari berikutnya."})
-
-    return warnings
