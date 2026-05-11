@@ -306,6 +306,7 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
             "bandarmology_included": "BandarmologyEngine" in rag_engines,
             "engine_details": {e["engine"]: e for e in engine_result.get("engines", [])},
             "raw_engines": engine_result.get("engines", []),
+            "debug_keys": list(engine_result.keys()),
         }
 
     except Exception as e:
