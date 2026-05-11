@@ -125,3 +125,32 @@ async def get_foreign_net() -> list:
         r = await client.get(f"{INVESGO_BASE_URL}/analysis/market/foreign-net", headers=_headers())
         r.raise_for_status()
         return r.json()
+
+async def get_market_context(ticker: str) -> dict:
+    """Harga realtime + company info dari market-context endpoint"""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                f"{INVESGO_BASE_URL}/analysis/market-context/{ticker}",
+                headers=_headers()
+            )
+            if r.status_code == 200:
+                return r.json()
+    except:
+        pass
+    # Fallback: pakai price-table
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                f"{INVESGO_BASE_URL}/analysis/chart/stock/{ticker}",
+                headers=_headers(),
+                params={"period": "1d"}
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, list) and data:
+                    last = data[-1]
+                    return {"price": {"last": last.get("close"), "high": last.get("high"), "low": last.get("low")}}
+    except:
+        pass
+    return {}

@@ -73,6 +73,20 @@ async def analyze(req: AnalyticRequest):
         if not ohlcv or len(ohlcv) < 20:
             raise HTTPException(400, "Insufficient OHLCV data")
 
+        # Inject harga realtime ke candle terakhir
+        try:
+            ctx = await invesgo.get_market_context(req.ticker)
+            if ctx and ctx.get("price", {}).get("last"):
+                realtime_price = float(ctx["price"]["last"])
+                realtime_high = float(ctx["price"].get("high", ohlcv[-1].get("high", realtime_price)))
+                realtime_low = float(ctx["price"].get("low", ohlcv[-1].get("low", realtime_price)))
+                ohlcv[-1]["close"] = realtime_price
+                ohlcv[-1]["high"] = max(realtime_high, realtime_price)
+                ohlcv[-1]["low"] = min(realtime_low, realtime_price)
+                logger.info(f"Injected realtime price {realtime_price} for {req.ticker}")
+        except Exception as e:
+            logger.warning(f"Could not inject realtime price: {e}")
+
         # Cast OHLCV ke float
         ohlcv = [{
             **c,
