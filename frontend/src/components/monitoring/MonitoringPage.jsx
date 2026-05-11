@@ -322,10 +322,14 @@ export default function MonitoringPage() {
                   </div>
                 )}
 
-                {/* Warnings */}
+                {/* Early Warning System */}
                 {pos.warnings?.length > 0 && pos.warnings.map((w,j) => (
-                  <div key={j} className="flex items-center gap-2 text-xs font-mono text-accent-red bg-accent-red/5 border border-accent-red/20 rounded px-2 py-1">
-                    <AlertTriangle className="w-3 h-3 shrink-0"/>{w.message||w}
+                  <div key={j} className={`flex items-center gap-2 text-xs font-mono rounded px-2 py-1 ${
+                    w.level==='HIGH'?'text-accent-red bg-accent-red/5 border border-accent-red/20':
+                    w.level==='MEDIUM'?'text-accent-gold bg-accent-gold/5 border border-accent-gold/20':
+                    'text-slate-400 bg-slate-600/5 border border-slate-600/20'}`}>
+                    <AlertTriangle className="w-3 h-3 shrink-0"/>
+                    <span className="font-bold mr-1">[{w.level||'INFO'}]</span>{w.message||w}
                   </div>
                 ))}
 
