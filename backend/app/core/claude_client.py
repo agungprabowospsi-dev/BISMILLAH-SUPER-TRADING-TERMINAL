@@ -28,3 +28,4 @@ async def ask_claude(system: str, prompt: str, max_tokens: int = 300) -> str:
     except Exception as e:
         logger.error(f"Claude API error: {e}")
         return "AI analysis temporarily unavailable."
+# model: claude-haiku-4-5-20251001
