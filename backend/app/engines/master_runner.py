@@ -108,3 +108,42 @@ async def run_all_engines(ticker: str, ohlcv: list, mode: str, **kwargs) -> dict
         "total_engines": len(all_results),
         "engines": all_results,
     }
+
+
+# ─── MONITORING-ONLY RUNNER (6 engines) ──────────────────────────────────────
+from app.engines.price_action_engine import PriceActionEngine
+from app.engines.volume_intelligence_engine import VolumeIntelligenceEngine
+from app.engines.support_resistance_engine import SupportResistanceEngine
+from app.engines.trend_structure_engine import TrendStructureEngine
+
+_monitoring_engines = [
+    PriceActionEngine(),
+    VolumeIntelligenceEngine(),
+    BandarmologyEngine(),
+    TrendStructureEngine(),
+    SupportResistanceEngine(),
+    OrderbookEngine(),
+]
+
+async def run_monitoring_engines(ticker: str, ohlcv: list, mode: str, **kwargs) -> dict:
+    """Jalankan hanya 5 engines untuk monitoring — lebih cepat."""
+    tasks = [e.analyze(ticker, ohlcv, mode, **kwargs) for e in _monitoring_engines]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    all_results = []
+    scores = []
+    for r in results:
+        if not isinstance(r, Exception) and hasattr(r, "score"):
+            all_results.append(r.to_dict())
+            scores.append(r.score)
+
+    composite = float(np.mean(scores)) if scores else 50.0
+
+    return {
+        "ticker": ticker,
+        "mode": mode,
+        "composite_score": round(composite, 2),
+        "signal": "bullish" if composite >= 60 else "bearish" if composite <= 40 else "neutral",
+        "total_engines": len(all_results),
+        "engines": all_results,
+    }

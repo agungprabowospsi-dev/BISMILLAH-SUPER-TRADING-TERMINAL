@@ -6,7 +6,7 @@ from typing import Optional
 import asyncio
 import json
 from app.core import invesgo
-from app.engines.master_runner import run_all_engines
+from app.engines.master_runner import run_all_engines, run_monitoring_engines
 from app.knowledge_base import kb_service
 import logging
 
@@ -291,7 +291,7 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
             "volume": float(c.get("volume", 0) or 0),
         } for c in ohlcv]
 
-        engine_result = await run_all_engines(ticker, normalized_ohlcv, mode)
+        engine_result = await run_monitoring_engines(ticker, normalized_ohlcv, mode)
         logger.warning(f"[DEBUG] engine_result keys: {list(engine_result.keys()) if engine_result else None}")
         logger.warning(f"[DEBUG] engines count: {len(engine_result.get('engines', []))}")
 
