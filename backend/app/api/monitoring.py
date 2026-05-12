@@ -361,7 +361,7 @@ async def stateless_monitoring_check(req: MonitoringRequest):
     early_warnings = extract_early_warnings(engine_context)
     warnings = warnings + early_warnings
 
-    return {
+    return sanitize_for_json({
         "ticker": req.ticker,
         "mode": req.mode,
         "current_price": current,
@@ -375,7 +375,7 @@ async def stateless_monitoring_check(req: MonitoringRequest):
         "institutional_alerts": generate_institutional_alerts(req.entry_price, req.stop_loss, req.take_profit, current),
         "engine_context": engine_context,
         "warnings": warnings,
-    }
+    })
 
 
 # ─── ADDITIVE EARLY WARNING SYSTEM ────────────────────────────────────────────
