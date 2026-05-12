@@ -14,6 +14,14 @@ logger = logging.getLogger(__name__)
 
 import numpy as np
 
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer): return int(obj)
+        if isinstance(obj, np.floating): return float(obj)
+        if isinstance(obj, np.bool_): return bool(obj)
+        if isinstance(obj, np.ndarray): return obj.tolist()
+        return super().default(obj)
+
 def sanitize_for_json(obj):
     """Recursively convert numpy types to Python native types."""
     if isinstance(obj, dict):
@@ -363,7 +371,7 @@ async def stateless_monitoring_check(req: MonitoringRequest):
     early_warnings = extract_early_warnings(engine_context)
     warnings = warnings + early_warnings
 
-    return JSONResponse(content=json.loads(json.dumps(sanitize_for_json({
+    result = sanitize_for_json({
         "ticker": req.ticker,
         "mode": req.mode,
         "current_price": current,
@@ -377,7 +385,8 @@ async def stateless_monitoring_check(req: MonitoringRequest):
         "institutional_alerts": generate_institutional_alerts(req.entry_price, req.stop_loss, req.take_profit, current),
         "engine_context": engine_context,
         "warnings": warnings,
-    })))
+    })
+    return JSONResponse(content=json.loads(json.dumps(result, cls=NumpyEncoder)))
 
 
 # ─── ADDITIVE EARLY WARNING SYSTEM ────────────────────────────────────────────
