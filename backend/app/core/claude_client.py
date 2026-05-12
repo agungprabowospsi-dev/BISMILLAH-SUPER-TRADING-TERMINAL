@@ -7,7 +7,7 @@ ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 
 async def ask_claude(system: str, prompt: str, max_tokens: int = 300) -> str:
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             r = await client.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={
@@ -16,7 +16,7 @@ async def ask_claude(system: str, prompt: str, max_tokens: int = 300) -> str:
                     "content-type": "application/json",
                 },
                 json={
-                    "model": "claude-sonnet-4-5",
+                    "model": "claude-haiku-4-5",
                     "max_tokens": max_tokens,
                     "system": system,
                     "messages": [{"role": "user", "content": prompt}],
