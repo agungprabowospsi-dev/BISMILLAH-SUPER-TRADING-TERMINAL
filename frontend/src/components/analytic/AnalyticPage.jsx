@@ -29,7 +29,7 @@ export default function AnalyticPage() {
       setAnalyticResult(res)
       // Fetch market context 4 box
       try {
-        const ctx = await fetch(`${import.meta.env.VITE_BACKEND_URL || 'https://bismillah-super-trading-terminal-production.up.railway.app'}/api/analytic/market-context/${analyticTicker.toUpperCase().trim()}`)
+        const ctx = await fetch(`${import.meta.env.VITE_BACKEND_URL || 'https://backend-production-daed.up.railway.app'}/api/analytic/market-context/${analyticTicker.toUpperCase().trim()}`)
         const ctxData = await ctx.json()
         setMarketCtx(ctxData)
       } catch(e) { console.log('market ctx error:', e) }
