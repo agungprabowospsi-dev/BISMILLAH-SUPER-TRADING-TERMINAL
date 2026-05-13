@@ -159,6 +159,7 @@ export default function MonitoringPage() {
             )}
           </div>
         </div>
+        <button onClick={() => { localStorage.removeItem("bismillah_positions"); window.location.reload(); }} className="btn-ghost flex items-center gap-1 text-xs mr-2">🗑 Reset</button>
         <button onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center gap-2">
           <Plus className="w-4 h-4"/>Add Position
         </button>
