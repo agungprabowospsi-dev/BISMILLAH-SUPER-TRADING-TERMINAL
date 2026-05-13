@@ -384,6 +384,55 @@ export default function MonitoringPage() {
                   </div>
                 )}
 
+                {/* Broker & Foreign Flow Data */}
+                {pos.engine_context?.engine_details && (
+                  (() => {
+                    const bandar = pos.engine_context.engine_details.BandarmologyEngine
+                    const foreign = pos.engine_context.engine_details.ForeignFlowEngine
+                    const ob = pos.engine_context.engine_details.OrderbookEngine
+                    if (!bandar && !foreign && !ob) return null
+                    return (
+                      <div className="bg-bg-secondary border border-border-dim rounded p-3 space-y-2">
+                        <p className="label-xs">SMART MONEY DATA</p>
+                        <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                          {foreign?.data && (
+                            <>
+                              <div>
+                                <p className="text-slate-600">Foreign Flow</p>
+                                <p className={foreign.data.trend==='net_buy'?'text-accent-green font-bold':'text-accent-red font-bold'}>
+                                  {foreign.data.trend==='net_buy'?'NET BUY ↑':'NET SELL ↓'}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-slate-600">Net Foreign</p>
+                                <p className={Number(foreign.data.net_foreign)>0?'text-accent-green font-bold':'text-accent-red font-bold'}>
+                                  {Number(foreign.data.net_foreign||0).toLocaleString('id-ID')}
+                                </p>
+                              </div>
+                            </>
+                          )}
+                          {ob?.data && ob.data.bid_ask_ratio && (
+                            <>
+                              <div>
+                                <p className="text-slate-600">Bid/Ask Ratio</p>
+                                <p className={ob.data.bid_ask_ratio>1.5?'text-accent-green font-bold':ob.data.bid_ask_ratio<0.7?'text-accent-red font-bold':'text-white font-bold'}>
+                                  {Number(ob.data.bid_ask_ratio||0).toFixed(2)}x
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-slate-600">Orderbook</p>
+                                <p className={ob.signal==='bullish'?'text-accent-green font-bold':ob.signal==='bearish'?'text-accent-red font-bold':'text-slate-400'}>
+                                  {(ob.signal||'neutral').toUpperCase()}
+                                </p>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })()
+                )}
+
                 {/* Smart Trailing Stop */}
                 {pos.smart_trailing_stop?.active && (
                   <div className="bg-accent-green/5 border border-accent-green/20 rounded p-2 text-xs font-mono">
