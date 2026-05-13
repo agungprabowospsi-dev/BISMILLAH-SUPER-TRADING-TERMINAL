@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { Upload, BookOpen, CheckSquare, Square, ChevronDown, ChevronUp, Trash2, Search, RefreshCw, BookMarked, Zap } from 'lucide-react'
 import clsx from 'clsx'
 
-const API = 'https://bismillah-super-trading-terminal-production.up.railway.app'
+const API = 'https://backend-production-daed.up.railway.app'
 
 const CATEGORY_COLORS = {
   Technical:    { bg: 'bg-blue-50',   text: 'text-blue-700',   border: 'border-blue-200' },
