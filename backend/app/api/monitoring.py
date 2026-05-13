@@ -299,9 +299,10 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
             "volume": float(c.get("volume", 0) or 0),
         } for c in ohlcv]
 
-        # Ambil data real dari Invesgo untuk Orderbook + Bandarmology
+        # Ambil data real dari Invesgo untuk Orderbook + Bandarmology + Foreign
         intraday_data = {}
         broker_data_raw = []
+        ksei_data_raw = []
         try:
             intraday_data = await invesgo.get_ohlcv_intraday(ticker, market="RG")
         except Exception as e:
@@ -310,6 +311,10 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
             broker_data_raw = await invesgo.get_broker_summary(ticker, investor="all", market="RG")
         except Exception as e:
             logger.warning(f"[BROKER] skip for {ticker}: {e}")
+        try:
+            ksei_data_raw = await invesgo.get_ksei_ownership(ticker)
+        except Exception as e:
+            logger.warning(f"[KSEI] skip for {ticker}: {e}")
 
         # Format orderbook dari intraday
         orderbook = {}
@@ -341,7 +346,22 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
                 "total_net_value": total_net
             }
 
-        engine_result = await run_monitoring_engines(ticker, normalized_ohlcv, mode, orderbook=orderbook, broker_data=broker_data)
+        # Format KSEI/Foreign data
+        foreign_data = {}
+        if ksei_data_raw and len(ksei_data_raw) > 0:
+            latest = ksei_data_raw[0]
+            prev = ksei_data_raw[1] if len(ksei_data_raw) > 1 else {}
+            foreign_now = float(latest.get("foreign_cp", 0) or 0)
+            foreign_prev = float(prev.get("foreign_cp", 0) or 0)
+            net_foreign = foreign_now - foreign_prev
+            foreign_data = {
+                "net_foreign_buy": net_foreign,
+                "foreign_buy": foreign_now,
+                "foreign_sell": foreign_prev,
+                "foreign_ownership_pct": float(latest.get("foreign_pf", 0) or 0),
+            }
+
+        engine_result = await run_monitoring_engines(ticker, normalized_ohlcv, mode, orderbook=orderbook, broker_data=broker_data, foreign_data=foreign_data)
         logger.warning(f"[DEBUG] engine_result keys: {list(engine_result.keys()) if engine_result else None}")
         logger.warning(f"[DEBUG] engines count: {len(engine_result.get('engines', []))}")
 

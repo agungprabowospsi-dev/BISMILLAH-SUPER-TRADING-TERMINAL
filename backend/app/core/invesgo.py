@@ -98,6 +98,17 @@ async def get_price_table(ticker: str) -> dict:
         r.raise_for_status()
         return r.json()
 
+
+async def get_ksei_ownership(ticker: str, range_months: int = 3) -> list:
+    """KSEI ownership data - foreign vs retail"""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(
+            f"{INVESGO_BASE_URL}/analysis/shareholder/ksei/{ticker}",
+            headers=_headers(),
+            params={"range": range_months}
+        )
+        r.raise_for_status()
+        return r.json()
 async def get_sector_rotation() -> dict:
     """Sector rotation"""
     async with httpx.AsyncClient(timeout=15) as client:
