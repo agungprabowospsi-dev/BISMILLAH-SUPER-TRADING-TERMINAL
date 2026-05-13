@@ -174,9 +174,23 @@ export default function KnowledgeBasePage() {
       const form = new FormData()
       form.append('file', file)
       if (description) form.append('description', description)
-      const controller = new AbortController(); const timeoutId = setTimeout(() => controller.abort(), 600000); const r = await fetch(`${API}/api/kb/upload`, { method: 'POST', body: form, signal: controller.signal }); clearTimeout(timeoutId)
-      const d = await r.json()
-      if (!r.ok) { setError(d.detail || 'Upload gagal'); setUploading(false); return }
+      const d = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open('POST', `${API}/api/kb/upload`)
+        xhr.timeout = 600000
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 100)
+            setUploadProgress(`Mengirim file: ${pct}%`)
+          }
+        }
+        xhr.onload = () => { try { resolve(JSON.parse(xhr.responseText)) } catch(e) { reject(new Error('Invalid response')) } }
+        xhr.onerror = () => reject(new Error('Network error'))
+        xhr.ontimeout = () => reject(new Error('Upload timeout'))
+        xhr.send(form)
+      }).catch(e => { setError(e.message); setUploading(false); return null })
+      if (!d) return
+      if (!d.job_id) { setError(d.detail || 'Upload gagal'); setUploading(false); return }
       const jobId = d.job_id
       if (!jobId) { setError('Tidak ada job_id dari server'); setUploading(false); return }
       const pollSteps = [
