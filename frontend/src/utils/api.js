@@ -1,6 +1,6 @@
 export const BACKEND_URL =
   import.meta.env.VITE_BACKEND_URL ||
-  "https://bismillah-super-trading-terminal-production.up.railway.app";
+  "https://backend-production-daed.up.railway.app";
 
 console.log("[API] BACKEND_URL:", BACKEND_URL);
 
