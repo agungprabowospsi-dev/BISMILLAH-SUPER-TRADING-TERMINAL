@@ -123,6 +123,7 @@ _monitoring_engines = [
     TrendStructureEngine(),
     SupportResistanceEngine(),
     OrderbookEngine(),
+    ForeignFlowEngine(),
 ]
 
 async def run_monitoring_engines(ticker: str, ohlcv: list, mode: str, **kwargs) -> dict:
