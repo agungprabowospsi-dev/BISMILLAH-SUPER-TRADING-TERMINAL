@@ -87,8 +87,14 @@ async def get_company_info(ticker: str) -> dict:
 
 async def get_price_table(ticker: str) -> dict:
     """Price table"""
+    from datetime import datetime
+    today = datetime.now().strftime("%Y-%m-%d")
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/analysis/price-table/{ticker}", headers=_headers())
+        r = await client.get(
+            f"{INVESGO_BASE_URL}/analysis/price-table/{ticker}",
+            headers=_headers(),
+            params={"date": today}
+        )
         r.raise_for_status()
         return r.json()
 
