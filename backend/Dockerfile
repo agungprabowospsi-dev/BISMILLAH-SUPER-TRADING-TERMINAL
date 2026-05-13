@@ -17,4 +17,4 @@ RUN mkdir -p /app/knowledge_base/books /app/knowledge_base/chroma_db
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2"]
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2 --limit-concurrency 100 --timeout-keep-alive 600 --h11-max-incomplete-event-size 104857600"]
