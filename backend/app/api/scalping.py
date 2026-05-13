@@ -34,8 +34,8 @@ async def analyze_scalping_signal(ticker: str, intraday: dict, ohlcv: list) -> d
         freq_ratio = bid_freq / offer_freq if offer_freq > 0 else 1
 
         # Volume analysis dari OHLCV
-        volumes = [c["volume"] for c in ohlcv[-20:]] if ohlcv else [volume]
-        avg_vol = np.mean(volumes) if volumes else volume
+        volumes = [float(c["volume"] or 0) for c in ohlcv[-20:]] if ohlcv else [volume]
+        avg_vol = float(np.mean(volumes)) if volumes else volume
         rvol = volume / avg_vol if avg_vol > 0 else 1
 
         # Change from prev
