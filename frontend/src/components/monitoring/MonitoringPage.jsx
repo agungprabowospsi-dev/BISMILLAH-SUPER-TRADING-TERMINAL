@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Activity, Plus, Trash2, AlertTriangle, Wifi, WifiOff } from 'lucide-react'
+import { Activity, Plus, Trash2, AlertTriangle, WifiOff, ChevronDown, ChevronUp, Brain } from 'lucide-react'
 import clsx from 'clsx'
 
-const BACKEND = 'https://bismillah-super-trading-terminal-production.up.railway.app'
+const BACKEND = 'https://backend-production-daed.up.railway.app'
 const POLL_INTERVAL = 15000
+const STORAGE_KEY = 'bismillah_positions'
 
 async function fetchMarketData(ticker) {
   try {
@@ -40,17 +41,29 @@ async function fetchEngineData(pos) {
 }
 
 export default function MonitoringPage() {
-  const [positions, setPositions] = useState([])
+  const [positions, setPositions] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY)
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
   const [showForm, setShowForm] = useState(false)
   const [backendOnline, setBackendOnline] = useState(null)
+  const [expandedEngines, setExpandedEngines] = useState({})
+  const toggleEngines = (id) => setExpandedEngines(prev => ({...prev, [id]: !prev[id]}))
   const [form, setForm] = useState({
     ticker: '', entry_price: '', stop_loss: '',
     take_profit_1: '', take_profit_2: '', take_profit_3: '', mode: 'DAYTRADING'
   })
   const positionsRef = useRef([])
 
-  // Keep ref in sync
   useEffect(() => { positionsRef.current = positions }, [positions])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(positions))
+    } catch { }
+  }, [positions])
 
   const refreshOne = async (pos) => {
     const [market, engine] = await Promise.all([
@@ -82,7 +95,6 @@ export default function MonitoringPage() {
     }
   }
 
-  // Polling pakai ref — tidak ada closure problem
   useEffect(() => {
     const poll = setInterval(async () => {
       const current = positionsRef.current
@@ -118,7 +130,6 @@ export default function MonitoringPage() {
     }
     setShowForm(false)
     setForm({ ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'DAYTRADING' })
-    // Langsung refresh setelah add
     const enriched = await refreshOne(newPos)
     setPositions(prev => [enriched, ...prev])
   }
@@ -271,6 +282,24 @@ export default function MonitoringPage() {
                   ))}
                 </div>
 
+                {/* TP2 & TP3 */}
+                {(pos.take_profit_2 || pos.take_profit_3) && (
+                  <div className="grid grid-cols-2 gap-2">
+                    {pos.take_profit_2 && (
+                      <div className="bg-bg-secondary rounded p-2 text-center">
+                        <p className="label-xs mb-0.5">TP2</p>
+                        <p className="font-mono text-xs font-bold text-accent-green">{Number(pos.take_profit_2).toLocaleString('id-ID')}</p>
+                      </div>
+                    )}
+                    {pos.take_profit_3 && (
+                      <div className="bg-bg-secondary rounded p-2 text-center">
+                        <p className="label-xs mb-0.5">TP3</p>
+                        <p className="font-mono text-xs font-bold text-accent-green">{Number(pos.take_profit_3).toLocaleString('id-ID')}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* R:R */}
                 {pos.rr && (
                   <div className="grid grid-cols-2 gap-2">
@@ -310,6 +339,47 @@ export default function MonitoringPage() {
                       </div>
                       <div><p className="text-slate-600">Engines</p><p className="text-white font-bold">{pos.engine_context.total_engines||34}</p></div>
                     </div>
+                  </div>
+                )}
+
+                {/* AI Engine Rationale — Collapsible */}
+                {pos.engine_context?.engine_details && Object.keys(pos.engine_context.engine_details).length > 0 && (
+                  <div className="bg-bg-secondary border border-border-dim rounded overflow-hidden">
+                    <button
+                      onClick={() => toggleEngines(pos.id)}
+                      className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/5 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <Brain className="w-3.5 h-3.5 text-accent-green"/>
+                        <p className="label-xs text-accent-green">AI ENGINE RATIONALE</p>
+                      </div>
+                      {expandedEngines[pos.id]
+                        ? <ChevronUp className="w-3.5 h-3.5 text-slate-500"/>
+                        : <ChevronDown className="w-3.5 h-3.5 text-slate-500"/>}
+                    </button>
+                    {expandedEngines[pos.id] && (
+                      <div className="px-3 pb-3 space-y-3 border-t border-border-dim pt-3">
+                        {Object.entries(pos.engine_context.engine_details).map(([eng, v]) => {
+                          const rationale = v?.rationale
+                          if (!rationale || rationale === 'AI analysis temporarily unavailable.') return null
+                          const sig = v?.signal || 'neutral'
+                          const engShort = eng.replace('Engine','')
+                          return (
+                            <div key={eng} className="space-y-1">
+                              <div className="flex items-center justify-between">
+                                <p className="text-[10px] font-mono font-bold text-slate-400 uppercase">{engShort}</p>
+                                <span className={clsx('text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded border',
+                                  sig==='bullish'?'text-accent-green border-accent-green/30 bg-accent-green/5':
+                                  sig==='bearish'?'text-accent-red border-accent-red/30 bg-accent-red/5':
+                                  'text-slate-400 border-slate-600/30 bg-slate-600/5')}>{sig}</span>
+                              </div>
+                              <div className="text-[10px] font-mono text-slate-400 leading-relaxed">
+                                {rationale.replace(/\*\*/g,'').replace(/#+\s/g,'').trim()}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
 
