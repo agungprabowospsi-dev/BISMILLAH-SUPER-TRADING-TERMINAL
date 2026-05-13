@@ -299,7 +299,49 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
             "volume": float(c.get("volume", 0) or 0),
         } for c in ohlcv]
 
-        engine_result = await run_monitoring_engines(ticker, normalized_ohlcv, mode)
+        # Ambil data real dari Invesgo untuk Orderbook + Bandarmology
+        intraday_data = {}
+        broker_data_raw = []
+        try:
+            intraday_data = await invesgo.get_ohlcv_intraday(ticker, market="RG")
+        except Exception as e:
+            logger.warning(f"[INTRADAY] skip for {ticker}: {e}")
+        try:
+            broker_data_raw = await invesgo.get_broker_summary(ticker, investor="all", market="RG")
+        except Exception as e:
+            logger.warning(f"[BROKER] skip for {ticker}: {e}")
+
+        # Format orderbook dari intraday
+        orderbook = {}
+        if intraday_data:
+            bid_price = intraday_data.get("bid_price", 0)
+            offer_price = intraday_data.get("offer_price", 0)
+            bid_lot = intraday_data.get("bid_lot", 0)
+            offer_lot = intraday_data.get("offer_lot", 0)
+            if bid_price and offer_price:
+                orderbook = {
+                    "bids": [[bid_price, bid_lot]],
+                    "asks": [[offer_price, offer_lot]],
+                    "bid_freq": intraday_data.get("bid_freq", 0),
+                    "offer_freq": intraday_data.get("offer_freq", 0),
+                    "spread_pct": round((offer_price - bid_price) / bid_price * 100, 3) if bid_price else 0
+                }
+
+        # Format broker data
+        broker_data = {}
+        if broker_data_raw:
+            sorted_brokers = sorted(broker_data_raw, key=lambda x: float(x.get("net_value", 0) or 0), reverse=True)
+            top_buy = sorted_brokers[:3] if sorted_brokers else []
+            top_sell = sorted(broker_data_raw, key=lambda x: float(x.get("net_value", 0) or 0))[:3]
+            total_net = sum(float(b.get("net_value", 0) or 0) for b in broker_data_raw)
+            broker_data = {
+                "top_broker_net_buy": total_net,
+                "top_buyers": [{"name": b.get("name"), "net_value": float(b.get("net_value", 0) or 0)} for b in top_buy],
+                "top_sellers": [{"name": b.get("name"), "net_value": float(b.get("net_value", 0) or 0)} for b in top_sell],
+                "total_net_value": total_net
+            }
+
+        engine_result = await run_monitoring_engines(ticker, normalized_ohlcv, mode, orderbook=orderbook, broker_data=broker_data)
         logger.warning(f"[DEBUG] engine_result keys: {list(engine_result.keys()) if engine_result else None}")
         logger.warning(f"[DEBUG] engines count: {len(engine_result.get('engines', []))}")
 

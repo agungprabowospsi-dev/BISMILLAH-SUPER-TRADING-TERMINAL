@@ -32,12 +32,13 @@ async def get_ohlcv_daily(ticker: str, period: str = "3mo") -> list:
         r.raise_for_status()
         return r.json()
 
-async def get_ohlcv_intraday(ticker: str, interval: str = "5m") -> list:
-    """OHLCV intraday"""
+async def get_ohlcv_intraday(ticker: str, market: str = "RG") -> dict:
+    """OHLCV intraday + bid/ask real"""
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.get(
             f"{INVESGO_BASE_URL}/analysis/intraday-data/{ticker}",
-            headers=_headers()
+            headers=_headers(),
+            params={"market": market}
         )
         r.raise_for_status()
         return r.json()
@@ -49,10 +50,17 @@ async def get_orderbook(ticker: str) -> dict:
         r.raise_for_status()
         return r.json()
 
-async def get_broker_summary(ticker: str) -> dict:
-    """Broker summary"""
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/analysis/inventory-chart/stock/{ticker}", headers=_headers())
+async def get_broker_summary(ticker: str, investor: str = "all", market: str = "RG") -> list:
+    """Broker net buy/sell real dari BEI"""
+    from datetime import datetime, timedelta
+    today = datetime.now().strftime("%Y-%m-%d")
+    from_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(
+            f"{INVESGO_BASE_URL}/analysis/summary/stock/{ticker}",
+            headers=_headers(),
+            params={"from": from_date, "to": today, "investor": investor, "market": market}
+        )
         r.raise_for_status()
         return r.json()
 
