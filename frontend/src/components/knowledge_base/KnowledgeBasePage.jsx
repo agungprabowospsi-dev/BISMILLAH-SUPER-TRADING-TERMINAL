@@ -174,7 +174,7 @@ export default function KnowledgeBasePage() {
       const form = new FormData()
       form.append('file', file)
       if (description) form.append('description', description)
-      const r = await fetch(`${API}/api/kb/upload`, { method: 'POST', body: form })
+      const controller = new AbortController(); const timeoutId = setTimeout(() => controller.abort(), 600000); const r = await fetch(`${API}/api/kb/upload`, { method: 'POST', body: form, signal: controller.signal }); clearTimeout(timeoutId)
       const d = await r.json()
       if (!r.ok) { setError(d.detail || 'Upload gagal'); setUploading(false); return }
       const jobId = d.job_id
