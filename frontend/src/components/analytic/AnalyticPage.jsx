@@ -247,18 +247,13 @@ export default function AnalyticPage() {
                   </span>
                 </div>
               ))}
-              <button onClick={() => {
-                const data = {
-                  ticker:r.ticker||analyticTicker,
-                  entry_price:r.entry, stop_loss:r.stop_loss||r.sl,
-                  take_profit_1:r.tp1,
-                  take_profit_2:r.tp2, take_profit_3:r.tp3,
-                  mode:analyticMode
-                }
-                localStorage.setItem('pendingMonitor', JSON.stringify(data))
-                window.dispatchEvent(new Event('pendingMonitor'))
-                sendToMonitoring(data)
-              }} className="btn-primary w-full flex items-center justify-center gap-2 mt-2">
+              <button onClick={() => sendToMonitoring({
+                ticker:r.ticker||analyticTicker,
+                entry_price:r.entry, stop_loss:r.stop_loss||r.sl,
+                take_profit_1:r.tp1,
+                take_profit_2:r.tp2, take_profit_3:r.tp3,
+                mode:analyticMode
+              })} className="btn-primary w-full flex items-center justify-center gap-2 mt-2">
                 Monitor Posisi<ArrowRight className="w-4 h-4"/>
               </button>
             </div>

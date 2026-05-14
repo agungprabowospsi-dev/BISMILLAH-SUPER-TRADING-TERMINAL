@@ -49,7 +49,6 @@ export default function MonitoringPage() {
     } catch { return [] }
   })
   const [showForm, setShowForm] = useState(false)
-  const [formReady, setFormReady] = useState(false)
   const [backendOnline, setBackendOnline] = useState(null)
   const [expandedEngines, setExpandedEngines] = useState({})
   const toggleEngines = (id) => setExpandedEngines(prev => ({...prev, [id]: !prev[id]}))
@@ -59,54 +58,21 @@ export default function MonitoringPage() {
   })
   const positionsRef = useRef([])
   const { monitoringInput, setMonitoringInput } = useStore()
-  
-  // Direct check on render - simplest approach
-  if (monitoringInput && !formReady) {
-    const d = monitoringInput
-    setTimeout(() => {
-      setForm({
-        ticker: d.ticker || '',
-        entry_price: String(d.entry_price || ''),
-        stop_loss: String(d.stop_loss || ''),
-        take_profit_1: String(d.take_profit_1 || ''),
-        take_profit_2: String(d.take_profit_2 || ''),
-        take_profit_3: String(d.take_profit_3 || ''),
-        mode: d.mode?.toUpperCase() || 'DAYTRADING'
-      })
-      setShowForm(true)
-      setFormReady(true)
-      setMonitoringInput(null)
-    }, 0)
-  }
-
-  const applyPendingMonitor = () => {
-    const pending = localStorage.getItem('pendingMonitor')
-    if (!pending) return
-    try {
-      const data = JSON.parse(pending)
-      localStorage.removeItem('pendingMonitor')
-      setForm({
-        ticker: data.ticker || '',
-        entry_price: String(data.entry_price || ''),
-        stop_loss: String(data.stop_loss || ''),
-        take_profit_1: String(data.take_profit_1 || ''),
-        take_profit_2: String(data.take_profit_2 || ''),
-        take_profit_3: String(data.take_profit_3 || ''),
-        mode: data.mode?.toUpperCase() || 'DAYTRADING'
-      })
-      setShowForm(true)
-    } catch(e) { console.error(e) }
-  }
 
   useEffect(() => {
-    applyPendingMonitor()
-    window.addEventListener('storage', applyPendingMonitor)
-    window.addEventListener('pendingMonitor', applyPendingMonitor)
-    return () => {
-      window.removeEventListener('storage', applyPendingMonitor)
-      window.removeEventListener('pendingMonitor', applyPendingMonitor)
-    }
-  }, [])
+    if (!monitoringInput) return
+    setForm({
+      ticker: monitoringInput.ticker || '',
+      entry_price: String(monitoringInput.entry_price || ''),
+      stop_loss: String(monitoringInput.stop_loss || ''),
+      take_profit_1: String(monitoringInput.take_profit_1 || ''),
+      take_profit_2: String(monitoringInput.take_profit_2 || ''),
+      take_profit_3: String(monitoringInput.take_profit_3 || ''),
+      mode: (monitoringInput.mode || 'DAYTRADING').toUpperCase()
+    })
+    setShowForm(true)
+  }, [monitoringInput])
+
 
   useEffect(() => { positionsRef.current = positions }, [positions])
 
