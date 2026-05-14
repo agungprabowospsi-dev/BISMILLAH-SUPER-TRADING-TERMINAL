@@ -282,7 +282,11 @@ export default function AnalyticPage() {
                 entry_price:r.entry, stop_loss:r.stop_loss||r.sl,
                 take_profit_1:r.tp1,
                 take_profit_2:r.tp2, take_profit_3:r.tp3,
-                mode:analyticMode
+                mode:analyticMode,
+                final_score:r.score||r.composite_score||50,
+                market_regime:r.market_regime||'SIDEWAYS',
+                engine_scores:r.engines?.engines||{},
+                kb_context:r.rag_used?'rag_active':''
               })} className="btn-primary w-full flex items-center justify-center gap-2 mt-2">
                 Monitor Posisi<ArrowRight className="w-4 h-4"/>
               </button>
