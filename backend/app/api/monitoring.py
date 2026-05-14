@@ -1,3 +1,4 @@
+from app.ml.signal_quality import add_training_sample
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import JSONResponse
 import json
@@ -47,6 +48,13 @@ class MonitoringRequest(BaseModel):
     stop_loss: float
     take_profit: float
     mode: str = "swing"
+    # ML Training fields — diisi otomatis dari Analytic
+    engine_scores: dict = {}
+    market_regime: str = "SIDEWAYS"
+    lq45_change: float = 0.0
+    breadth_ratio: float = 50.0
+    final_score: float = 50.0
+    kb_context: str = ""
 
 _active_monitors = {}
 
@@ -73,9 +81,35 @@ async def get_status(monitoring_id: str):
     if current <= pos["stop_loss"]:
         position_status = "exit"
         warnings.append({"level": "high", "msg": f"STOP LOSS HIT at {current}"})
+        # ML Training — outcome = 0 (loss)
+        try:
+            add_training_sample(
+                engine_scores=pos.get("engine_scores", {}),
+                market_regime=pos.get("market_regime", "SIDEWAYS"),
+                lq45_change=pos.get("lq45_change", 0.0),
+                breadth_ratio=pos.get("breadth_ratio", 50.0),
+                final_score=pos.get("final_score", 50.0),
+                outcome=0,
+                kb_context=pos.get("kb_context", "")
+            )
+        except Exception as ml_err:
+            pass
     elif current >= pos["take_profit"]:
         position_status = "exit"
         warnings.append({"level": "high", "msg": f"TAKE PROFIT HIT at {current}"})
+        # ML Training — outcome = 1 (win)
+        try:
+            add_training_sample(
+                engine_scores=pos.get("engine_scores", {}),
+                market_regime=pos.get("market_regime", "SIDEWAYS"),
+                lq45_change=pos.get("lq45_change", 0.0),
+                breadth_ratio=pos.get("breadth_ratio", 50.0),
+                final_score=pos.get("final_score", 50.0),
+                outcome=1,
+                kb_context=pos.get("kb_context", "")
+            )
+        except Exception as ml_err:
+            pass
     elif current <= pos["entry_price"] * 0.97:
         warnings.append({"level": "medium", "msg": "Price down 3% from entry — monitor closely"})
 
