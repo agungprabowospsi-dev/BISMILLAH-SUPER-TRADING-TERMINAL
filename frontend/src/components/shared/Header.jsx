@@ -11,6 +11,7 @@ const TABS = [
   { id:'scalping', label:'Scalping', icon:Zap },
   { id:'kb', label:'Knowledge Base', icon:BookOpen },
   { id:'backtest', label:'Backtest', icon:Activity },
+  { id:'regime', label:'Market Regime', icon:Activity },
 ]
 
 const TICKERS = [
