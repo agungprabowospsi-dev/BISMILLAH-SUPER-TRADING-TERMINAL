@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { useStore } from '../../stores/useStore'
 import { Activity, Plus, Trash2, AlertTriangle, WifiOff, ChevronDown, ChevronUp, Brain } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -56,6 +57,22 @@ export default function MonitoringPage() {
     take_profit_1: '', take_profit_2: '', take_profit_3: '', mode: 'DAYTRADING'
   })
   const positionsRef = useRef([])
+  const { monitoringInput, setMonitoringInput } = useStore()
+
+  useEffect(() => {
+    if (!monitoringInput) return
+    setForm({
+      ticker: monitoringInput.ticker || '',
+      entry_price: monitoringInput.entry_price || '',
+      stop_loss: monitoringInput.stop_loss || '',
+      take_profit_1: monitoringInput.take_profit_1 || '',
+      take_profit_2: monitoringInput.take_profit_2 || '',
+      take_profit_3: monitoringInput.take_profit_3 || '',
+      mode: monitoringInput.mode?.toUpperCase() || 'DAYTRADING'
+    })
+    setShowForm(true)
+    setMonitoringInput(null)
+  }, [monitoringInput])
 
   useEffect(() => { positionsRef.current = positions }, [positions])
 
