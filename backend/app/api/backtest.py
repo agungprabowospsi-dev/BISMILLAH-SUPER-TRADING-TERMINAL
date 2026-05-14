@@ -407,3 +407,33 @@ async def test_market():
     except Exception as e:
         results["foreign_net"] = str(e)[:100]
     return results
+
+@router.get("/top-test")
+async def test_top():
+    import httpx, os
+    base = os.environ.get("INVESGO_BASE_URL", "https://api.invezgo.com")
+    key = os.environ["INVESGO_API_KEY"]
+    headers = {"Authorization": f"Bearer {key}"}
+    results = {}
+    tests = [
+        ("top-change", {}),
+        ("top-change", {"sort": "gainer"}),
+        ("top-change", {"type": "gainer"}),
+        ("top-change", {"filter": "gainer"}),
+        ("market/top-gainer", {}),
+        ("top-gainer", {}),
+        ("top-change/gainer", {}),
+    ]
+    async with httpx.AsyncClient(timeout=10) as client:
+        for ep, params in tests:
+            try:
+                r = await client.get(f"{base}/analysis/{ep}", headers=headers, params=params)
+                data = r.json()
+                if r.status_code == 200:
+                    count = len(data) if isinstance(data, list) else "dict"
+                    results[f"{ep}?{params}"] = f"✅ {count}"
+                else:
+                    results[f"{ep}?{params}"] = f"❌ {r.status_code}"
+            except Exception as e:
+                results[f"{ep}?{params}"] = f"❌ {str(e)[:40]}"
+    return results
