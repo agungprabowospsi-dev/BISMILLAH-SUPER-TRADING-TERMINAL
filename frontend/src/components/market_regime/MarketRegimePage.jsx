@@ -182,7 +182,7 @@ export default function MarketRegimePage() {
         <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
           <div style={{ background:'#ffffff', border:'1px solid #f8fafc', borderRadius:12, padding:16 }}>
             <div style={{ fontFamily:'monospace', fontSize:11, color:'#64748b', marginBottom:10, display:'flex', justifyContent:'space-between' }}>
-              <span>MARKET BREADTH (LQ45)</span>
+              <span>MARKET BREADTH ({breadth.source || "LQ45"})</span>
               <span style={{ color: breadth.breadth_ratio > 0 ? '#22c55e' : '#ef4444' }}>Ratio: {((breadth.breadth_ratio||0)*100).toFixed(0)}%</span>
             </div>
             <BreadthBar positive={breadth.positive} negative={breadth.negative} neutral={breadth.neutral}/>

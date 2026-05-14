@@ -244,11 +244,34 @@ async def get_market_regime() -> dict:
     # Fetch semua index secara parallel
     await asyncio.gather(*[fetch_index(idx) for idx in ALL_INDICES])
     
-    # Hitung market breadth dari LQ45
+    # Hitung market breadth dari IHSG (semua saham IDX) - fallback ke LQ45
+    ihsg = results.get("IHSG") or {}
     lq45 = results.get("LQ45") or {}
-    positive = lq45.get("positive", 0) or 0
-    negative = lq45.get("negative", 0) or 0
-    neutral = lq45.get("neutral", 0) or 0
+    idxsmc = results.get("IDXSMC") or {}
+
+    # Gunakan IHSG kalau ada data, otherwise aggregate semua index
+    ihsg_pos = ihsg.get("positive", 0) or 0
+    ihsg_neg = ihsg.get("negative", 0) or 0
+    ihsg_neu = ihsg.get("neutral", 0) or 0
+
+    if ihsg_pos + ihsg_neg + ihsg_neu > 0:
+        # IHSG punya data lengkap (900+ saham)
+        positive = ihsg_pos
+        negative = ihsg_neg
+        neutral = ihsg_neu
+        breadth_source = "IDX (All Stocks)"
+    else:
+        # Fallback: aggregate LQ45 + IDXSMC
+        positive = (lq45.get("positive", 0) or 0) + (idxsmc.get("positive", 0) or 0)
+        negative = (lq45.get("negative", 0) or 0) + (idxsmc.get("negative", 0) or 0)
+        neutral = (lq45.get("neutral", 0) or 0) + (idxsmc.get("neutral", 0) or 0)
+        if positive + negative + neutral == 0:
+            positive = lq45.get("positive", 0) or 0
+            negative = lq45.get("negative", 0) or 0
+            neutral = lq45.get("neutral", 0) or 0
+            breadth_source = "LQ45"
+        else:
+            breadth_source = "LQ45 + SMC"
     total = positive + negative + neutral
     
     # Hitung change% dari index yang ada data
@@ -260,7 +283,9 @@ async def get_market_regime() -> dict:
             return ((close - prev) / prev) * 100
         return 0
     
-    lq45_change = calc_change(lq45)
+    # Gunakan IHSG change sebagai main market indicator
+    ihsg_change = calc_change(ihsg)
+    lq45_change = ihsg_change if ihsg_change != 0 else calc_change(lq45)
     
     # Determine regime
     if lq45_change > 1 and positive > negative:
@@ -280,7 +305,8 @@ async def get_market_regime() -> dict:
         "negative": negative,
         "neutral": neutral,
         "total": total,
-        "breadth_ratio": round(positive / total * 100, 1) if total > 0 else 0
+        "breadth_ratio": round(positive / total * 100, 1) if total > 0 else 0,
+        "source": breadth_source
     }
     results["_lq45_change"] = round(lq45_change, 2)
     
