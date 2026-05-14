@@ -238,6 +238,22 @@ export default function AnalyticPage() {
                   )}
                 </div>
               )}
+              {/* WIN PROBABILITY — ML Engine */}
+              {r.win_probability && (
+                <div className="w-full rounded-xl border px-3 py-2 text-center" style={{borderColor: r.win_probability.color+'40', background: r.win_probability.color+'10'}}>
+                  <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">Win Probability</p>
+                  <p className="font-display text-2xl font-bold mt-1" style={{color: r.win_probability.color}}>
+                    {r.win_probability.probability}%
+                  </p>
+                  <div className="flex items-center justify-center gap-2 mt-1">
+                    <span className="font-mono text-xs font-bold px-2 py-0.5 rounded" style={{background: r.win_probability.color+'30', color: r.win_probability.color}}>
+                      Grade {r.win_probability.grade}
+                    </span>
+                    <span className="font-mono text-[10px] text-slate-500">{r.win_probability.grade_label}</span>
+                  </div>
+                  <p className="font-mono text-[9px] text-slate-600 mt-1">{r.win_probability.method}</p>
+                </div>
+              )}
               <div className="w-full">
                 <p className="label-xs mb-1.5">AI Confidence</p>
                 <ConfidenceBar value={r.confidence||r.ai_confidence||0}/>
