@@ -181,3 +181,36 @@ async def test_data(ticker: str):
         }
     except Exception as e:
         return {"error": str(e)}
+
+@router.get("/test-date/{ticker}")
+async def test_date_range(ticker: str):
+    import httpx, os
+    from datetime import datetime, timedelta
+    base = os.environ.get("INVESGO_BASE_URL", "https://api.invezgo.com")
+    key = os.environ["INVESGO_API_KEY"]
+    headers = {"Authorization": f"Bearer {key}"}
+    
+    results = {}
+    # Test berbagai parameter
+    tests = [
+        {"from": "2010-01-01", "to": "2026-01-01"},
+        {"from": "2020-01-01", "to": "2026-01-01"},
+        {"startDate": "2010-01-01", "endDate": "2026-01-01"},
+        {"start": "2010-01-01", "end": "2026-01-01"},
+        {"period": "10y"},
+        {"period": "max"},
+        {"limit": "5000"},
+    ]
+    
+    async with httpx.AsyncClient(timeout=30) as client:
+        for params in tests:
+            try:
+                r = await client.get(f"{base}/analysis/chart/stock/{ticker}", headers=headers, params=params)
+                data = r.json()
+                count = len(data) if isinstance(data, list) else "not list"
+                first = data[0].get("date","?")[:10] if isinstance(data, list) and data else "?"
+                results[str(params)] = f"{count} candles, first={first}"
+            except Exception as e:
+                results[str(params)] = f"ERROR: {str(e)[:50]}"
+    
+    return results
