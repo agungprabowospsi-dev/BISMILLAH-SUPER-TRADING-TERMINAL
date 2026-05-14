@@ -40,7 +40,7 @@ export default function ForeignFlowPage() {
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
           {lastUpdate && <span style={{ fontFamily:'monospace', fontSize:11, color:'#64748b' }}>Update: {lastUpdate.toLocaleTimeString('id-ID')}</span>}
-          <button onClick={fetchData} disabled={loading} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', background:'#f8fafc', border:'1px solid #334155', borderRadius:6, color:'#64748b', cursor:'pointer', fontFamily:'monospace', fontSize:11 }}>
+          <button onClick={fetchData} disabled={loading} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', background:'#f1f5f9', border:'1px solid #334155', borderRadius:6, color:'#64748b', cursor:'pointer', fontFamily:'monospace', fontSize:11 }}>
             <RefreshCw size={12} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }}/>
             {loading ? 'Loading...' : 'Refresh'}
           </button>
@@ -70,14 +70,14 @@ export default function ForeignFlowPage() {
         </div>
 
         {/* Stock Table */}
-        <div style={{ background:'#ffffff', border:'1px solid #f8fafc', borderRadius:12, overflow:'hidden' }}>
-          <div style={{ padding:'12px 16px', borderBottom:'1px solid #f8fafc', fontFamily:'monospace', fontSize:11, color:'#64748b' }}>
+        <div style={{ background:'#ffffff', border:'1px solid #e2e8f0', borderRadius:12, overflow:'hidden' }}>
+          <div style={{ padding:'12px 16px', borderBottom:'1px solid #e2e8f0', fontFamily:'monospace', fontSize:11, color:'#64748b' }}>
             DETAIL PER SAHAM — Net Foreign Buy/Sell (Miliar Rupiah)
           </div>
           <div style={{ overflowX:'auto' }}>
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
               <thead>
-                <tr style={{ background:'#f8fafc' }}>
+                <tr style={{ background:'#f1f5f9' }}>
                   {['SAHAM','SIGNAL','NET (M)','BUY (M)','SELL (M)','TOP BROKER ASING'].map(h => (
                     <th key={h} style={{ padding:'8px 12px', fontFamily:'monospace', fontSize:10, color:'#64748b', textAlign:'left', fontWeight:'normal' }}>{h}</th>
                   ))}
@@ -88,7 +88,7 @@ export default function ForeignFlowPage() {
                   const isBuy = s.signal === 'BUY'
                   const color = isBuy ? '#22c55e' : s.signal === 'SELL' ? '#ef4444' : '#64748b'
                   return (
-                    <tr key={s.ticker} style={{ borderBottom:'1px solid #f8fafc', background: i%2===0 ? 'transparent' : '#1e293b' }}>
+                    <tr key={s.ticker} style={{ borderBottom:'1px solid #e2e8f0', background: i%2===0 ? '#ffffff' : '#f8fafc' }}>
                       <td style={{ padding:'10px 12px', fontFamily:'monospace', fontSize:13, fontWeight:'bold', color:'#1e293b' }}>{s.ticker}</td>
                       <td style={{ padding:'10px 12px' }}>
                         <span style={{ display:'inline-flex', alignItems:'center', gap:4, padding:'2px 8px', borderRadius:4, background:`${color}20`, color, fontFamily:'monospace', fontSize:10, fontWeight:'bold' }}>
