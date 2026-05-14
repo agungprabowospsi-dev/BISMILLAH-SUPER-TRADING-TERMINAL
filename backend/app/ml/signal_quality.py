@@ -8,6 +8,7 @@ import json
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
+from app.ml.kb_features import kb_features_to_array, extract_kb_features
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ _model = None
 _model_meta = {}
 _training_data = []  # Buffer training data dari forward test
 
-def _build_features(engine_scores: Dict, market_regime: str, lq45_change: float, breadth_ratio: float) -> np.ndarray:
+def _build_features(engine_scores: Dict, market_regime: str, lq45_change: float, breadth_ratio: float, kb_context: str = "") -> np.ndarray:
     """Convert engine scores + market context ke feature vector"""
     
     # Regime encoding
@@ -62,6 +63,10 @@ def _build_features(engine_scores: Dict, market_regime: str, lq45_change: float,
         float(high_count) / 34.0,
     ]
     
+    # KB Features — wisdom dari 10+ buku trading
+    kb_feats = kb_features_to_array(kb_context)
+    features = features + kb_feats
+
     return np.array(features, dtype=np.float32)
 
 def _rule_based_probability(engine_scores: Dict, market_regime: str, lq45_change: float, final_score: float) -> float:
@@ -116,7 +121,8 @@ def predict_win_probability(
     market_regime: str = 'SIDEWAYS',
     lq45_change: float = 0.0,
     breadth_ratio: float = 50.0,
-    final_score: float = 0.0
+    final_score: float = 0.0,
+    kb_context: str = ""
 ) -> Dict[str, Any]:
     """
     Prediksi win probability untuk sebuah sinyal trading
@@ -124,15 +130,25 @@ def predict_win_probability(
     """
     global _model
     
+    # KB boost dari knowledge base
+    kb_feats = extract_kb_features(kb_context)
+    kb_boost = (kb_feats.get('kb_overall', 0.5) - 0.5) * 20
+    kb_win_rate = kb_feats.get('kb_win_rate', 0.5)
+    kb_consensus = kb_feats.get('kb_consensus', 0.5)
+
     prob = _rule_based_probability(engine_scores, market_regime, lq45_change, final_score)
-    method = "Rule-Based (KB)"
+    prob += kb_boost
+    prob += (kb_win_rate - 0.5) * 15
+    prob += (kb_consensus - 0.5) * 10
+    prob = max(5.0, min(95.0, prob))
+    method = "Rule-Based + KB (10 buku)"
     confidence = "medium"
     n_samples = len(_training_data)
     
     # Kalau sudah ada ML model (>= 30 sampel forward test)
     if _model is not None and n_samples >= 30:
         try:
-            features = _build_features(engine_scores, market_regime, lq45_change, breadth_ratio)
+            features = _build_features(engine_scores, market_regime, lq45_change, breadth_ratio, kb_context)
             ml_prob = float(_model.predict_proba([features])[0][1]) * 100
             # Blend rule-based + ML
             weight_ml = min(0.8, n_samples / 100)
@@ -172,14 +188,14 @@ def predict_win_probability(
     }
 
 def add_training_sample(engine_scores: Dict, market_regime: str, lq45_change: float, 
-                         breadth_ratio: float, final_score: float, outcome: int):
+                         breadth_ratio: float, final_score: float, outcome: int, kb_context: str = ""):
     """
     Tambah sampel training dari forward test result
     outcome: 1 = win (TP hit), 0 = loss (SL hit)
     """
     global _model, _training_data
     
-    features = _build_features(engine_scores, market_regime, lq45_change, breadth_ratio)
+    features = _build_features(engine_scores, market_regime, lq45_change, breadth_ratio, kb_context)
     _training_data.append((features, outcome))
     
     logger.info(f"Training sample added: outcome={outcome}, total={len(_training_data)}")

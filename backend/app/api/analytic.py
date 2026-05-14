@@ -297,7 +297,8 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
                 market_regime=regime_str,
                 lq45_change=lq45_chg,
                 breadth_ratio=breadth,
-                final_score=float(score)
+                final_score=float(score),
+                kb_context=kb_context if 'kb_context' in locals() else ""
             )
             result["win_probability"] = win_prob
             result["ml_status"] = get_model_status()
