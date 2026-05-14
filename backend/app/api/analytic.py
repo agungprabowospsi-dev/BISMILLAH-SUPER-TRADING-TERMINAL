@@ -367,3 +367,27 @@ async def test_period(ticker: str, period: str):
         return {"period": period, "type": type(data).__name__, "keys": list(data.keys()) if isinstance(data, dict) else None}
     except Exception as e:
         return {"error": str(e)}
+
+@router.get("/market-regime")
+async def get_market_regime_endpoint():
+    try:
+        data = await invesgo.get_market_regime()
+        return {"status": "ok", "data": data}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.get("/top-movers/{sort_type}")
+async def get_top_movers_endpoint(sort_type: str = "gainer"):
+    try:
+        data = await invesgo.get_top_movers(sort=sort_type, limit=20)
+        return {"status": "ok", "data": data}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.get("/financial/{ticker}")
+async def get_financial_endpoint(ticker: str):
+    try:
+        data = await invesgo.get_financial_statement(ticker)
+        return {"status": "ok", "data": data}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
