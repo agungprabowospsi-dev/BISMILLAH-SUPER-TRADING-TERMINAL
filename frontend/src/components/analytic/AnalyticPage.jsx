@@ -208,6 +208,20 @@ export default function AnalyticPage() {
                 <p className="font-mono text-xs text-slate-500 mt-0.5">{r.mode||analyticMode} MODE</p>
               </div>
               {r.signal && <SignalBadge signal={r.signal}/>}
+              {r.market_regime && (
+                <div className={`mt-1 rounded-xl border px-3 py-2 text-center ${
+                  r.market_regime.includes('BULL') ? 'border-accent-green/30 bg-accent-green/10' :
+                  r.market_regime.includes('BEAR') ? 'border-accent-red/30 bg-accent-red/10' :
+                  'border-slate-600/30 bg-slate-600/10'
+                }`}>
+                  <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">Market Regime</p>
+                  <p className={`font-display text-sm font-bold ${
+                    r.market_regime.includes('BULL') ? 'text-accent-green' :
+                    r.market_regime.includes('BEAR') ? 'text-accent-red' :
+                    'text-slate-400'
+                  }`}>{r.market_regime}</p>
+                </div>
+              )}
 
               {r.setup_type && (
                 <div className="mt-1 rounded-xl border border-accent-blue/30 bg-accent-blue/10 px-3 py-2 text-center">
