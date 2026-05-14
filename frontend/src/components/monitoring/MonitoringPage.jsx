@@ -60,21 +60,21 @@ export default function MonitoringPage() {
   const { monitoringInput, setMonitoringInput } = useStore()
 
   useEffect(() => {
-    if (!monitoringInput) return
-    const data = monitoringInput
-    setTimeout(() => {
-      setForm({
-        ticker: data.ticker || '',
-        entry_price: data.entry_price || '',
-        stop_loss: data.stop_loss || '',
-        take_profit_1: data.take_profit_1 || '',
-        take_profit_2: data.take_profit_2 || '',
-        take_profit_3: data.take_profit_3 || '',
-        mode: data.mode?.toUpperCase() || 'DAYTRADING'
-      })
-      setShowForm(true)
-      setMonitoringInput(null)
-    }, 100)
+    const fromSession = sessionStorage.getItem('monitoringInput')
+    const data = monitoringInput || (fromSession ? JSON.parse(fromSession) : null)
+    if (!data) return
+    sessionStorage.removeItem('monitoringInput')
+    setForm({
+      ticker: data.ticker || '',
+      entry_price: data.entry_price || '',
+      stop_loss: data.stop_loss || '',
+      take_profit_1: data.take_profit_1 || '',
+      take_profit_2: data.take_profit_2 || '',
+      take_profit_3: data.take_profit_3 || '',
+      mode: data.mode?.toUpperCase() || 'DAYTRADING'
+    })
+    setShowForm(true)
+    if (monitoringInput) setMonitoringInput(null)
   }, [monitoringInput])
 
   useEffect(() => { positionsRef.current = positions }, [positions])
