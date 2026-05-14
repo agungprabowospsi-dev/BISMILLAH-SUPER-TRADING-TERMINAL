@@ -66,12 +66,12 @@ function BreadthBar({ positive=0, negative=0, neutral=0 }) {
     <div>
       <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
         <span style={{ color:'#22c55e', fontFamily:'monospace', fontSize:12 }}>▲ {positive} ({pct(positive)}%)</span>
-        <span style={{ color:'#94a3b8', fontFamily:'monospace', fontSize:12 }}>— {neutral}</span>
+        <span style={{ color:'#64748b', fontFamily:'monospace', fontSize:12 }}>— {neutral}</span>
         <span style={{ color:'#ef4444', fontFamily:'monospace', fontSize:12 }}>▼ {negative} ({pct(negative)}%)</span>
       </div>
-      <div style={{ display:'flex', height:10, borderRadius:5, overflow:'hidden', background:'#1e293b' }}>
+      <div style={{ display:'flex', height:10, borderRadius:5, overflow:'hidden', background:'#f8fafc' }}>
         <div style={{ width:`${pct(positive)}%`, background:'#22c55e' }}/>
-        <div style={{ width:`${pct(neutral)}%`, background:'#475569' }}/>
+        <div style={{ width:`${pct(neutral)}%`, background:'#64748b' }}/>
         <div style={{ width:`${pct(negative)}%`, background:'#ef4444' }}/>
       </div>
     </div>
@@ -82,15 +82,15 @@ function IndexCard({ code, data }) {
   const label = INDEX_LABELS[code] || code
   const chg = data?.change_pct || 0
   const close = data?.close || 0
-  const color = chg > 0 ? '#22c55e' : chg < 0 ? '#ef4444' : '#94a3b8'
+  const color = chg > 0 ? '#22c55e' : chg < 0 ? '#ef4444' : '#64748b'
   const Icon = chg > 0 ? TrendingUp : chg < 0 ? TrendingDown : Minus
   return (
-    <div style={{ background:'#1e293b', border:'1px solid #334155', borderRadius:8, padding:'10px 12px', display:'flex', flexDirection:'column', gap:4 }}>
+    <div style={{ background:'#f8fafc', border:'1px solid #334155', borderRadius:8, padding:'10px 12px', display:'flex', flexDirection:'column', gap:4 }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-        <span style={{ fontFamily:'monospace', fontSize:11, color:'#94a3b8', fontWeight:'bold' }}>{label}</span>
+        <span style={{ fontFamily:'monospace', fontSize:11, color:'#64748b', fontWeight:'bold' }}>{label}</span>
         <Icon size={12} color={color}/>
       </div>
-      <div style={{ fontFamily:'monospace', fontSize:14, fontWeight:'bold', color:'#f1f5f9' }}>
+      <div style={{ fontFamily:'monospace', fontSize:14, fontWeight:'bold', color:'#1e293b' }}>
         {close > 0 ? close.toFixed(2) : '—'}
       </div>
       <div style={{ fontFamily:'monospace', fontSize:11, color }}>
@@ -108,10 +108,10 @@ function SektoralHeatmap({ sektoral }) {
         const chg = d?.change_pct || 0
         const intensity = Math.min(Math.abs(chg) / 3, 1)
         const bg = chg > 0 ? `rgba(34,197,94,${0.1+intensity*0.5})` : chg < 0 ? `rgba(239,68,68,${0.1+intensity*0.5})` : 'rgba(71,85,105,0.3)'
-        const color = chg > 0 ? '#86efac' : chg < 0 ? '#fca5a5' : '#94a3b8'
+        const color = chg > 0 ? '#86efac' : chg < 0 ? '#fca5a5' : '#64748b'
         return (
           <div key={code} style={{ background:bg, border:`1px solid ${color}30`, borderRadius:6, padding:'8px 6px', textAlign:'center' }}>
-            <div style={{ fontFamily:'monospace', fontSize:9, color:'#94a3b8', marginBottom:2 }}>{SEKTORAL_LABEL[code]||code}</div>
+            <div style={{ fontFamily:'monospace', fontSize:9, color:'#64748b', marginBottom:2 }}>{SEKTORAL_LABEL[code]||code}</div>
             <div style={{ fontFamily:'monospace', fontSize:12, fontWeight:'bold', color }}>
               {chg !== 0 ? `${chg>0?'+':''}${chg.toFixed(1)}%` : '—'}
             </div>
@@ -156,13 +156,13 @@ export default function MarketRegimePage() {
     <div style={{ padding:'16px 20px', maxWidth:1200, margin:'0 auto' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
         <div>
-          <h1 style={{ fontFamily:'monospace', fontSize:18, fontWeight:'bold', color:'#f1f5f9', margin:0 }}>📊 Market Regime Engine</h1>
+          <h1 style={{ fontFamily:'monospace', fontSize:18, fontWeight:'bold', color:'#1e293b', margin:0 }}>📊 Market Regime Engine</h1>
           <p style={{ fontFamily:'monospace', fontSize:11, color:'#64748b', margin:'2px 0 0' }}>20 Index IDX · Real-time Analysis</p>
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
           <span style={{ fontFamily:'monospace', fontSize:11, color:'#64748b' }}>Refresh dalam {countdown}s</span>
           {lastUpdate && <span style={{ fontFamily:'monospace', fontSize:11, color:'#64748b' }}>Update: {lastUpdate.toLocaleTimeString('id-ID')}</span>}
-          <button onClick={fetchData} disabled={loading} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', background:'#1e293b', border:'1px solid #334155', borderRadius:6, color:'#94a3b8', cursor:'pointer', fontFamily:'monospace', fontSize:11 }}>
+          <button onClick={fetchData} disabled={loading} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', background:'#f8fafc', border:'1px solid #334155', borderRadius:6, color:'#64748b', cursor:'pointer', fontFamily:'monospace', fontSize:11 }}>
             <RefreshCw size={12} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }}/>
             {loading ? 'Loading...' : 'Refresh'}
           </button>
@@ -170,7 +170,7 @@ export default function MarketRegimePage() {
       </div>
 
       <div style={{ display:'grid', gridTemplateColumns:'240px 1fr', gap:16, marginBottom:16 }}>
-        <div style={{ background:'#0f172a', border:`1px solid ${cfg.color}40`, borderRadius:12, padding:20, display:'flex', flexDirection:'column', alignItems:'center', gap:12 }}>
+        <div style={{ background:'#ffffff', border:`1px solid ${cfg.color}40`, borderRadius:12, padding:20, display:'flex', flexDirection:'column', alignItems:'center', gap:12 }}>
           <GaugeMeter score={bullScore} regime={regime}/>
           <div style={{ width:'100%' }}>
             <div style={{ fontFamily:'monospace', fontSize:10, color:'#64748b', marginBottom:4 }}>LQ45 CHANGE</div>
@@ -180,7 +180,7 @@ export default function MarketRegimePage() {
           </div>
         </div>
         <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-          <div style={{ background:'#0f172a', border:'1px solid #1e293b', borderRadius:12, padding:16 }}>
+          <div style={{ background:'#ffffff', border:'1px solid #f8fafc', borderRadius:12, padding:16 }}>
             <div style={{ fontFamily:'monospace', fontSize:11, color:'#64748b', marginBottom:10, display:'flex', justifyContent:'space-between' }}>
               <span>MARKET BREADTH (LQ45)</span>
               <span style={{ color: breadth.breadth_ratio > 0 ? '#22c55e' : '#ef4444' }}>Ratio: {((breadth.breadth_ratio||0)*100).toFixed(0)}%</span>
@@ -193,11 +193,11 @@ export default function MarketRegimePage() {
         </div>
       </div>
 
-      <div style={{ background:'#0f172a', border:'1px solid #1e293b', borderRadius:12, padding:16 }}>
+      <div style={{ background:'#ffffff', border:'1px solid #f8fafc', borderRadius:12, padding:16 }}>
         <div style={{ fontFamily:'monospace', fontSize:11, color:'#64748b', marginBottom:12 }}>SEKTORAL HEATMAP (11 Sektor IDX)</div>
         <SektoralHeatmap sektoral={sektoral}/>
         {Object.keys(sektoral).length === 0 && (
-          <div style={{ fontFamily:'monospace', fontSize:12, color:'#475569', textAlign:'center', padding:20 }}>Pasar tutup — data sektoral tidak tersedia</div>
+          <div style={{ fontFamily:'monospace', fontSize:12, color:'#64748b', textAlign:'center', padding:20 }}>Pasar tutup — data sektoral tidak tersedia</div>
         )}
       </div>
       <style>{`@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>

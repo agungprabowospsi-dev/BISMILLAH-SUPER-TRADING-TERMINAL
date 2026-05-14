@@ -31,7 +31,7 @@ export default function ForeignFlowPage() {
       {/* Header */}
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
         <div>
-          <h1 style={{ fontFamily:'monospace', fontSize:18, fontWeight:'bold', color:'#f1f5f9', margin:0 }}>
+          <h1 style={{ fontFamily:'monospace', fontSize:18, fontWeight:'bold', color:'#1e293b', margin:0 }}>
             🌏 Foreign Flow Dashboard
           </h1>
           <p style={{ fontFamily:'monospace', fontSize:11, color:'#64748b', margin:'2px 0 0' }}>
@@ -40,7 +40,7 @@ export default function ForeignFlowPage() {
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
           {lastUpdate && <span style={{ fontFamily:'monospace', fontSize:11, color:'#64748b' }}>Update: {lastUpdate.toLocaleTimeString('id-ID')}</span>}
-          <button onClick={fetchData} disabled={loading} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', background:'#1e293b', border:'1px solid #334155', borderRadius:6, color:'#94a3b8', cursor:'pointer', fontFamily:'monospace', fontSize:11 }}>
+          <button onClick={fetchData} disabled={loading} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', background:'#f8fafc', border:'1px solid #334155', borderRadius:6, color:'#64748b', cursor:'pointer', fontFamily:'monospace', fontSize:11 }}>
             <RefreshCw size={12} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }}/>
             {loading ? 'Loading...' : 'Refresh'}
           </button>
@@ -62,7 +62,7 @@ export default function ForeignFlowPage() {
             { label:'NET FOREIGN', value:`${summary.total_net > 0 ? '+' : ''}${summary.total_net?.toLocaleString('id-ID')} M`, color: summary.total_net >= 0 ? '#22c55e' : '#ef4444' },
             { label:'SIGNAL', value: summary.signal, color: isNetBuy ? '#22c55e' : '#ef4444' },
           ].map((c,i) => (
-            <div key={i} style={{ background:'#0f172a', border:`1px solid ${c.color}30`, borderRadius:10, padding:'14px 16px' }}>
+            <div key={i} style={{ background:'#ffffff', border:`1px solid ${c.color}30`, borderRadius:10, padding:'14px 16px' }}>
               <div style={{ fontFamily:'monospace', fontSize:9, color:'#64748b', marginBottom:6 }}>{c.label}</div>
               <div style={{ fontFamily:'monospace', fontSize:16, fontWeight:'bold', color: c.color }}>{c.value}</div>
             </div>
@@ -70,14 +70,14 @@ export default function ForeignFlowPage() {
         </div>
 
         {/* Stock Table */}
-        <div style={{ background:'#0f172a', border:'1px solid #1e293b', borderRadius:12, overflow:'hidden' }}>
-          <div style={{ padding:'12px 16px', borderBottom:'1px solid #1e293b', fontFamily:'monospace', fontSize:11, color:'#64748b' }}>
+        <div style={{ background:'#ffffff', border:'1px solid #f8fafc', borderRadius:12, overflow:'hidden' }}>
+          <div style={{ padding:'12px 16px', borderBottom:'1px solid #f8fafc', fontFamily:'monospace', fontSize:11, color:'#64748b' }}>
             DETAIL PER SAHAM — Net Foreign Buy/Sell (Miliar Rupiah)
           </div>
           <div style={{ overflowX:'auto' }}>
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
               <thead>
-                <tr style={{ background:'#1e293b' }}>
+                <tr style={{ background:'#f8fafc' }}>
                   {['SAHAM','SIGNAL','NET (M)','BUY (M)','SELL (M)','TOP BROKER ASING'].map(h => (
                     <th key={h} style={{ padding:'8px 12px', fontFamily:'monospace', fontSize:10, color:'#64748b', textAlign:'left', fontWeight:'normal' }}>{h}</th>
                   ))}
@@ -86,10 +86,10 @@ export default function ForeignFlowPage() {
               <tbody>
                 {stocks.map((s, i) => {
                   const isBuy = s.signal === 'BUY'
-                  const color = isBuy ? '#22c55e' : s.signal === 'SELL' ? '#ef4444' : '#94a3b8'
+                  const color = isBuy ? '#22c55e' : s.signal === 'SELL' ? '#ef4444' : '#64748b'
                   return (
-                    <tr key={s.ticker} style={{ borderBottom:'1px solid #1e293b', background: i%2===0 ? 'transparent' : '#0a0f1a' }}>
-                      <td style={{ padding:'10px 12px', fontFamily:'monospace', fontSize:13, fontWeight:'bold', color:'#f1f5f9' }}>{s.ticker}</td>
+                    <tr key={s.ticker} style={{ borderBottom:'1px solid #f8fafc', background: i%2===0 ? 'transparent' : '#1e293b' }}>
+                      <td style={{ padding:'10px 12px', fontFamily:'monospace', fontSize:13, fontWeight:'bold', color:'#1e293b' }}>{s.ticker}</td>
                       <td style={{ padding:'10px 12px' }}>
                         <span style={{ display:'inline-flex', alignItems:'center', gap:4, padding:'2px 8px', borderRadius:4, background:`${color}20`, color, fontFamily:'monospace', fontSize:10, fontWeight:'bold' }}>
                           {isBuy ? <TrendingUp size={10}/> : <TrendingDown size={10}/>}
@@ -118,7 +118,7 @@ export default function ForeignFlowPage() {
           </div>
         </div>
 
-        <div style={{ marginTop:10, fontFamily:'monospace', fontSize:10, color:'#475569', textAlign:'center' }}>
+        <div style={{ marginTop:10, fontFamily:'monospace', fontSize:10, color:'#64748b', textAlign:'center' }}>
           ⚠️ Data kumulatif 30 hari dari Broker Summary BEI. Broker asing: UBS, JP Morgan, Macquarie, Kim Eng, Deutsche, Morgan Stanley, DBS, Citi, Mirae.
         </div>
       </>}
