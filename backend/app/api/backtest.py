@@ -384,3 +384,26 @@ async def test_date_range(ticker: str):
             except Exception as e:
                 results[str(params)] = f"ERROR: {str(e)[:50]}"
     return results
+
+@router.get("/market-test")
+async def test_market():
+    from app.core import invesgo
+    results = {}
+    try:
+        results["market_summary"] = await invesgo.get_market_summary()
+    except Exception as e:
+        results["market_summary"] = str(e)[:100]
+    try:
+        results["sector_rotation"] = await invesgo.get_sector_rotation()
+    except Exception as e:
+        results["sector_rotation"] = str(e)[:100]
+    try:
+        composite = await invesgo.get_chart_composite()
+        results["composite_candles"] = len(composite) if isinstance(composite, list) else composite
+    except Exception as e:
+        results["composite_candles"] = str(e)[:100]
+    try:
+        results["foreign_net"] = await invesgo.get_foreign_net()
+    except Exception as e:
+        results["foreign_net"] = str(e)[:100]
+    return results
