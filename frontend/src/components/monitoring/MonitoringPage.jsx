@@ -61,9 +61,11 @@ export default function MonitoringPage() {
       take_profit_1: String(mi.take_profit_1 || ''),
       take_profit_2: String(mi.take_profit_2 || ''),
       take_profit_3: String(mi.take_profit_3 || ''),
-      mode: (mi.mode || 'DAYTRADING').toUpperCase()
+      mode: (mi.mode || 'DAYTRADING').toUpperCase(),
+      lot: String(mi.lot || ''),
+      broker: mi.broker || ''
     }
-    return { ticker: '', entry_price: '', stop_loss: '', take_profit_1: '', take_profit_2: '', take_profit_3: '', mode: 'DAYTRADING' }
+    return { ticker: '', entry_price: '', stop_loss: '', take_profit_1: '', take_profit_2: '', take_profit_3: '', mode: 'DAYTRADING', lot: '', broker: '' }
   })
   const positionsRef = useRef([])
   const { monitoringInput, setMonitoringInput } = useStore()
@@ -113,6 +115,7 @@ export default function MonitoringPage() {
       volume_signal: market?.volume_signal || pos.volume_signal,
       pnl: pnlAmt,
       pnl_pct: pnlPct,
+      pnl_rupiah: pnlAmt * (pos.lot || 1) * 100,
       status,
       institutional_alerts: engine?.institutional_alerts ?? pos.institutional_alerts,
       engine_context: engine?.engine_context ?? pos.engine_context,
@@ -150,13 +153,16 @@ export default function MonitoringPage() {
       take_profit_3: parseFloat(form.take_profit_3) || null,
       mode: form.mode,
       current_price: entry,
+      lot: parseFloat(form.lot) || 1,
+      broker: form.broker || '',
+      modal: entry * (parseFloat(form.lot) || 1) * 100,
       name: ticker,
       status: 'HOLD',
       pnl: 0, pnl_pct: 0,
       institutional_alerts: [], engine_context: null, warnings: [], rr: null,
     }
     setShowForm(false)
-    setForm({ ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'DAYTRADING' })
+    setForm({ ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'DAYTRADING',lot:'',broker:'' })
     const enriched = await refreshOne(newPos)
     setPositions(prev => [enriched, ...prev])
   }
@@ -203,6 +209,8 @@ export default function MonitoringPage() {
               ['Take Profit 1','take_profit_1','text','6400'],
               ['Take Profit 2','take_profit_2','text','6700'],
               ['Take Profit 3','take_profit_3','text','7000'],
+              ['Lot (lembar/100) *','lot','text','10'],
+              ['Broker','broker','text','BCA Sekuritas'],
             ].map(([label,key,type,ph]) => (
               <div key={key}>
                 <label className="label-xs block mb-1.5">{label}</label>
@@ -343,6 +351,31 @@ export default function MonitoringPage() {
                     </div>
                   </div>
                 )}
+
+                {/* Modal & Forward Test Info */}
+                <div className="bg-bg-secondary border border-border-dim rounded p-3 space-y-2">
+                  <p className="label-xs text-accent-gold">💰 FORWARD TEST INFO</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <p className="label-xs">Modal</p>
+                      <p className="font-mono text-xs font-bold text-white">Rp {Number((pos.modal || pos.entry_price * (pos.lot||1) * 100) || 0).toLocaleString('id-ID')}</p>
+                    </div>
+                    <div>
+                      <p className="label-xs">Lot</p>
+                      <p className="font-mono text-xs font-bold text-white">{pos.lot || 1} lot ({((pos.lot||1)*100).toLocaleString('id-ID')} lembar)</p>
+                    </div>
+                    <div>
+                      <p className="label-xs">P&L Rupiah</p>
+                      <p className={clsx('font-mono text-xs font-bold', (pos.pnl_rupiah||pos.pnl*100) > 0 ? 'text-accent-green' : (pos.pnl_rupiah||pos.pnl*100) < 0 ? 'text-accent-red' : 'text-slate-400')}>
+                        {(pos.pnl_rupiah||0) >= 0 ? '+' : ''}Rp {Number(pos.pnl_rupiah || (pos.pnl * (pos.lot||1) * 100) || 0).toLocaleString('id-ID')}
+                      </p>
+                    </div>
+                    {pos.broker && <div>
+                      <p className="label-xs">Broker</p>
+                      <p className="font-mono text-xs font-bold text-white">{pos.broker}</p>
+                    </div>}
+                  </div>
+                </div>
 
                 {/* Engine Context */}
                 {pos.engine_context && (
