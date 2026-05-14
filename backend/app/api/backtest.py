@@ -14,29 +14,27 @@ class BacktestRequest(BaseModel):
 @router.post("/run")
 async def run_backtest(req: BacktestRequest):
     try:
-        import yfinance as yf
-        import pandas as pd
         from app.engines.master_runner import run_all_engines
         from app.knowledge_base import kb_service
+        from app.core import invesgo
 
-        # 1. Ambil data historis
-        ticker_yf = f"{req.ticker.upper()}.JK"
-        df = yf.download(ticker_yf, period=req.period, interval="1d", progress=False)
-        
-        if df.empty or len(df) < 30:
+        # 1. Ambil data historis dari Invesgo (support 15 tahun)
+        raw = await invesgo.get_ohlcv_daily(req.ticker, period=req.period)
+        if not raw or len(raw) < 30:
             return {"error": f"Data tidak cukup untuk {req.ticker}"}
 
         # 2. Convert ke format OHLCV
         candles = []
-        for date, row in df.iterrows():
+        for c in raw:
             candles.append({
-                "date": str(date.date()),
-                "open": float(row["Open"]),
-                "high": float(row["High"]),
-                "low": float(row["Low"]),
-                "close": float(row["Close"]),
-                "volume": float(row["Volume"])
+                "date": str(c.get("date",""))[:10],
+                "open": float(c.get("open") or 0),
+                "high": float(c.get("high") or 0),
+                "low": float(c.get("low") or 0),
+                "close": float(c.get("close") or 0),
+                "volume": float(c.get("volume") or 0)
             })
+
 
         # 3. Rolling backtest - window 60 candles
         WINDOW = 60
