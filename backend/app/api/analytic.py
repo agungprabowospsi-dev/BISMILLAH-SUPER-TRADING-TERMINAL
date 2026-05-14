@@ -2,6 +2,7 @@
 from fastapi import APIRouter as _R, HTTPException
 from fastapi.responses import JSONResponse
 import numpy as np
+from app.ml.signal_quality import predict_win_probability, get_model_status
 from pydantic import BaseModel
 from app.core import invesgo
 from app.engines.master_runner import run_all_engines
@@ -285,6 +286,23 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "rag_context_count": len(kb_parts) if "kb_parts" in locals() else 0,
             "rag_engines": analytic_engines if "analytic_engines" in locals() else [],
         }
+
+        # ML — Win Probability
+        try:
+            regime_str = regime if 'regime' in dir() else 'SIDEWAYS'
+            lq45_chg = float(all_engines.get('_lq45_change', 0) or 0)
+            breadth = float(all_engines.get('_breadth', {}).get('breadth_ratio', 50) or 50)
+            win_prob = predict_win_probability(
+                engine_scores=all_engines.get('engines', {}),
+                market_regime=regime_str,
+                lq45_change=lq45_chg,
+                breadth_ratio=breadth,
+                final_score=float(score)
+            )
+            result["win_probability"] = win_prob
+            result["ml_status"] = get_model_status()
+        except Exception as e:
+            result["win_probability"] = {"probability": 50.0, "grade": "C", "grade_label": "Moderate", "color": "#fbbf24", "method": "fallback", "error": str(e)}
         return JSONResponse(content=_json.loads(_json.dumps(result, cls=NumpyEncoder)))
     except HTTPException:
         raise
@@ -394,6 +412,7 @@ async def market_context(ticker: str):
 
 def _calc_atr(ohlcv, period=14):
     import numpy as np
+from app.ml.signal_quality import predict_win_probability, get_model_status
     trs = []
     for i in range(1, len(ohlcv)):
         h, l, pc = ohlcv[i]["high"], ohlcv[i]["low"], ohlcv[i-1]["close"]
