@@ -437,3 +437,32 @@ async def test_top():
             except Exception as e:
                 results[f"{ep}?{params}"] = f"❌ {str(e)[:40]}"
     return results
+
+@router.get("/index-test")
+async def test_all_indices():
+    import httpx, os
+    base = os.environ.get("INVESGO_BASE_URL", "https://api.invezgo.com")
+    key = os.environ["INVESGO_API_KEY"]
+    headers = {"Authorization": f"Bearer {key}"}
+    results = {}
+    
+    indices = [
+        "IHSG","LQ45","IDX30","IDXSMC","IDXBUMN",
+        "IDXVESTA","IDXG30","IDXHIDIV","IDXESGL",
+        "IDXBASIC","IDXCYC","IDXNONCYC","IDXENERGY",
+        "IDXFINANCE","IDXHEALTH","IDXINDUST","IDXINFRA",
+        "IDXPROPERT","IDXTECHNO","IDXTRANS"
+    ]
+    
+    async with httpx.AsyncClient(timeout=15) as client:
+        for idx in indices:
+            try:
+                r = await client.get(f"{base}/analysis/intraday-index/{idx}", headers=headers)
+                if r.status_code == 200:
+                    d = r.json()
+                    results[idx] = f"✅ close={d.get('close')} chg={d.get('change_pct','?')}"
+                else:
+                    results[idx] = f"❌ {r.status_code}"
+            except Exception as e:
+                results[idx] = f"❌ {str(e)[:30]}"
+    return results
