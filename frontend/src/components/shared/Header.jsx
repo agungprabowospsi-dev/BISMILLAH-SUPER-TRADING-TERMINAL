@@ -13,6 +13,7 @@ const TABS = [
   { id:'backtest', label:'Backtest', icon:Activity },
   { id:'regime', label:'Market Regime', icon:Activity },
   { id:'foreignflow', label:'Foreign Flow', icon:TrendingUp },
+  { id:'enhancement', label:'Enhancement', icon:Activity },
 ]
 
 const TICKERS = [

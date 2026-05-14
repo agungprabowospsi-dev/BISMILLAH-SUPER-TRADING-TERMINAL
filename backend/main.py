@@ -8,6 +8,7 @@ from app.core.redis_client import init_redis
 from app.core.knowledge_base import init_knowledge_base
 from app.api import screener, analytic, monitoring, scalping, health, backtest
 from app.api import knowledge_base as kb_api
+from app.api import enhancement as enhancement_api
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -45,3 +46,4 @@ app.include_router(monitoring.router, prefix="/api/monitoring")
 app.include_router(scalping.router, prefix="/ws")
 app.include_router(scalping.router, prefix="/api")
 app.include_router(kb_api.router)
+app.include_router(enhancement_api.router)

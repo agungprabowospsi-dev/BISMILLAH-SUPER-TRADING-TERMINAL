@@ -8,6 +8,7 @@ import KnowledgeBasePage from './components/knowledge_base/KnowledgeBasePage'
 import BacktestPage from './components/backtest/BacktestPage'
 import MarketRegimePage from './components/market_regime/MarketRegimePage'
 import ForeignFlowPage from './components/market_regime/ForeignFlowPage'
+import EnhancementPage from './components/enhancement/EnhancementPage'
 import { useStore } from './stores/useStore'
 
 export default function App() {
@@ -24,6 +25,7 @@ export default function App() {
         {activeTab==='backtest' && <BacktestPage/>}
         {activeTab==='regime' && <MarketRegimePage/>}
         {activeTab==='foreignflow' && <ForeignFlowPage/>}
+        {activeTab==='enhancement' && <EnhancementPage/>}
       </main>
       <footer style={{ borderTop: '1px solid #e2e8f0', marginTop: 32, padding: '12px 24px', display: 'flex', justifyContent: 'space-between' }}>
         <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#94a3b8' }}>BISMILLAH SUPER TRADING TERMINAL v1.0</span>
