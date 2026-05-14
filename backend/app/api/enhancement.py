@@ -46,7 +46,7 @@ class ExecRequest(BaseModel):
 async def enhancement_chat(req: ChatRequest):
     try:
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-5",
             max_tokens=3000,
             system=SYSTEM_PROMPT,
             messages=[{"role": m.role, "content": m.content} for m in req.messages]
