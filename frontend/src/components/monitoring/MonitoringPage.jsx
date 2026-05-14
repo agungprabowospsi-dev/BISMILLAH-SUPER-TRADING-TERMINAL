@@ -49,6 +49,7 @@ export default function MonitoringPage() {
     } catch { return [] }
   })
   const [showForm, setShowForm] = useState(false)
+  const [formReady, setFormReady] = useState(false)
   const [backendOnline, setBackendOnline] = useState(null)
   const [expandedEngines, setExpandedEngines] = useState({})
   const toggleEngines = (id) => setExpandedEngines(prev => ({...prev, [id]: !prev[id]}))
@@ -58,6 +59,25 @@ export default function MonitoringPage() {
   })
   const positionsRef = useRef([])
   const { monitoringInput, setMonitoringInput } = useStore()
+  
+  // Direct check on render - simplest approach
+  if (monitoringInput && !formReady) {
+    const d = monitoringInput
+    setTimeout(() => {
+      setForm({
+        ticker: d.ticker || '',
+        entry_price: String(d.entry_price || ''),
+        stop_loss: String(d.stop_loss || ''),
+        take_profit_1: String(d.take_profit_1 || ''),
+        take_profit_2: String(d.take_profit_2 || ''),
+        take_profit_3: String(d.take_profit_3 || ''),
+        mode: d.mode?.toUpperCase() || 'DAYTRADING'
+      })
+      setShowForm(true)
+      setFormReady(true)
+      setMonitoringInput(null)
+    }, 0)
+  }
 
   const applyPendingMonitor = () => {
     const pending = localStorage.getItem('pendingMonitor')
