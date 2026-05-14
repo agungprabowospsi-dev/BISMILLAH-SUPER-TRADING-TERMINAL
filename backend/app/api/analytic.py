@@ -357,3 +357,13 @@ def _calc_atr(ohlcv, period=14):
         h, l, pc = ohlcv[i]["high"], ohlcv[i]["low"], ohlcv[i-1]["close"]
         trs.append(max(h - l, abs(h - pc), abs(l - pc)))
     return np.mean(trs[-period:]) if trs else ohlcv[-1]["close"] * 0.02
+
+@router.get("/test-period/{ticker}/{period}")
+async def test_period(ticker: str, period: str):
+    try:
+        data = await invesgo.get_ohlcv_daily(ticker, period=period)
+        if isinstance(data, list):
+            return {"period": period, "candles": len(data), "first": data[0] if data else None, "last": data[-1] if data else None}
+        return {"period": period, "type": type(data).__name__, "keys": list(data.keys()) if isinstance(data, dict) else None}
+    except Exception as e:
+        return {"error": str(e)}
