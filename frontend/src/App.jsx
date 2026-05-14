@@ -5,6 +5,7 @@ import AnalyticPage from './components/analytic/AnalyticPage'
 import MonitoringPage from './components/monitoring/MonitoringPage'
 import ScalpingPage from './components/scalping/ScalpingPage'
 import KnowledgeBasePage from './components/knowledge_base/KnowledgeBasePage'
+import BacktestPage from './components/backtest/BacktestPage'
 import { useStore } from './stores/useStore'
 
 export default function App() {
@@ -18,6 +19,7 @@ export default function App() {
         {activeTab==='monitoring' && <MonitoringPage/>}
         {activeTab==='scalping' && <ScalpingPage/>}
         {activeTab==='kb' && <KnowledgeBasePage/>}
+        {activeTab==='backtest' && <BacktestPage/>}
       </main>
       <footer style={{ borderTop: '1px solid #e2e8f0', marginTop: 32, padding: '12px 24px', display: 'flex', justifyContent: 'space-between' }}>
         <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#94a3b8' }}>BISMILLAH SUPER TRADING TERMINAL v1.0</span>

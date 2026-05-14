@@ -10,6 +10,7 @@ const TABS = [
   { id:'monitoring', label:'Monitoring', icon:Activity },
   { id:'scalping', label:'Scalping', icon:Zap },
   { id:'kb', label:'Knowledge Base', icon:BookOpen },
+  { id:'backtest', label:'Backtest', icon:Activity },
 ]
 
 const TICKERS = [
