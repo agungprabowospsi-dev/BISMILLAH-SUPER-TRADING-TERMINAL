@@ -433,3 +433,98 @@ async def get_financial_endpoint(ticker: str):
         return {"status": "ok", "data": data}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+# ============ FOREIGN FLOW DASHBOARD ============
+LQ45_STOCKS = [
+    "BBCA","BBRI","BMRI","TLKM","ASII","BYAN","GOTO","UNVR",
+    "ICBP","INDF","ANTM","PTBA","ADRO","ESSA","SMGR","PGAS",
+    "EXCL","KLBF","MAPI","SIDO"
+]
+
+# Broker asing yang dikenal di IDX
+FOREIGN_BROKERS = {
+    "YP":"Indo Premier","BK":"J.P Morgan","RX":"Macquarie",
+    "ZP":"Kim Eng","AK":"UBS","CC":"Mandiri","DB":"Deutsche",
+    "MS":"Morgan Stanley","CS":"Credit Suisse","ML":"Merrill Lynch",
+    "DP":"DBS Vickers","KI":"Citi","OD":"Mirae","LG":"Trimegah"
+}
+
+@router.get("/foreign-flow")
+async def get_foreign_flow_dashboard():
+    import asyncio
+    from app.core import invesgo
+
+    async def fetch_broker(ticker):
+        try:
+            data = await invesgo.get_broker_summary(ticker)
+            return ticker, data
+        except:
+            return ticker, []
+
+    # Fetch 10 saham LQ45 terbesar secara parallel
+    tasks = [fetch_broker(t) for t in LQ45_STOCKS[:10]]
+    results = await asyncio.gather(*tasks)
+
+    stocks = []
+    total_foreign_buy = 0
+    total_foreign_sell = 0
+
+    for ticker, brokers in results:
+        if not brokers:
+            continue
+
+        # Filter broker asing
+        foreign_net = 0
+        foreign_buy = 0
+        foreign_sell = 0
+        top_foreign = []
+
+        for b in brokers:
+            code = b.get("code","")
+            if code in FOREIGN_BROKERS:
+                net = float(b.get("net_value",0) or 0)
+                buy = float(b.get("buy_value",0) or 0)
+                sell = float(b.get("sell_value",0) or 0)
+                foreign_net += net
+                foreign_buy += buy
+                foreign_sell += sell
+                top_foreign.append({
+                    "broker": code,
+                    "name": FOREIGN_BROKERS[code],
+                    "net_value": net,
+                    "buy_value": buy,
+                    "sell_value": sell
+                })
+
+        # Sort by abs net value
+        top_foreign.sort(key=lambda x: abs(x["net_value"]), reverse=True)
+
+        total_foreign_buy += foreign_buy
+        total_foreign_sell += foreign_sell
+
+        stocks.append({
+            "ticker": ticker,
+            "foreign_net": round(foreign_net/1e9, 2),
+            "foreign_buy": round(foreign_buy/1e9, 2),
+            "foreign_sell": round(foreign_sell/1e9, 2),
+            "signal": "BUY" if foreign_net > 0 else "SELL" if foreign_net < 0 else "NEUTRAL",
+            "top_brokers": top_foreign[:3]
+        })
+
+    # Sort by foreign net
+    stocks.sort(key=lambda x: x["foreign_net"], reverse=True)
+
+    return {
+        "status": "ok",
+        "data": {
+            "summary": {
+                "total_foreign_buy": round(total_foreign_buy/1e9, 2),
+                "total_foreign_sell": round(total_foreign_sell/1e9, 2),
+                "total_net": round((total_foreign_buy-total_foreign_sell)/1e9, 2),
+                "signal": "NET BUY" if total_foreign_buy > total_foreign_sell else "NET SELL"
+            },
+            "stocks": stocks,
+            "universe": "LQ45 Top 10",
+            "period": "30 hari terakhir"
+        }
+    }
