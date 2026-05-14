@@ -12,6 +12,7 @@ const TABS = [
   { id:'kb', label:'Knowledge Base', icon:BookOpen },
   { id:'backtest', label:'Backtest', icon:Activity },
   { id:'regime', label:'Market Regime', icon:Activity },
+  { id:'foreignflow', label:'Foreign Flow', icon:TrendingUp },
 ]
 
 const TICKERS = [
