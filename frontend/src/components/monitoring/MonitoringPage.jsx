@@ -67,6 +67,7 @@ export default function MonitoringPage() {
   })
   const positionsRef = useRef([])
   const { monitoringInput, setMonitoringInput } = useStore()
+  console.log('[MONITORING] monitoringInput:', monitoringInput, 'showForm:', showForm)
 
   useEffect(() => {
     if (!monitoringInput) return
