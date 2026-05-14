@@ -323,7 +323,6 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
 @router.get("/market-context/{ticker}")
 async def market_context(ticker: str):
     """4 box: price, volume, company, technical"""
-    import json as _json
 
     class NumpyEncoder(_json.JSONEncoder):
         def default(self, obj):
@@ -421,7 +420,6 @@ async def market_context(ticker: str):
 
 def _calc_atr(ohlcv, period=14):
     import numpy as np
-from app.ml.signal_quality import predict_win_probability, get_model_status
     trs = []
     for i in range(1, len(ohlcv)):
         h, l, pc = ohlcv[i]["high"], ohlcv[i]["low"], ohlcv[i-1]["close"]
