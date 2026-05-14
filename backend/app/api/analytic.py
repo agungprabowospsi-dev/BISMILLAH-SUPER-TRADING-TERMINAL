@@ -289,11 +289,18 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
 
         # ML — Win Probability
         try:
-            regime_str = regime if 'regime' in dir() else 'SIDEWAYS'
-            lq45_chg = float(all_engines.get('_lq45_change', 0) or 0)
-            breadth = float(all_engines.get('_breadth', {}).get('breadth_ratio', 50) or 50)
+            regime_str = str(result.get("market_regime", "SIDEWAYS"))
+            lq45_chg = 0.0
+            breadth = 50.0
+            eng_list = all_engines.get('engines', [])
+            eng_dict = {}
+            if isinstance(eng_list, list):
+                for e in eng_list:
+                    eng_dict[e.get('engine','?')] = e.get('score', 0)
+            elif isinstance(eng_list, dict):
+                eng_dict = eng_list
             win_prob = predict_win_probability(
-                engine_scores=all_engines.get('engines', {}),
+                engine_scores=eng_dict,
                 market_regime=regime_str,
                 lq45_change=lq45_chg,
                 breadth_ratio=breadth,
@@ -303,7 +310,8 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             result["win_probability"] = win_prob
             result["ml_status"] = get_model_status()
         except Exception as e:
-            result["win_probability"] = {"probability": 50.0, "grade": "C", "grade_label": "Moderate", "color": "#fbbf24", "method": "fallback", "error": str(e)}
+            import traceback
+            result["win_probability"] = {"probability": 50.0, "grade": "C", "grade_label": "Moderate", "color": "#fbbf24", "method": "fallback", "error": str(e), "trace": traceback.format_exc()[:200]}
         return JSONResponse(content=_json.loads(_json.dumps(result, cls=NumpyEncoder)))
     except HTTPException:
         raise
