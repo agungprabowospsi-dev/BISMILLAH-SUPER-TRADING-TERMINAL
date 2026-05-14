@@ -160,6 +160,10 @@ export default function MonitoringPage() {
       status: 'HOLD',
       pnl: 0, pnl_pct: 0,
       institutional_alerts: [], engine_context: null, warnings: [], rr: null,
+      engine_scores: (useStore.getState().monitoringInput || {}).engine_scores || {},
+      market_regime: (useStore.getState().monitoringInput || {}).market_regime || 'SIDEWAYS',
+      final_score: (useStore.getState().monitoringInput || {}).final_score || 50.0,
+      kb_context: (useStore.getState().monitoringInput || {}).kb_context || '',
     }
     setShowForm(false)
     setForm({ ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'DAYTRADING',lot:'',broker:'' })
