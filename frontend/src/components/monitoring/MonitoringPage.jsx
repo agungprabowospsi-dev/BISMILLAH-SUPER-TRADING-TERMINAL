@@ -60,22 +60,23 @@ export default function MonitoringPage() {
   const { monitoringInput, setMonitoringInput } = useStore()
 
   useEffect(() => {
-    const fromSession = sessionStorage.getItem('monitoringInput')
-    const data = monitoringInput || (fromSession ? JSON.parse(fromSession) : null)
-    if (!data) return
-    sessionStorage.removeItem('monitoringInput')
-    setForm({
-      ticker: data.ticker || '',
-      entry_price: data.entry_price || '',
-      stop_loss: data.stop_loss || '',
-      take_profit_1: data.take_profit_1 || '',
-      take_profit_2: data.take_profit_2 || '',
-      take_profit_3: data.take_profit_3 || '',
-      mode: data.mode?.toUpperCase() || 'DAYTRADING'
-    })
-    setShowForm(true)
-    if (monitoringInput) setMonitoringInput(null)
-  }, [monitoringInput])
+    const pending = localStorage.getItem('pendingMonitor')
+    if (!pending) return
+    try {
+      const data = JSON.parse(pending)
+      localStorage.removeItem('pendingMonitor')
+      setForm({
+        ticker: data.ticker || '',
+        entry_price: String(data.entry_price || ''),
+        stop_loss: String(data.stop_loss || ''),
+        take_profit_1: String(data.take_profit_1 || ''),
+        take_profit_2: String(data.take_profit_2 || ''),
+        take_profit_3: String(data.take_profit_3 || ''),
+        mode: data.mode?.toUpperCase() || 'DAYTRADING'
+      })
+      setShowForm(true)
+    } catch(e) { console.error(e) }
+  }, [])
 
   useEffect(() => { positionsRef.current = positions }, [positions])
 

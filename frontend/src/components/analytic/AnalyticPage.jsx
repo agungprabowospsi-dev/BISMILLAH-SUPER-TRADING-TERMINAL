@@ -255,7 +255,7 @@ export default function AnalyticPage() {
                   take_profit_2:r.tp2, take_profit_3:r.tp3,
                   mode:analyticMode
                 }
-                sessionStorage.setItem('monitoringInput', JSON.stringify(data))
+                localStorage.setItem('pendingMonitor', JSON.stringify(data))
                 sendToMonitoring(data)
               }} className="btn-primary w-full flex items-center justify-center gap-2 mt-2">
                 Monitor Posisi<ArrowRight className="w-4 h-4"/>
