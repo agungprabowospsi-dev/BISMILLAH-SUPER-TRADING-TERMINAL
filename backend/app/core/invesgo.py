@@ -194,3 +194,51 @@ async def get_market_context(ticker: str) -> dict:
     except:
         pass
     return {}
+
+async def get_financial_statement(ticker: str) -> dict:
+    """Laporan keuangan quarterly - Balance Sheet, Cash Flow, Income Statement"""
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(f"{INVESGO_BASE_URL}/analysis/financial-statement/{ticker}", headers=_headers())
+        r.raise_for_status()
+        return r.json()
+
+async def get_intraday_index(index: str = "IHSG") -> dict:
+    """IHSG & index live - IHSG, LQ45, IDX30, sektoral (15+ indices)"""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(f"{INVESGO_BASE_URL}/analysis/intraday-index/{index}", headers=_headers())
+        r.raise_for_status()
+        return r.json()
+
+async def get_top_movers(sort: str = "gainer", limit: int = 20) -> list:
+    """Top Gainers, Losers, Most Active - sort: gainer/loser/active/value/freq/foreign"""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(
+            f"{INVESGO_BASE_URL}/analysis/top-change",
+            headers=_headers(),
+            params={"sort": sort, "limit": limit}
+        )
+        r.raise_for_status()
+        return r.json()
+
+async def get_market_regime() -> dict:
+    """Market Regime dari IHSG + sektoral + foreign flow + top movers"""
+    import asyncio
+    results = {}
+    
+    # IHSG & indices
+    for index in ["IHSG", "LQ45", "IDX30", "IDXSMC", "IDXBUMN"]:
+        try:
+            data = await get_intraday_index(index)
+            results[index] = data
+        except:
+            results[index] = None
+    
+    # Top movers
+    for sort in ["gainer", "loser", "active"]:
+        try:
+            data = await get_top_movers(sort=sort, limit=10)
+            results[f"top_{sort}"] = data
+        except:
+            results[f"top_{sort}"] = []
+    
+    return results
