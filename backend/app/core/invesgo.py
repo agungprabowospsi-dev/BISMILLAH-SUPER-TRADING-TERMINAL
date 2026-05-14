@@ -221,24 +221,82 @@ async def get_top_movers(sort: str = "gainer", limit: int = 20) -> list:
         return r.json()
 
 async def get_market_regime() -> dict:
-    """Market Regime dari IHSG + sektoral + foreign flow + top movers"""
+    """Market Regime lengkap dari semua index Invesgo"""
     import asyncio
+    
+    ALL_INDICES = [
+        "IHSG", "LQ45", "IDX30", "IDXSMC", "IDXBUMN",
+        "IDXG30", "IDXESGL", "IDXHIDIV", "IDXVESTA",
+        "IDXBASIC", "IDXCYC", "IDXNONCYC", "IDXENERGY",
+        "IDXFINANCE", "IDXHEALTH", "IDXINDUST", "IDXINFRA",
+        "IDXPROPERT", "IDXTECHNO", "IDXTRANS"
+    ]
+    
     results = {}
     
-    # IHSG & indices
-    for index in ["IHSG", "LQ45", "IDX30", "IDXSMC", "IDXBUMN"]:
+    async def fetch_index(idx):
         try:
-            data = await get_intraday_index(index)
-            results[index] = data
+            data = await get_intraday_index(idx)
+            results[idx] = data
         except:
-            results[index] = None
+            results[idx] = None
     
-    # Top movers
-    for sort in ["gainer", "loser", "active"]:
-        try:
-            data = await get_top_movers(sort=sort, limit=10)
-            results[f"top_{sort}"] = data
-        except:
-            results[f"top_{sort}"] = []
+    # Fetch semua index secara parallel
+    await asyncio.gather(*[fetch_index(idx) for idx in ALL_INDICES])
+    
+    # Hitung market breadth dari LQ45
+    lq45 = results.get("LQ45") or {}
+    positive = lq45.get("positive", 0) or 0
+    negative = lq45.get("negative", 0) or 0
+    neutral = lq45.get("neutral", 0) or 0
+    total = positive + negative + neutral
+    
+    # Hitung change% dari index yang ada data
+    def calc_change(d):
+        if not d: return 0
+        close = d.get("close") or 0
+        prev = d.get("prev") or 0
+        if close and prev and prev != 0:
+            return ((close - prev) / prev) * 100
+        return 0
+    
+    lq45_change = calc_change(lq45)
+    
+    # Determine regime
+    if lq45_change > 1 and positive > negative:
+        regime = "STRONG BULL"
+    elif lq45_change > 0 or positive > negative:
+        regime = "BULL"
+    elif lq45_change > -1 and abs(positive - negative) < 10:
+        regime = "SIDEWAYS"
+    elif lq45_change < -1 and negative > positive:
+        regime = "STRONG BEAR"
+    else:
+        regime = "BEAR"
+    
+    results["_regime"] = regime
+    results["_breadth"] = {
+        "positive": positive,
+        "negative": negative,
+        "neutral": neutral,
+        "total": total,
+        "breadth_ratio": round(positive / total * 100, 1) if total > 0 else 0
+    }
+    results["_lq45_change"] = round(lq45_change, 2)
+    
+    # Sektoral summary
+    sektoral = {}
+    sektor_keys = ["IDXBASIC","IDXCYC","IDXNONCYC","IDXENERGY","IDXFINANCE",
+                   "IDXHEALTH","IDXINDUST","IDXINFRA","IDXPROPERT","IDXTECHNO","IDXTRANS"]
+    for sk in sektor_keys:
+        d = results.get(sk)
+        if d:
+            chg = calc_change(d)
+            sektoral[sk] = {
+                "close": d.get("close"),
+                "change_pct": round(chg, 2),
+                "status": "UP" if chg > 0 else "DOWN" if chg < 0 else "FLAT"
+            }
+    results["_sektoral"] = sektoral
     
     return results
