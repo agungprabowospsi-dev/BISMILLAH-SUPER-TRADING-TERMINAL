@@ -1,205 +1,378 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional
 import logging
+import asyncio
+import json
+import uuid
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 class BacktestRequest(BaseModel):
+    mode: str = "swing"
+    timeframe: str = "daily"
+    period: str = "5y"
+    universe: int = 20
+    min_score: float = 65.0
+
+class SingleBacktestRequest(BaseModel):
     ticker: str
     mode: str = "swing"
+    timeframe: str = "daily"
     period: str = "1y"
+    min_score: float = 65.0
 
-@router.post("/run")
-async def run_backtest(req: BacktestRequest):
+# ── Job storage di Redis ──────────────────────────────────────
+def get_redis():
+    from app.core.redis_client import get_redis
+    return get_redis()
+
+async def save_job(job_id: str, data: dict):
     try:
-        from app.engines.master_runner import run_all_engines
-        from app.knowledge_base import kb_service
-        from app.core import invesgo
-
-        # 1. Ambil data historis dari Invesgo (support 15 tahun)
-        raw = await invesgo.get_ohlcv_daily(req.ticker, period=req.period)
-        if not raw or len(raw) < 30:
-            return {"error": f"Data tidak cukup untuk {req.ticker}"}
-
-        # 2. Convert ke format OHLCV
-        candles = []
-        for c in raw:
-            candles.append({
-                "date": str(c.get("date",""))[:10],
-                "open": float(c.get("open") or 0),
-                "high": float(c.get("high") or 0),
-                "low": float(c.get("low") or 0),
-                "close": float(c.get("close") or 0),
-                "volume": float(c.get("volume") or 0)
-            })
-
-
-        # 3. Rolling backtest - window 60 candles
-        WINDOW = 60
-        trades = []
-        equity = 100.0
-        equity_curve = [{"date": candles[WINDOW]["date"], "equity": equity}]
-        
-        i = WINDOW
-        in_trade = False
-        current_trade = None
-
-        while i < len(candles):
-            window = candles[max(0, i-WINDOW):i]
-            current = candles[i]
-
-            # Check exit jika ada trade aktif
-            if in_trade and current_trade:
-                price = current["close"]
-                entry = current_trade["entry"]
-                sl = current_trade["sl"]
-                tp1 = current_trade["tp1"]
-
-                hit_sl = price <= sl
-                hit_tp = price >= tp1
-
-                if hit_sl or hit_tp:
-                    pnl_pct = ((price - entry) / entry) * 100
-                    current_trade["exit_price"] = price
-                    current_trade["exit_date"] = current["date"]
-                    current_trade["pnl_pct"] = round(pnl_pct, 2)
-                    current_trade["result"] = "WIN" if hit_tp else "LOSS"
-                    equity *= (1 + pnl_pct/100)
-                    trades.append(current_trade)
-                    equity_curve.append({"date": current["date"], "equity": round(equity, 2)})
-                    in_trade = False
-                    current_trade = None
-
-            # Generate signal jika tidak ada trade
-            if not in_trade and i % 5 == 0:
-                try:
-                    eng = await run_all_engines(req.ticker, window, req.mode)
-                    score = eng.get("composite_score", 0)
-                    
-                    # RAG boost
-                    try:
-                        rag = await kb_service.get_kb_context_for_engine("PriceActionEngine", req.ticker)
-                        rag_boost = 5 if rag and len(rag) > 100 else 0
-                    except:
-                        rag_boost = 0
-
-                    total_score = score + rag_boost
-
-                    if total_score >= 65:
-                        price = current["close"]
-                        atr = _calc_atr_simple(window)
-                        sl = round(price - 1.5 * atr)
-                        tp1 = round(price + 2.0 * atr)
-                        tp2 = round(price + 3.0 * atr)
-                        
-                        current_trade = {
-                            "ticker": req.ticker,
-                            "entry_date": current["date"],
-                            "entry": price,
-                            "sl": sl,
-                            "tp1": tp1,
-                            "tp2": tp2,
-                            "score": round(total_score, 1),
-                            "rag_boost": rag_boost
-                        }
-                        in_trade = True
-                except Exception as e:
-                    logger.warning(f"Engine error at candle {i}: {e}")
-
-            i += 1
-
-        # 4. Hitung statistik
-        if not trades:
-            return {"error": "Tidak ada trade yang dihasilkan", "candles": len(candles)}
-
-        wins = [t for t in trades if t["result"] == "WIN"]
-        losses = [t for t in trades if t["result"] == "LOSS"]
-        winrate = len(wins) / len(trades) * 100
-        avg_win = sum(t["pnl_pct"] for t in wins) / len(wins) if wins else 0
-        avg_loss = sum(t["pnl_pct"] for t in losses) / len(losses) if losses else 0
-        profit_factor = abs(avg_win / avg_loss) if avg_loss != 0 else 999
-
-        # Max drawdown
-        peak = 100.0
-        max_dd = 0
-        eq = 100.0
-        for t in trades:
-            eq *= (1 + t["pnl_pct"]/100)
-            if eq > peak:
-                peak = eq
-            dd = (peak - eq) / peak * 100
-            if dd > max_dd:
-                max_dd = dd
-
-        return {
-            "ticker": req.ticker,
-            "mode": req.mode,
-            "period": req.period,
-            "total_candles": len(candles),
-            "total_trades": len(trades),
-            "winrate": round(winrate, 1),
-            "profit_factor": round(profit_factor, 2),
-            "max_drawdown": round(max_dd, 1),
-            "avg_win_pct": round(avg_win, 2),
-            "avg_loss_pct": round(avg_loss, 2),
-            "final_equity": round(equity, 2),
-            "equity_curve": equity_curve[-20:],
-            "trades": trades[-10:]
-        }
-
+        r = get_redis()
+        await r.setex(f"backtest:{job_id}", 86400, json.dumps(data))
     except Exception as e:
-        logger.error(f"Backtest error: {e}")
-        return {"error": str(e)}
+        logger.error(f"Redis save error: {e}")
 
-def _calc_atr_simple(candles: list, period: int = 14) -> float:
-    if len(candles) < period:
+async def get_job(job_id: str) -> dict:
+    try:
+        r = get_redis()
+        raw = await r.get(f"backtest:{job_id}")
+        return json.loads(raw) if raw else None
+    except:
+        return None
+
+# ── Helper ATR ────────────────────────────────────────────────
+def calc_atr(candles: list, period: int = 14) -> float:
+    if len(candles) < period + 1:
         return candles[-1]["close"] * 0.02
     trs = []
-    for i in range(1, min(period+1, len(candles))):
+    for i in range(1, period + 1):
         c = candles[-i]
         p = candles[-i-1]
         tr = max(c["high"]-c["low"], abs(c["high"]-p["close"]), abs(c["low"]-p["close"]))
         trs.append(tr)
     return sum(trs) / len(trs)
 
-@router.get("/test/{ticker}")
-async def test_data(ticker: str):
+# ── Core backtest per saham ───────────────────────────────────
+async def backtest_single(ticker: str, candles: list, mode: str, min_score: float) -> dict:
+    from app.engines.master_runner import run_all_engines
+    from app.knowledge_base import kb_service
+
+    WINDOW = 60
+    trades = []
+    equity = 100.0
+    equity_curve = []
+    in_trade = False
+    current_trade = None
+    hold_days = 0
+    MAX_HOLD = 10 if mode == "swing" else 1
+
+    i = WINDOW
+    while i < len(candles):
+        current = candles[i]
+        window = candles[max(0, i-WINDOW):i]
+
+        # Check exit
+        if in_trade and current_trade:
+            hold_days += 1
+            price = current["close"]
+            hit_sl = price <= current_trade["sl"]
+            hit_tp = price >= current_trade["tp1"]
+            hit_max = hold_days >= MAX_HOLD
+
+            if hit_sl or hit_tp or hit_max:
+                pnl_pct = ((price - current_trade["entry"]) / current_trade["entry"]) * 100
+                result = "WIN" if hit_tp else ("LOSS" if hit_sl else "EXPIRED")
+                current_trade.update({
+                    "exit_price": price,
+                    "exit_date": current["date"],
+                    "pnl_pct": round(pnl_pct, 2),
+                    "result": result,
+                    "hold_days": hold_days
+                })
+                equity *= (1 + pnl_pct/100)
+                trades.append(current_trade)
+                equity_curve.append({"date": current["date"], "equity": round(equity, 2)})
+                in_trade = False
+                current_trade = None
+                hold_days = 0
+
+        # Generate signal setiap 3 candle
+        if not in_trade and i % 3 == 0:
+            try:
+                eng = await run_all_engines(ticker, window, mode)
+                score = eng.get("composite_score", 0)
+
+                # RAG boost
+                try:
+                    rag = await kb_service.get_kb_context_for_engine("PriceActionEngine", ticker)
+                    rag_boost = 5 if rag and len(rag) > 100 else 0
+                except:
+                    rag_boost = 0
+
+                total_score = score + rag_boost
+
+                if total_score >= min_score:
+                    price = current["close"]
+                    atr = calc_atr(window)
+                    sl_mult = 1.5 if mode == "swing" else 1.0
+                    tp_mult = 2.0 if mode == "swing" else 1.5
+                    current_trade = {
+                        "ticker": ticker,
+                        "entry_date": current["date"],
+                        "entry": price,
+                        "sl": round(price - sl_mult * atr),
+                        "tp1": round(price + tp_mult * atr),
+                        "tp2": round(price + (tp_mult + 1) * atr),
+                        "score": round(total_score, 1),
+                        "rag_boost": rag_boost,
+                        "mode": mode
+                    }
+                    in_trade = True
+                    hold_days = 0
+            except Exception as e:
+                logger.warning(f"Engine error {ticker} candle {i}: {e}")
+
+        i += 1
+
+    wins = [t for t in trades if t["result"] == "WIN"]
+    losses = [t for t in trades if t["result"] == "LOSS"]
+    winrate = len(wins) / len(trades) * 100 if trades else 0
+    avg_win = sum(t["pnl_pct"] for t in wins) / len(wins) if wins else 0
+    avg_loss = sum(t["pnl_pct"] for t in losses) / len(losses) if losses else 0
+    profit_factor = abs(avg_win / avg_loss) if avg_loss != 0 else 999
+
+    return {
+        "ticker": ticker,
+        "total_trades": len(trades),
+        "winrate": round(winrate, 1),
+        "profit_factor": round(profit_factor, 2),
+        "avg_win_pct": round(avg_win, 2),
+        "avg_loss_pct": round(avg_loss, 2),
+        "final_equity": round(equity, 2),
+        "trades": trades
+    }
+
+# ── Universe Backtest Background Job ─────────────────────────
+async def run_universe_backtest(job_id: str, req: BacktestRequest):
+    from app.core import invesgo
+
+    await save_job(job_id, {
+        "status": "running",
+        "progress": 0,
+        "message": "Memulai universe backtest...",
+        "started_at": datetime.now().isoformat()
+    })
+
     try:
-        import yfinance as yf
-        ticker_yf = f"{ticker.upper()}.JK"
-        df = yf.download(ticker_yf, period="5y", interval="1d", progress=False)
-        return {
-            "ticker_yf": ticker_yf,
-            "rows": len(df),
-            "empty": df.empty,
-            "first": str(df.index[0].date()) if not df.empty else None,
-            "last": str(df.index[-1].date()) if not df.empty else None
+        # 1. Ambil daftar saham
+        await save_job(job_id, {"status": "running", "progress": 5, "message": "Mengambil daftar saham IDX..."})
+        stock_list = await invesgo.get_stock_list()
+        
+        # Filter liquid stocks
+        tickers = []
+        for s in stock_list:
+            code = s.get("code") or s.get("ticker") or s.get("symbol")
+            if code:
+                tickers.append(code)
+        
+        # Limit universe
+        tickers = tickers[:req.universe]
+        total = len(tickers)
+
+        await save_job(job_id, {
+            "status": "running",
+            "progress": 10,
+            "message": f"Memproses {total} saham...",
+            "total_stocks": total
+        })
+
+        # 2. Backtest per saham
+        all_results = []
+        all_trades = []
+        
+        for idx, ticker in enumerate(tickers):
+            try:
+                progress = 10 + int((idx / total) * 80)
+                await save_job(job_id, {
+                    "status": "running",
+                    "progress": progress,
+                    "message": f"Backtesting {ticker} ({idx+1}/{total})...",
+                    "current_ticker": ticker
+                })
+
+                candles = await invesgo.get_ohlcv_daily(ticker, period=req.period)
+                if not candles or len(candles) < 80:
+                    continue
+
+                formatted = [{
+                    "date": str(c.get("date",""))[:10],
+                    "open": float(c.get("open") or 0),
+                    "high": float(c.get("high") or 0),
+                    "low": float(c.get("low") or 0),
+                    "close": float(c.get("close") or 0),
+                    "volume": float(c.get("volume") or 0)
+                } for c in candles]
+
+                result = await backtest_single(ticker, formatted, req.mode, req.min_score)
+                if result["total_trades"] > 0:
+                    all_results.append(result)
+                    all_trades.extend(result["trades"])
+
+                await asyncio.sleep(0.1)
+
+            except Exception as e:
+                logger.warning(f"Skip {ticker}: {e}")
+                continue
+
+        # 3. Aggregate statistik
+        await save_job(job_id, {"status": "running", "progress": 92, "message": "Menghitung statistik..."})
+
+        if not all_trades:
+            await save_job(job_id, {"status": "failed", "progress": 100, "message": "Tidak ada trade yang dihasilkan"})
+            return
+
+        total_trades = len(all_trades)
+        wins = [t for t in all_trades if t["result"] == "WIN"]
+        losses = [t for t in all_trades if t["result"] == "LOSS"]
+        winrate = len(wins) / total_trades * 100
+        avg_win = sum(t["pnl_pct"] for t in wins) / len(wins) if wins else 0
+        avg_loss = sum(t["pnl_pct"] for t in losses) / len(losses) if losses else 0
+        profit_factor = abs(avg_win / avg_loss) if avg_loss != 0 else 999
+
+        # Max drawdown
+        equity = 100.0
+        peak = 100.0
+        max_dd = 0
+        for t in sorted(all_trades, key=lambda x: x.get("exit_date","")):
+            equity *= (1 + t["pnl_pct"]/100)
+            if equity > peak:
+                peak = equity
+            dd = (peak - equity) / peak * 100
+            if dd > max_dd:
+                max_dd = dd
+
+        # Per tahun breakdown
+        yearly = {}
+        for t in all_trades:
+            year = t.get("exit_date","")[:4]
+            if year not in yearly:
+                yearly[year] = {"trades": 0, "wins": 0, "total_pnl": 0}
+            yearly[year]["trades"] += 1
+            if t["result"] == "WIN":
+                yearly[year]["wins"] += 1
+            yearly[year]["total_pnl"] += t["pnl_pct"]
+
+        yearly_summary = {
+            y: {
+                "trades": d["trades"],
+                "winrate": round(d["wins"]/d["trades"]*100, 1),
+                "total_pnl": round(d["total_pnl"], 2)
+            } for y, d in yearly.items() if d["trades"] > 0
         }
+
+        # Top performers
+        top_stocks = sorted(all_results, key=lambda x: x["winrate"], reverse=True)[:10]
+
+        final_result = {
+            "status": "completed",
+            "progress": 100,
+            "message": "Backtest selesai!",
+            "completed_at": datetime.now().isoformat(),
+            "config": {
+                "mode": req.mode,
+                "timeframe": req.timeframe,
+                "period": req.period,
+                "universe": req.universe,
+                "min_score": req.min_score
+            },
+            "summary": {
+                "total_stocks_tested": len(all_results),
+                "total_trades": total_trades,
+                "winrate": round(winrate, 1),
+                "profit_factor": round(profit_factor, 2),
+                "max_drawdown": round(max_dd, 1),
+                "avg_win_pct": round(avg_win, 2),
+                "avg_loss_pct": round(avg_loss, 2),
+                "final_equity": round(equity, 2)
+            },
+            "yearly_breakdown": yearly_summary,
+            "top_performers": top_stocks[:5],
+            "recent_trades": sorted(all_trades, key=lambda x: x.get("exit_date",""), reverse=True)[:20]
+        }
+
+        await save_job(job_id, final_result)
+
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Universe backtest error: {e}")
+        await save_job(job_id, {"status": "failed", "progress": 0, "message": str(e)})
+
+# ── API Endpoints ─────────────────────────────────────────────
+@router.post("/universe/start")
+async def start_universe_backtest(req: BacktestRequest, background_tasks: BackgroundTasks):
+    job_id = f"bt_{uuid.uuid4().hex[:8]}"
+    background_tasks.add_task(run_universe_backtest, job_id, req)
+    return {
+        "job_id": job_id,
+        "message": "Backtest dimulai di background",
+        "status_url": f"/api/backtest/status/{job_id}",
+        "config": req.dict()
+    }
+
+@router.get("/status/{job_id}")
+async def get_backtest_status(job_id: str):
+    job = await get_job(job_id)
+    if not job:
+        return {"error": "Job tidak ditemukan"}
+    return job
+
+@router.post("/single/run")
+async def run_single_backtest(req: SingleBacktestRequest, background_tasks: BackgroundTasks):
+    job_id = f"bt_{uuid.uuid4().hex[:8]}"
+    
+    async def single_job(job_id, req):
+        from app.core import invesgo
+        await save_job(job_id, {"status": "running", "progress": 10, "message": f"Mengambil data {req.ticker}..."})
+        try:
+            candles = await invesgo.get_ohlcv_daily(req.ticker, period=req.period)
+            if not candles or len(candles) < 30:
+                await save_job(job_id, {"status": "failed", "message": "Data tidak cukup"})
+                return
+            formatted = [{
+                "date": str(c.get("date",""))[:10],
+                "open": float(c.get("open") or 0),
+                "high": float(c.get("high") or 0),
+                "low": float(c.get("low") or 0),
+                "close": float(c.get("close") or 0),
+                "volume": float(c.get("volume") or 0)
+            } for c in candles]
+            await save_job(job_id, {"status": "running", "progress": 30, "message": "Menjalankan 34 engines..."})
+            result = await backtest_single(req.ticker, formatted, req.mode, req.min_score)
+            result["status"] = "completed"
+            result["progress"] = 100
+            result["config"] = req.dict()
+            await save_job(job_id, result)
+        except Exception as e:
+            await save_job(job_id, {"status": "failed", "message": str(e)})
+
+    background_tasks.add_task(single_job, job_id, req)
+    return {"job_id": job_id, "message": f"Backtest {req.ticker} dimulai", "status_url": f"/api/backtest/status/{job_id}"}
 
 @router.get("/test-date/{ticker}")
 async def test_date_range(ticker: str):
     import httpx, os
-    from datetime import datetime, timedelta
     base = os.environ.get("INVESGO_BASE_URL", "https://api.invezgo.com")
     key = os.environ["INVESGO_API_KEY"]
     headers = {"Authorization": f"Bearer {key}"}
-    
     results = {}
-    # Test berbagai parameter
     tests = [
         {"from": "2010-01-01", "to": "2026-01-01"},
         {"from": "2020-01-01", "to": "2026-01-01"},
-        {"startDate": "2010-01-01", "endDate": "2026-01-01"},
-        {"start": "2010-01-01", "end": "2026-01-01"},
         {"period": "10y"},
-        {"period": "max"},
-        {"limit": "5000"},
     ]
-    
     async with httpx.AsyncClient(timeout=30) as client:
         for params in tests:
             try:
@@ -210,5 +383,4 @@ async def test_date_range(ticker: str):
                 results[str(params)] = f"{count} candles, first={first}"
             except Exception as e:
                 results[str(params)] = f"ERROR: {str(e)[:50]}"
-    
     return results
