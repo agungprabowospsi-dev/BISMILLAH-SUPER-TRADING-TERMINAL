@@ -165,3 +165,19 @@ def _calc_atr_simple(candles: list, period: int = 14) -> float:
         tr = max(c["high"]-c["low"], abs(c["high"]-p["close"]), abs(c["low"]-p["close"]))
         trs.append(tr)
     return sum(trs) / len(trs)
+
+@router.get("/test/{ticker}")
+async def test_data(ticker: str):
+    try:
+        import yfinance as yf
+        ticker_yf = f"{ticker.upper()}.JK"
+        df = yf.download(ticker_yf, period="5y", interval="1d", progress=False)
+        return {
+            "ticker_yf": ticker_yf,
+            "rows": len(df),
+            "empty": df.empty,
+            "first": str(df.index[0].date()) if not df.empty else None,
+            "last": str(df.index[-1].date()) if not df.empty else None
+        }
+    except Exception as e:
+        return {"error": str(e)}
