@@ -67,8 +67,7 @@ export default function MonitoringPage() {
   })
   const positionsRef = useRef([])
   const { monitoringInput, setMonitoringInput } = useStore()
-  console.log('[MONITORING] monitoringInput:', monitoringInput, 'showForm:', showForm)
-  if (monitoringInput) alert('GOT DATA: ' + monitoringInput.ticker + ' entry=' + monitoringInput.entry_price)
+
 
   useEffect(() => {
     if (!monitoringInput) return
