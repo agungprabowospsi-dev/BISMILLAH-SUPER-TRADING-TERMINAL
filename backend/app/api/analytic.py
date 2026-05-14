@@ -181,6 +181,46 @@ async def analyze(req: AnalyticRequest):
             logger.debug(f"[RAG] analytic skip: {kb_err}")
         # ────────────────────────────────────────────────────────────
 
+        # Market Regime Context
+        market_regime_context = ""
+        try:
+            regime_data = await invesgo.get_market_regime()
+            ihsg = regime_data.get("IHSG", {}) or {}
+            lq45 = regime_data.get("LQ45", {}) or {}
+            
+            ihsg_close = ihsg.get("close")
+            ihsg_prev = ihsg.get("prev")
+            ihsg_change_pct = 0
+            if ihsg_close and ihsg_prev and ihsg_prev != 0:
+                ihsg_change_pct = ((ihsg_close - ihsg_prev) / ihsg_prev) * 100
+            
+            top_gainer = regime_data.get("top_gainer", [])
+            top_loser = regime_data.get("top_loser", [])
+            
+            # Determine regime
+            if ihsg_change_pct > 1:
+                regime = "STRONG BULL"
+            elif ihsg_change_pct > 0:
+                regime = "BULL"
+            elif ihsg_change_pct > -1:
+                regime = "SIDEWAYS/BEAR"
+            else:
+                regime = "STRONG BEAR"
+            
+            lq45_close = lq45.get("close", 0)
+            
+            market_regime_context = f"""
+=== MARKET REGIME ===
+Regime: {regime}
+IHSG: {ihsg_close or "N/A"} ({ihsg_change_pct:+.2f}%)
+LQ45: {lq45_close}
+Top Gainers: {", ".join([s.get("code","") for s in (top_gainer[:3] if top_gainer else [])])}
+Top Losers: {", ".join([s.get("code","") for s in (top_loser[:3] if top_loser else [])])}
+"""
+        except Exception as regime_err:
+            logger.debug(f"[REGIME] skip: {regime_err}")
+            market_regime_context = ""
+
         rationale = await ask_claude(
             system="Kamu adalah analis saham IDX profesional. Berikan analisis trading yang jelas dan actionable dalam Bahasa Indonesia.",
             prompt=f"""
@@ -191,16 +231,17 @@ R:R = {rr}
 Setup Type: {setup_type}
 Setup Reason: {setup_reason}
 Engine: {all_engines.get('bullish_count', 0)} bullish, {all_engines.get('bearish_count', 0)} bearish dari 10 engines
+{market_regime_context}
 {kb_context}
 
 Tulis analisis trading 3-4 kalimat dalam Bahasa Indonesia:
-1. Kondisi market saat ini
+1. Kondisi market saat ini (sertakan regime market jika tersedia)
 2. Jenis setup berdasarkan Setup Type, jangan otomatis menyebut continuation jika Setup Type bukan continuation
 3. Alasan entry dan level kunci
 4. Manajemen risiko (SL/TP)
 Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memperkuat analisis.
 """,
-            max_tokens=350
+            max_tokens=400
         )
 
         import json as _json
@@ -222,6 +263,7 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "score": float(score),
             "confidence": float(min(95, score)),
             "signal": all_engines['signal'],
+            "market_regime": regime if 'regime' in dir() else "N/A",
             "setup_type": setup_type,
             "setup_reason": setup_reason,
             "setup_metrics": {
