@@ -256,6 +256,7 @@ export default function AnalyticPage() {
                   mode:analyticMode
                 }
                 localStorage.setItem('pendingMonitor', JSON.stringify(data))
+                window.dispatchEvent(new Event('pendingMonitor'))
                 sendToMonitoring(data)
               }} className="btn-primary w-full flex items-center justify-center gap-2 mt-2">
                 Monitor Posisi<ArrowRight className="w-4 h-4"/>

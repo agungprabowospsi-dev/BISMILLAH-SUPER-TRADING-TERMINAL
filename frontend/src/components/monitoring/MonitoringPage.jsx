@@ -59,7 +59,7 @@ export default function MonitoringPage() {
   const positionsRef = useRef([])
   const { monitoringInput, setMonitoringInput } = useStore()
 
-  useEffect(() => {
+  const applyPendingMonitor = () => {
     const pending = localStorage.getItem('pendingMonitor')
     if (!pending) return
     try {
@@ -76,6 +76,16 @@ export default function MonitoringPage() {
       })
       setShowForm(true)
     } catch(e) { console.error(e) }
+  }
+
+  useEffect(() => {
+    applyPendingMonitor()
+    window.addEventListener('storage', applyPendingMonitor)
+    window.addEventListener('pendingMonitor', applyPendingMonitor)
+    return () => {
+      window.removeEventListener('storage', applyPendingMonitor)
+      window.removeEventListener('pendingMonitor', applyPendingMonitor)
+    }
   }, [])
 
   useEffect(() => { positionsRef.current = positions }, [positions])
