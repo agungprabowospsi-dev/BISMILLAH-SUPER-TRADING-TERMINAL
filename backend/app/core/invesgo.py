@@ -21,13 +21,28 @@ async def get_stock_list() -> list:
         r.raise_for_status()
         return r.json()
 
-async def get_ohlcv_daily(ticker: str, period: str = "3mo") -> list:
-    """OHLCV harian"""
-    async with httpx.AsyncClient(timeout=30) as client:
+async def get_ohlcv_daily(ticker: str, period: str = "3mo", from_date: str = None, to_date: str = None) -> list:
+    """OHLCV harian - support period atau from/to date"""
+    from datetime import datetime, timedelta
+    if from_date and to_date:
+        params = {"from": from_date, "to": to_date}
+    else:
+        # Convert period ke from/to date
+        today = datetime.now().strftime("%Y-%m-%d")
+        period_map = {
+            "1mo": 30, "3mo": 90, "6mo": 180,
+            "1y": 365, "2y": 730, "3y": 1095,
+            "5y": 1825, "10y": 3650, "15y": 5475
+        }
+        days = period_map.get(period, 90)
+        from_dt = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        params = {"from": from_dt, "to": today}
+    
+    async with httpx.AsyncClient(timeout=60) as client:
         r = await client.get(
             f"{INVESGO_BASE_URL}/analysis/chart/stock/{ticker}",
             headers=_headers(),
-            params={"period": period}
+            params=params
         )
         r.raise_for_status()
         return r.json()
