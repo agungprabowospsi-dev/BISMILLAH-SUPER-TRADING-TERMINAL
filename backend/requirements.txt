@@ -11,3 +11,4 @@ numpy==1.26.4
 python-multipart==0.0.9
 beautifulsoup4==4.12.3
 anthropic>=0.25.0
+yfinance==0.2.40
