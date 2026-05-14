@@ -48,13 +48,22 @@ export default function MonitoringPage() {
       return saved ? JSON.parse(saved) : []
     } catch { return [] }
   })
-  const [showForm, setShowForm] = useState(false)
+  const [showForm, setShowForm] = useState(() => !!useStore.getState().monitoringInput)
   const [backendOnline, setBackendOnline] = useState(null)
   const [expandedEngines, setExpandedEngines] = useState({})
   const toggleEngines = (id) => setExpandedEngines(prev => ({...prev, [id]: !prev[id]}))
-  const [form, setForm] = useState({
-    ticker: '', entry_price: '', stop_loss: '',
-    take_profit_1: '', take_profit_2: '', take_profit_3: '', mode: 'DAYTRADING'
+  const [form, setForm] = useState(() => {
+    const mi = useStore.getState().monitoringInput
+    if (mi) return {
+      ticker: mi.ticker || '',
+      entry_price: String(mi.entry_price || ''),
+      stop_loss: String(mi.stop_loss || ''),
+      take_profit_1: String(mi.take_profit_1 || ''),
+      take_profit_2: String(mi.take_profit_2 || ''),
+      take_profit_3: String(mi.take_profit_3 || ''),
+      mode: (mi.mode || 'DAYTRADING').toUpperCase()
+    }
+    return { ticker: '', entry_price: '', stop_loss: '', take_profit_1: '', take_profit_2: '', take_profit_3: '', mode: 'DAYTRADING' }
   })
   const positionsRef = useRef([])
   const { monitoringInput, setMonitoringInput } = useStore()
