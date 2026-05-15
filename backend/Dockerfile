@@ -6,12 +6,11 @@ RUN apt-get update && apt-get install -y \
     gcc g++ libpq-dev curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY . .
+
 RUN pip install --no-cache-dir -r requirements.txt
 
 RUN rm -rf /app/data
-
-COPY . .
 
 RUN mkdir -p /app/knowledge_base/books /app/knowledge_base/chroma_db
 
