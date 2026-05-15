@@ -72,7 +72,7 @@ def _build_features(engine_scores: Dict, market_regime: str, lq45_change: float,
 def _rule_based_probability(engine_scores: Dict, market_regime: str, lq45_change: float, final_score: float) -> float:
     """
     Rule-based win probability ketika belum ada training data
-    Berdasarkan logika dari 10 buku trading di KB
+    Berdasarkan logika dari 12 buku trading di KB
     """
     prob = 50.0  # Base probability
     
@@ -141,7 +141,7 @@ def predict_win_probability(
     prob += (kb_win_rate - 0.5) * 15
     prob += (kb_consensus - 0.5) * 10
     prob = max(5.0, min(95.0, prob))
-    method = "Rule-Based + KB (10 buku)"
+    method = "Rule-Based + KB (12 buku)"
     confidence = "medium"
     n_samples = len(_training_data)
     

@@ -985,7 +985,7 @@ def calculate_pattern_bonus(mode: Mode, ohlcv: List[Dict[str, Any]]) -> Dict[str
 async def calculate_rag_boost(ticker: str, mode: Mode, context: Dict[str, Any]) -> Dict[str, Any]:
     """
     Enhanced RAG boost — query spesifik per phase + pattern + mode
-    Menggunakan insight dari 11 buku trading di Knowledge Base
+    Menggunakan insight dari 12 buku trading di Knowledge Base
     """
     if kb_service is None:
         return {"boost": 0, "reason": "kb_service unavailable"}
