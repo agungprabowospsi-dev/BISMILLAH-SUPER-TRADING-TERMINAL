@@ -569,3 +569,87 @@ async def get_foreign_flow_dashboard():
             "period": "30 hari terakhir"
         }
     }
+
+
+# ============ DATA ACCUMULATION ============
+from sqlalchemy import text as sql_text
+from app.core.database import AsyncSessionLocal as _AsyncSessionLocal
+
+DATA_WATCHLIST = [
+    "BBCA","BBRI","BMRI","TLKM","ASII","BYAN","GOTO","UNVR",
+    "ICBP","INDF","ANTM","PTBA","ADRO","ESSA","SMGR","PGAS",
+    "EXCL","KLBF","MAPI","SIDO","MDKA","AMMN","EMTK","BUKA",
+    "ACES","MNCN","SCMA","LSIP","AALI","HRUM"
+]
+
+@router.post("/data/create-table")
+async def create_ohlcv_table():
+    try:
+        async with _AsyncSessionLocal() as db:
+            await db.execute(sql_text("""
+                CREATE TABLE IF NOT EXISTS ohlcv_daily (
+                    id SERIAL PRIMARY KEY,
+                    ticker VARCHAR(10) NOT NULL,
+                    date DATE NOT NULL,
+                    open FLOAT, high FLOAT, low FLOAT, close FLOAT,
+                    volume BIGINT,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    UNIQUE(ticker, date)
+                )
+            """))
+            await db.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_ohlcv_ticker_date ON ohlcv_daily(ticker, date)"))
+            await db.commit()
+        return {"status": "ok", "message": "Table ohlcv_daily ready"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+@router.post("/data/accumulate")
+async def accumulate_ohlcv():
+    import asyncio as _asyncio
+    from datetime import datetime as _dt
+    today = _dt.now().strftime("%Y-%m-%d")
+    results = {"success": [], "failed": []}
+
+    async def save_one(ticker):
+        try:
+            ohlcv = await _asyncio.wait_for(invesgo.get_ohlcv_daily(ticker, period="5d"), timeout=15)
+            if not ohlcv: return
+            last = ohlcv[-1]
+            async with _AsyncSessionLocal() as db:
+                await db.execute(sql_text("""
+                    INSERT INTO ohlcv_daily (ticker, date, open, high, low, close, volume, created_at)
+                    VALUES (:ticker, :date, :open, :high, :low, :close, :volume, NOW())
+                    ON CONFLICT (ticker, date) DO UPDATE SET
+                    open=EXCLUDED.open, high=EXCLUDED.high,
+                    low=EXCLUDED.low, close=EXCLUDED.close, volume=EXCLUDED.volume
+                """), {
+                    "ticker": ticker, "date": last.get("date", today),
+                    "open": float(last.get("open", 0) or 0),
+                    "high": float(last.get("high", 0) or 0),
+                    "low": float(last.get("low", 0) or 0),
+                    "close": float(last.get("close", 0) or 0),
+                    "volume": float(last.get("volume", 0) or 0),
+                })
+                await db.commit()
+            results["success"].append(ticker)
+        except Exception as e:
+            results["failed"].append({"ticker": ticker, "reason": str(e)[:50]})
+
+    for i in range(0, len(DATA_WATCHLIST), 10):
+        await _asyncio.gather(*[save_one(t) for t in DATA_WATCHLIST[i:i+10]])
+        await _asyncio.sleep(1)
+
+    return {"status": "ok", "date": today, "success": len(results["success"]), "failed": len(results["failed"]), "details": results}
+
+@router.get("/data/status")
+async def ohlcv_status():
+    try:
+        async with _AsyncSessionLocal() as db:
+            result = await db.execute(sql_text("""
+                SELECT ticker, COUNT(*) as days, MIN(date) as from_date, MAX(date) as to_date
+                FROM ohlcv_daily GROUP BY ticker ORDER BY days DESC LIMIT 20
+            """))
+            rows = result.fetchall()
+        return {"status": "ok", "tickers": [{"ticker": r[0], "days": r[1], "from": str(r[2]), "to": str(r[3])} for r in rows], "total": len(rows)}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
