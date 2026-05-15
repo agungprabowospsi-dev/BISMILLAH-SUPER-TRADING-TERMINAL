@@ -94,7 +94,7 @@ MODE_CONFIG: Dict[str, Dict[str, Any]] = {
             "bandarmology": 0.20,
             "foreign": 0.10,
             "pattern": 0.20,
-            "rag": 0.05,
+            "rag": 0.10,
         },
     },
     "intraday": {
@@ -984,17 +984,64 @@ def calculate_pattern_bonus(mode: Mode, ohlcv: List[Dict[str, Any]]) -> Dict[str
 
 async def calculate_rag_boost(ticker: str, mode: Mode, context: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Lightweight safe RAG boost.
-    If kb_service does not expose a compatible API, return neutral low boost.
+    Enhanced RAG boost — query spesifik per phase + pattern + mode
+    Menggunakan insight dari 11 buku trading di Knowledge Base
     """
     if kb_service is None:
         return {"boost": 0, "reason": "kb_service unavailable"}
 
+    # Build query spesifik berdasarkan konteks deteksi
+    phase = context.get("phase", "neutral")
+    rvol = context.get("rvol", 1.0)
+    patterns = context.get("patterns", [])
+    akumulasi_signals = context.get("akumulasi_signals", [])
+
+    # Query berbeda per phase
+    phase_queries = {
+        "early_accumulation": "early accumulation phase quiet volume institutional buying bandar akumulasi awal",
+        "accumulation": "accumulation phase bandar akumulasi volume naik harga sideways wyckoff phase B",
+        "markup": "markup phase breakout volume konfirmasi trend naik institutional buying",
+        "accumulation_late": "late accumulation bandar finishing position sebelum breakout",
+        "distribution": "distribusi bandar jual institutional selling volume tinggi harga tidak naik",
+        "decline": "downtrend bearish avoid tidak masuk posisi",
+        "neutral": "volume price analysis setup trading IDX",
+    }
+
+    # Query spesifik per mode
+    mode_context = {
+        "swing": "swing trading 3-30 hari institutional accumulation trend following",
+        "intraday": "intraday trading volume spike gap opening momentum hari ini",
+        "scalping": "scalping momentum burst orderbook bid ask spread",
+    }
+
+    # Pattern context
+    pattern_ctx = ""
+    if patterns:
+        pattern_names = [p.get("name", "") if isinstance(p, dict) else str(p) for p in patterns[:3]]
+        pattern_ctx = f"chart pattern {' '.join(pattern_names)}"
+
+    # Akumulasi signal context
+    akum_ctx = " ".join(akumulasi_signals[:3]) if akumulasi_signals else ""
+
+    # Build final query
     query = (
-        f"{mode} screener {ticker} "
-        f"bandarmology accumulation volume price analysis pattern "
-        f"phase {context.get('phase')} rvol {context.get('rvol')}"
-    )
+        f"{phase_queries.get(phase, phase_queries['neutral'])} "
+        f"{mode_context.get(mode, '')} "
+        f"rvol {rvol} {pattern_ctx} {akum_ctx} "
+        f"IDX saham Indonesia trading setup"
+    ).strip()
+
+    # Keywords scoring — lebih komprehensif
+    bullish_keywords = [
+        "accumulation", "akumulasi", "institutional buying", "bandar beli",
+        "volume naik", "breakout", "wyckoff", "markup", "bullish",
+        "net buy", "foreign buy", "momentum", "uptrend", "support",
+        "quiet accumulation", "demand zone", "absorption"
+    ]
+    bearish_keywords = [
+        "distribution", "distribusi", "selling", "downtrend", "bearish",
+        "decline", "avoid", "resistance", "overhead supply"
+    ]
 
     try:
         for method_name in ("search_relevant", "search", "query", "get_context"):
@@ -1002,15 +1049,33 @@ async def calculate_rag_boost(ticker: str, mode: Mode, context: Dict[str, Any]) 
             if method is None:
                 continue
             try:
-                result = await call_maybe_async(method, query=query, limit=5)
+                result = await call_maybe_async(method, query=query, limit=8)
             except TypeError:
-                result = await call_maybe_async(method, query, 5)
+                result = await call_maybe_async(method, query, 8)
 
             text = str(result or "").lower()
-            boost = 0
-            keywords = ("accumulation", "volume", "breakout", "wyckoff", "institution", "bandar", "foreign")
-            boost = min(5, sum(1 for k in keywords if k in text))
-            return {"boost": boost, "reason": "KB keyword alignment", "source": method_name}
+            if not text or len(text) < 50:
+                continue
+
+            bull_count = sum(1 for k in bullish_keywords if k in text)
+            bear_count = sum(1 for k in bearish_keywords if k in text)
+
+            # Net boost: bullish - bearish, max 8
+            net_boost = bull_count - bear_count
+            boost = max(0, min(8, net_boost))
+
+            # Bonus kalau phase match dengan KB content
+            if phase in ["early_accumulation", "accumulation"] and bull_count >= 3:
+                boost = min(8, boost + 2)
+
+            return {
+                "boost": boost,
+                "reason": f"KB: {bull_count} bullish / {bear_count} bearish signals",
+                "source": method_name,
+                "query_phase": phase,
+                "bull_signals": bull_count,
+                "bear_signals": bear_count
+            }
     except Exception as exc:
         return {"boost": 0, "reason": f"KB error: {exc}"}
 
@@ -1026,7 +1091,7 @@ def final_score(mode: Mode, engine_score: float, bandarm_score: float, foreign_s
         + bandarm_score * w["bandarmology"]
         + foreign_score * w["foreign"]
         + pattern_score * w["pattern"]
-        + (rag_boost * 20) * w["rag"]  # rag_boost 0-5 normalized to 0-100
+        + (rag_boost * 12.5) * w["rag"]  # rag_boost 0-8 normalized to 0-100
     )
     # Fase 2B akumulasi multiplier — adaptive per mode
     score = apply_akumulasi_multiplier(score, akumulasi_score, mode)
@@ -1084,6 +1149,7 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             "phase": bandarm.get("phase"),
             "rvol": candidate.get("rvol"),
             "patterns": pattern.get("patterns"),
+            "akumulasi_signals": bandar_early.get("signals", []),
         })
 
         # Fase 2B — Bandar Early Detection
