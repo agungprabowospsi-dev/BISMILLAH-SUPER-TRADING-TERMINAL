@@ -84,9 +84,21 @@ def extract_kb_features(kb_context: str) -> Dict[str, float]:
                                 'golden ratio support', 'fib retracement buy'] if w in text)
     features['kb_fib_signal'] = min(1.0, fib_bull * 0.25)
 
-    # 10. Overall KB bullish score
-    all_bull = sum(v for k, v in features.items() if 'signal' in k or 'quality' in k or 'consensus' in k)
-    features['kb_overall'] = all_bull / 6.0  # normalize ke 0-1
+    # 10. Market Microstructure (Larry Harris — Trading and Exchanges)
+    micro_bull = sum(1 for w in [
+        'bid ask spread', 'order flow', 'market depth', 'liquidity',
+        'price impact', 'informed trader', 'institutional order',
+        'buying pressure', 'demand exceeds', 'order imbalance'
+    ] if w in text)
+    micro_bear = sum(1 for w in [
+        'selling pressure', 'supply exceeds', 'thin market',
+        'wide spread', 'illiquid', 'adverse selection'
+    ] if w in text)
+    features['kb_microstructure'] = min(1.0, max(0.0, 0.5 + (micro_bull - micro_bear) * 0.15))
+
+    # 11. Overall KB bullish score — update ke 11 komponen
+    all_bull = sum(v for k, v in features.items() if 'signal' in k or 'quality' in k or 'consensus' in k or 'microstructure' in k)
+    features['kb_overall'] = all_bull / 7.0  # normalize ke 0-1
 
     logger.debug(f"KB Features extracted: {features}")
     return features
@@ -103,6 +115,7 @@ def _default_features() -> Dict[str, float]:
         'kb_consensus': 0.5,
         'kb_quant_signal': 0.0,
         'kb_fib_signal': 0.0,
+        'kb_microstructure': 0.5,
         'kb_overall': 0.5,
     }
 

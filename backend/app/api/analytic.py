@@ -3,6 +3,7 @@ from fastapi import APIRouter as _R, HTTPException
 from fastapi.responses import JSONResponse
 import numpy as np
 from app.ml.signal_quality import predict_win_probability, get_model_status
+from app.ml.dynamic_sltp import calculate_dynamic_sltp
 from pydantic import BaseModel
 from app.core import invesgo
 from app.engines.master_runner import run_all_engines
@@ -312,6 +313,20 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
         except Exception as e:
             import traceback
             result["win_probability"] = {"probability": 50.0, "grade": "C", "grade_label": "Moderate", "color": "#fbbf24", "method": "fallback", "error": str(e), "trace": traceback.format_exc()[:200]}
+        # Dynamic SL/TP
+        try:
+            dynamic = calculate_dynamic_sltp(
+                entry_price=float(entry) if entry else float(result.get("entry", 0)),
+                ohlcv=normalized_ohlcv,
+                market_regime=str(result.get("market_regime", "SIDEWAYS")),
+                final_score=float(score),
+                mode=req.mode,
+                akumulasi_score=50.0
+            )
+            result["dynamic_sltp"] = dynamic
+        except Exception as e:
+            result["dynamic_sltp"] = {"method": "error", "error": str(e)}
+
         return JSONResponse(content=_json.loads(_json.dumps(result, cls=NumpyEncoder)))
     except HTTPException:
         raise
