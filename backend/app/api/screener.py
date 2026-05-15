@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 
 try:
     from app.core import invesgo
+from app.api.bandar_early_detection import get_bandar_early_score, apply_akumulasi_multiplier
 except Exception:
     invesgo = None
 
@@ -1018,7 +1019,7 @@ async def calculate_rag_boost(ticker: str, mode: Mode, context: Dict[str, Any]) 
 
 # ===== Phase 3 Combined Scoring =====
 
-def final_score(mode: Mode, engine_score: float, bandarm_score: float, foreign_score: float, pattern_score: float, rag_boost: float) -> float:
+def final_score(mode: Mode, engine_score: float, bandarm_score: float, foreign_score: float, pattern_score: float, rag_boost: float, akumulasi_score: float = 50.0) -> float:
     w = MODE_CONFIG[mode]["final_weights"]
     score = (
         engine_score * w["engine"]
@@ -1027,6 +1028,8 @@ def final_score(mode: Mode, engine_score: float, bandarm_score: float, foreign_s
         + pattern_score * w["pattern"]
         + (rag_boost * 20) * w["rag"]  # rag_boost 0-5 normalized to 0-100
     )
+    # Fase 2B akumulasi multiplier — adaptive per mode
+    score = apply_akumulasi_multiplier(score, akumulasi_score, mode)
     return round(clamp(score), 2)
 
 
@@ -1083,6 +1086,16 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             "patterns": pattern.get("patterns"),
         })
 
+        # Fase 2B — Bandar Early Detection
+        try:
+            bandar_early = await asyncio.wait_for(
+                get_bandar_early_score(ticker, mode, ohlcv), timeout=10
+            )
+            akumulasi_score = bandar_early.get("akumulasi_score", 50.0)
+        except Exception:
+            bandar_early = {"akumulasi_score": 50.0, "signals": [], "mode": mode}
+            akumulasi_score = 50.0
+
         fscore = final_score(
             mode=mode,
             engine_score=engine_score,
@@ -1090,6 +1103,7 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             foreign_score=to_float(foreign.get("score")),
             pattern_score=to_float(pattern.get("score")),
             rag_boost=to_float(rag.get("boost")),
+            akumulasi_score=akumulasi_score,
         )
 
         result = {
@@ -1109,6 +1123,9 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             "bandarmology": bandarm,
             "bandar_macd": bandarm.get("bandar_macd"),
             "phase": bandarm.get("phase"),
+            "bandar_early": bandar_early,
+            "akumulasi_score": akumulasi_score,
+            "akumulasi_signals": bandar_early.get("signals", []),
             "foreign_flow_score": foreign.get("score"),
             "foreign_flow": foreign,
             "pattern_bonus": pattern.get("bonus"),
