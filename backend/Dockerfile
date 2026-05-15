@@ -11,7 +11,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 RUN rm -rf /app/data
 
-ADD https://worldtimeapi.org/api/timezone/Asia/Jakarta /tmp/cachebust
 COPY . .
 
 RUN mkdir -p /app/knowledge_base/books /app/knowledge_base/chroma_db
