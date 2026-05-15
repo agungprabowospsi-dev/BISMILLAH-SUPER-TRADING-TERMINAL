@@ -277,6 +277,27 @@ export default function AnalyticPage() {
                   </span>
                 </div>
               ))}
+              {/* Dynamic SL/TP */}
+              {r.dynamic_sltp && r.dynamic_sltp.method !== 'error' && (
+                <div className="mt-2 rounded-lg border border-accent-blue/30 bg-accent-blue/5 p-3">
+                  <p className="font-mono text-[10px] text-slate-500 mb-2">⚡ DYNAMIC SL/TP (ATR × Regime × Score)</p>
+                  {[
+                    ['Dynamic SL', r.dynamic_sltp.sl, 'text-accent-red'],
+                    ['Dynamic TP1', r.dynamic_sltp.tp1, 'text-accent-gold'],
+                    ['Dynamic TP2', r.dynamic_sltp.tp2, 'text-accent-gold'],
+                    ['Dynamic TP3', r.dynamic_sltp.tp3, 'text-accent-gold'],
+                    ['ATR', r.dynamic_sltp.atr ? `${r.dynamic_sltp.atr_pct?.toFixed(1)}%` : null, 'text-accent-blue'],
+                    ['R:R TP1', r.dynamic_sltp.rr1 ? `1:${r.dynamic_sltp.rr1}` : null, 'text-accent-blue'],
+                  ].filter(([,v]) => v).map(([k,v,c]) => (
+                    <div key={k} className="flex justify-between items-center py-1 border-b border-border-dim/50 last:border-0">
+                      <span className="font-mono text-[10px] text-slate-500">{k}</span>
+                      <span className={clsx('font-mono font-bold text-xs', c)}>
+                        {typeof v==='number'?`Rp ${v.toLocaleString('id-ID')}`:v}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <button onClick={() => sendToMonitoring({
                 ticker:r.ticker||analyticTicker,
                 entry_price:r.entry, stop_loss:r.stop_loss||r.sl,
