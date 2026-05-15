@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Send, Terminal, Bot, User, Play, CheckCircle, XCircle, Loader, Trash2 } from 'lucide-react'
+import { Send, Terminal, Bot, User, Play, CheckCircle, XCircle, Loader, Trash2, StopCircle } from 'lucide-react'
 
 const BACKEND = import.meta.env.VITE_BACKEND_URL || 'https://backend-production-daed.up.railway.app'
 
@@ -125,11 +125,6 @@ export default function EnhancementPage() {
         return msg
       }))
 
-      // Auto-kirim output ke Claude untuk analisis
-      if (result.stdout || result.stderr) {
-        await sendMessage(`Output dari command \`${command}\`:\n\`\`\`\n${result.stdout || result.stderr}\n\`\`\`\nApa kesimpulannya?`, true)
-      }
-    } catch(e) {
       console.error(e)
     } finally {
       setRunningCmd(null)
@@ -183,13 +178,6 @@ export default function EnhancementPage() {
 
       setMessages(prev => [...prev, assistantMsg])
 
-      // Auto-run commands kalau ada
-      if (data.commands && data.commands.length > 0) {
-        const msgIdx = messages.length + (isAuto ? 0 : 1)
-        for (const cmd of data.commands) {
-          await runCommand(cmd, msgIdx)
-        }
-      }
 
     } catch(e) {
       setMessages(prev => [...prev, {
@@ -283,9 +271,15 @@ export default function EnhancementPage() {
             onKeyDown={handleKey} placeholder="Ketik perintah... contoh: 'Tambah fitur X', 'Fix bug Y', 'Cek status Z'" rows={2}
             style={{ flex:1, padding:'10px 14px', border:'1px solid #e2e8f0', borderRadius:12, fontFamily:'monospace', fontSize:13, color:'#1e293b', resize:'none', outline:'none', background:'#f8fafc', lineHeight:1.5 }}
           />
+          {loading && (
+            <button onClick={() => { setLoading(false); setMessages(prev => [...prev, {role:'assistant',content:'⛔ Dihentikan.',timestamp:new Date().toLocaleTimeString('id-ID')}]) }}
+              style={{ width:44, height:44, borderRadius:12, border:'none', background:'#ef4444', color:'white', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+              <StopCircle size={18}/>
+            </button>
+          )}
           <button onClick={() => sendMessage()} disabled={loading || !input.trim()}
-            style={{ width:44, height:44, borderRadius:12, border:'none', background: loading || !input.trim() ? '#e2e8f0' : '#7c3aed', color:'white', cursor: loading || !input.trim() ? 'not-allowed' : 'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-            {loading ? <Loader size={18} style={{ animation:'spin 1s linear infinite' }}/> : <Send size={18}/>}
+            style={{ width:44, height:44, borderRadius:12, border:'none', background: !input.trim() ? '#e2e8f0' : '#7c3aed', color:'white', cursor: loading || !input.trim() ? 'not-allowed' : 'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+            <Send size={18}/>
           </button>
         </div>
         <p style={{ fontFamily:'monospace', fontSize:9, color:'#94a3b8', margin:'6px 0 0' }}>
