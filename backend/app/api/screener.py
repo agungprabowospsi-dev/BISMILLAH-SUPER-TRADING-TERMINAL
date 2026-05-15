@@ -34,9 +34,11 @@ from pydantic import BaseModel, Field
 
 try:
     from app.core import invesgo
-from app.api.bandar_early_detection import get_bandar_early_score, apply_akumulasi_multiplier
+    from app.api.bandar_early_detection import get_bandar_early_score, apply_akumulasi_multiplier
 except Exception:
     invesgo = None
+    get_bandar_early_score = None
+    apply_akumulasi_multiplier = None
 
 try:
     from app.core.redis_client import cache_get, cache_set
