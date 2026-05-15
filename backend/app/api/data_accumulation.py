@@ -118,3 +118,4 @@ async def create_table():
         return {"status": "ok", "message": "Table ohlcv_daily ready"}
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
