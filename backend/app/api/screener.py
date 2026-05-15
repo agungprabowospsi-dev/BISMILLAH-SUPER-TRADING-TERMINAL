@@ -399,7 +399,9 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             if price < cfg["price_min"] or price > cfg["price_max"]:
                 return None
 
-            # Filter saham suspended
+            # Filter saham suspended — dari field Invesgo + OHLCV check
+            if int(stock.get("suspend", 0) or 0) > 0:
+                return None
             if metrics["volume"] <= 0:
                 return None
             if metrics["avg_volume_20"] <= 0:
