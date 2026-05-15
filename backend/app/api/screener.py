@@ -399,6 +399,16 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             if price < cfg["price_min"] or price > cfg["price_max"]:
                 return None
 
+            # Filter saham suspended
+            if metrics["volume"] <= 0:
+                return None
+            if metrics["avg_volume_20"] <= 0:
+                return None
+            if metrics["rvol"] <= 0:
+                return None
+            if (metrics.get("high", 0) == metrics.get("low", 0) == metrics["price"] and metrics["volume"] < 1000):
+                return None
+
             if metrics["rvol"] < cfg["rvol_min"]:
                 return None
 
