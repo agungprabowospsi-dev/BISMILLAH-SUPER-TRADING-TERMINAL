@@ -437,8 +437,6 @@ async def market_context(ticker: str):
 
 def _calc_atr(ohlcv, period=14):
     import numpy as np
-from sqlalchemy import text as sql_text
-from app.core.database import AsyncSessionLocal as _AsyncSessionLocal
     trs = []
     for i in range(1, len(ohlcv)):
         h, l, pc = ohlcv[i]["high"], ohlcv[i]["low"], ohlcv[i-1]["close"]
