@@ -2,6 +2,8 @@
 from fastapi import APIRouter as _R, HTTPException
 from fastapi.responses import JSONResponse
 import numpy as np
+from sqlalchemy import text as sql_text
+from app.core.database import AsyncSessionLocal as _AsyncSessionLocal
 from app.ml.signal_quality import predict_win_probability, get_model_status
 from app.ml.dynamic_sltp import calculate_dynamic_sltp
 from pydantic import BaseModel
@@ -435,6 +437,8 @@ async def market_context(ticker: str):
 
 def _calc_atr(ohlcv, period=14):
     import numpy as np
+from sqlalchemy import text as sql_text
+from app.core.database import AsyncSessionLocal as _AsyncSessionLocal
     trs = []
     for i in range(1, len(ohlcv)):
         h, l, pc = ohlcv[i]["high"], ohlcv[i]["low"], ohlcv[i-1]["close"]
@@ -572,8 +576,6 @@ async def get_foreign_flow_dashboard():
 
 
 # ============ DATA ACCUMULATION ============
-from sqlalchemy import text as sql_text
-from app.core.database import AsyncSessionLocal as _AsyncSessionLocal
 
 DATA_WATCHLIST = [
     "BBCA","BBRI","BMRI","TLKM","ASII","BYAN","GOTO","UNVR",
