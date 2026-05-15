@@ -358,6 +358,16 @@ def calc_prefilter_metrics(ohlcv: List[Dict[str, Any]]) -> Optional[Dict[str, An
     if close <= 0 or prev_close <= 0:
         return None
 
+    # Filter suspended: volume hari ini = 0 atau None
+    last_vol_raw = last.get("volume")
+    if last_vol_raw is None or to_float(last_vol_raw) <= 0:
+        return None
+
+    # Filter suspended: 3 hari terakhir semua volume = 0
+    last3_vol = [to_float(c.get("volume")) for c in ohlcv[-3:]]
+    if all(v <= 0 for v in last3_vol):
+        return None
+
     volumes20 = [to_float(c.get("volume")) for c in ohlcv[-21:-1]]
     avg_volume20 = sum(volumes20) / len(volumes20) if volumes20 else 0
     last_volume = to_float(last.get("volume"))
