@@ -610,14 +610,30 @@ async def accumulate_ohlcv():
     today = _dt.now().strftime("%Y-%m-%d")
     results = {"success": [], "failed": []}
 
-    # Fallback ke hari bursa terakhir (skip Sabtu & Minggu)
-    weekday = _dt.now().weekday()
-    if weekday == 5:    # Sabtu
-        trade_date = (_dt.now() - _td(days=1)).strftime("%Y-%m-%d")
-    elif weekday == 6:  # Minggu
-        trade_date = (_dt.now() - _td(days=2)).strftime("%Y-%m-%d")
-    else:
-        trade_date = today
+    # Cari hari bursa valid — cek hari ini dulu, mundur max 7 hari
+    import httpx as _httpx
+    INVESGO_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImNtbnVmb2s2bTAwMDcxa21wM25lODlqanEiLCJlbWFpbCI6ImFndW5ndHJhZGVyY3VhbkBnbWFpbC5jb20iLCJ1c2VybmFtZSI6InNhbWJlcmN1YW4iLCJuYW1lIjoiQUdVTkciLCJyb2xlIjoiUFJJTUUiLCJzY29wZSI6WyJwdWJsaWMiXSwidmVyaWZpZWQiOmZhbHNlLCJkZXZpY2UiOiJBUEkiLCJpYXQiOjE3Nzg2MzI2MjYsImV4cCI6MTc4MTMzNjAzNX0.XgcvzxL_Y-JIxYpH6DxtRnz1N-eWnSVddLfMoUeGmfA"
+    trade_date = None
+    for days_back in range(0, 8):
+        candidate_dt = _dt.now() - _td(days=days_back)
+        candidate = candidate_dt.strftime("%Y-%m-%d")
+        if candidate_dt.weekday() in (5, 6):
+            continue
+        try:
+            async with _httpx.AsyncClient(timeout=10) as _client:
+                _r = await _client.get(
+                    "https://api.invesgo.id/analysis/chart/stock/BBCA",
+                    headers={"Authorization": f"Bearer {INVESGO_TOKEN}"},
+                    params={"from": candidate, "to": candidate}
+                )
+                _data = _r.json()
+                if _data and len(_data) > 0 and float(_data[-1].get("close", 0)) > 0:
+                    trade_date = candidate
+                    break
+        except:
+            continue
+    if not trade_date:
+        trade_date = (_dt.now() - _td(days=4)).strftime("%Y-%m-%d")
 
     async def save_one(ticker):
         try:
