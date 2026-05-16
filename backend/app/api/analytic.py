@@ -606,15 +606,40 @@ async def create_ohlcv_table():
 @router.post("/data/accumulate")
 async def accumulate_ohlcv():
     import asyncio as _asyncio
-    from datetime import datetime as _dt
+    from datetime import datetime as _dt, timedelta as _td
     today = _dt.now().strftime("%Y-%m-%d")
     results = {"success": [], "failed": []}
 
+    # Fallback ke hari bursa terakhir (skip Sabtu & Minggu)
+    weekday = _dt.now().weekday()
+    if weekday == 5:    # Sabtu
+        trade_date = (_dt.now() - _td(days=1)).strftime("%Y-%m-%d")
+    elif weekday == 6:  # Minggu
+        trade_date = (_dt.now() - _td(days=2)).strftime("%Y-%m-%d")
+    else:
+        trade_date = today
+
     async def save_one(ticker):
         try:
-            ohlcv = await _asyncio.wait_for(invesgo.get_ohlcv_daily(ticker, period="5d"), timeout=15)
-            if not ohlcv: return
-            last = ohlcv[-1]
+            ohlcv = await _asyncio.wait_for(
+                invesgo.get_ohlcv_daily(ticker, from_date=trade_date, to_date=trade_date),
+                timeout=15
+            )
+            if not ohlcv:
+                results["failed"].append({"ticker": ticker, "reason": "no data from Invesgo"})
+                return
+
+            # Ambil candle valid terakhir
+            last = None
+            for candle in reversed(ohlcv):
+                if candle.get("close") and float(candle.get("close", 0)) > 0:
+                    last = candle
+                    break
+
+            if not last:
+                results["failed"].append({"ticker": ticker, "reason": "no valid candle"})
+                return
+
             async with _AsyncSessionLocal() as db:
                 await db.execute(sql_text("""
                     INSERT INTO ohlcv_daily (ticker, date, open, high, low, close, volume, created_at)
@@ -623,12 +648,12 @@ async def accumulate_ohlcv():
                     open=EXCLUDED.open, high=EXCLUDED.high,
                     low=EXCLUDED.low, close=EXCLUDED.close, volume=EXCLUDED.volume
                 """), {
-                    "ticker": ticker, "date": last.get("date", today),
+                    "ticker": ticker, "date": last.get("date", trade_date),
                     "open": float(last.get("open", 0) or 0),
                     "high": float(last.get("high", 0) or 0),
                     "low": float(last.get("low", 0) or 0),
                     "close": float(last.get("close", 0) or 0),
-                    "volume": float(last.get("volume", 0) or 0),
+                    "volume": int(float(last.get("volume", 0) or 0)),
                 })
                 await db.commit()
             results["success"].append(ticker)
@@ -639,7 +664,7 @@ async def accumulate_ohlcv():
         await _asyncio.gather(*[save_one(t) for t in DATA_WATCHLIST[i:i+10]])
         await _asyncio.sleep(1)
 
-    return {"status": "ok", "date": today, "success": len(results["success"]), "failed": len(results["failed"]), "details": results}
+    return {"status": "ok", "date": today, "trade_date": trade_date, "success": len(results["success"]), "failed": len(results["failed"]), "details": results}
 
 @router.get("/data/status")
 async def ohlcv_status():
