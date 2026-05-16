@@ -12,7 +12,6 @@ from sqlalchemy import text
 router = APIRouter(prefix="/api/data", tags=["data_accumulation"])
 logger = logging.getLogger(__name__)
 
-# LQ45 + saham penting untuk diakumulasi
 WATCHLIST = [
     "BBCA","BBRI","BMRI","TLKM","ASII","BYAN","GOTO","UNVR",
     "ICBP","INDF","ANTM","PTBA","ADRO","ESSA","SMGR","PGAS",
@@ -20,22 +19,56 @@ WATCHLIST = [
     "ACES","MNCN","SCMA","LSIP","AALI","HRUM"
 ]
 
+def get_last_trading_date() -> str:
+    """Ambil hari bursa terakhir — skip Sabtu & Minggu"""
+    today = datetime.now()
+    # Kalau Sabtu (5) → mundur 1 hari ke Jumat
+    # Kalau Minggu (6) → mundur 2 hari ke Jumat
+    # Kalau Senin-Jumat → pakai hari ini
+    weekday = today.weekday()
+    if weekday == 5:   # Sabtu
+        last = today - timedelta(days=1)
+    elif weekday == 6: # Minggu
+        last = today - timedelta(days=2)
+    else:
+        last = today
+    return last.strftime("%Y-%m-%d")
+
 @router.post("/accumulate")
 async def accumulate_daily():
     """Jalankan akumulasi data harian — panggil via cron atau manual"""
     results = {"success": [], "failed": [], "total": len(WATCHLIST)}
+    
+    trade_date = get_last_trading_date()
     today = datetime.now().strftime("%Y-%m-%d")
+    logger.info(f"Accumulate: today={today}, trade_date={trade_date}")
 
     async def save_one(ticker):
         try:
+            # Ambil data dari trade_date (hari bursa terakhir)
             ohlcv = await asyncio.wait_for(
-                invesgo.get_ohlcv_daily(ticker, period="5d"), timeout=15
+                invesgo.get_ohlcv_daily(
+                    ticker,
+                    from_date=trade_date,
+                    to_date=trade_date
+                ),
+                timeout=15
             )
             if not ohlcv:
-                results["failed"].append({"ticker": ticker, "reason": "no data"})
+                results["failed"].append({"ticker": ticker, "reason": "no data from Invesgo"})
                 return
 
-            last = ohlcv[-1]
+            # Ambil candle terakhir yang valid
+            last = None
+            for candle in reversed(ohlcv):
+                if candle.get("close") and float(candle.get("close", 0)) > 0:
+                    last = candle
+                    break
+
+            if not last:
+                results["failed"].append({"ticker": ticker, "reason": "no valid candle"})
+                return
+
             async with AsyncSessionLocal() as db:
                 await db.execute(text("""
                     INSERT INTO ohlcv_daily
@@ -47,15 +80,16 @@ async def accumulate_daily():
                     volume=EXCLUDED.volume
                 """), {
                     "ticker": ticker,
-                    "date": last.get("date", today),
+                    "date": last.get("date", trade_date),
                     "open": float(last.get("open", 0) or 0),
                     "high": float(last.get("high", 0) or 0),
                     "low": float(last.get("low", 0) or 0),
                     "close": float(last.get("close", 0) or 0),
-                    "volume": float(last.get("volume", 0) or 0),
+                    "volume": int(float(last.get("volume", 0) or 0)),
                 })
                 await db.commit()
             results["success"].append(ticker)
+
         except Exception as e:
             results["failed"].append({"ticker": ticker, "reason": str(e)[:50]})
 
@@ -68,6 +102,7 @@ async def accumulate_daily():
     return {
         "status": "ok",
         "date": today,
+        "trade_date": trade_date,
         "success": len(results["success"]),
         "failed": len(results["failed"]),
         "details": results
@@ -118,4 +153,3 @@ async def create_table():
         return {"status": "ok", "message": "Table ohlcv_daily ready"}
     except Exception as e:
         return {"status": "error", "error": str(e)}
-
