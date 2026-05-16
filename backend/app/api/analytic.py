@@ -664,7 +664,7 @@ async def accumulate_ohlcv():
                     open=EXCLUDED.open, high=EXCLUDED.high,
                     low=EXCLUDED.low, close=EXCLUDED.close, volume=EXCLUDED.volume
                 """), {
-                    "ticker": ticker, "date": last.get("date", trade_date)[:10],
+                    "ticker": ticker, "date": _dt.strptime(last.get("date", trade_date)[:10], "%Y-%m-%d").date(),
                     "open": float(last.get("open", 0) or 0),
                     "high": float(last.get("high", 0) or 0),
                     "low": float(last.get("low", 0) or 0),
