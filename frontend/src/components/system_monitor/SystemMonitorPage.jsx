@@ -44,7 +44,7 @@ export default function SystemMonitorPage() {
 
   useEffect(() => {
     if (!autoRefresh) return
-    const iv = setInterval(runAll, 30000)
+    const iv = setInterval(runAll, 5000)
     return () => clearInterval(iv)
   }, [autoRefresh])
 

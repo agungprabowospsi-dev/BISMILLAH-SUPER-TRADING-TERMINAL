@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import SystemHealthGauge from "../shared/SystemHealthGauge";
 import { BACKEND_URL } from "../../utils/api";
 import { useStore } from "../../stores/useStore";
 
@@ -105,6 +106,7 @@ export default function ScreenerPage() {
         <h1 style={S.title}>SCREENER</h1>
         <p style={S.subtitle}>Bismillah Super Trading Terminal</p>
       </div>
+      <SystemHealthGauge/>
       <div style={S.modeRow}>
         {MODE_OPTIONS.map((m) => (
           <button key={m} onClick={() => setMode(m)} style={{ ...S.modeBtn, ...(mode === m ? S.modeBtnActive : {}) }}>
