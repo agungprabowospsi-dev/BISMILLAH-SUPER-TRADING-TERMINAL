@@ -674,7 +674,7 @@ async def accumulate_ohlcv():
                 await db.commit()
             results["success"].append(ticker)
         except Exception as e:
-            results["failed"].append({"ticker": ticker, "reason": str(e)[:50]})
+            results["failed"].append({"ticker": ticker, "reason": str(e)[:200]})
 
     for i in range(0, len(DATA_WATCHLIST), 10):
         await _asyncio.gather(*[save_one(t) for t in DATA_WATCHLIST[i:i+10]])
