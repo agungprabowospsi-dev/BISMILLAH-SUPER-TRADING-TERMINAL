@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Activity, TrendingUp, BarChart2, Zap, Wifi, WifiOff, BookOpen } from 'lucide-react'
+import { Activity, TrendingUp, BarChart2, Zap, Wifi, WifiOff, BookOpen, Heart } from 'lucide-react'
 import { useStore } from '../../stores/useStore'
 import { checkHealth } from '../../utils/api'
 import clsx from 'clsx'
@@ -13,7 +13,7 @@ const TABS = [
   { id:'backtest', label:'Backtest', icon:Activity },
   { id:'regime', label:'Market Regime', icon:Activity },
   { id:'foreignflow', label:'Foreign Flow', icon:TrendingUp },
-  { id:'enhancement', label:'Enhancement', icon:Activity },
+  { id:'sysmonitor', label:'System Monitor', icon:Heart },
 ]
 
 const TICKERS = [
@@ -23,9 +23,36 @@ const TICKERS = [
   {sym:'ANTM',price:'1.685',chg:'-1.17%',up:false},{sym:'INDF',price:'6.950',chg:'+0.72%',up:true},
 ]
 
+const BACKEND = 'https://backend-production-daed.up.railway.app'
+
+async function runHealthCheck() {
+  const checks = {}
+  const t = async (key, fn) => {
+    try { const r = await fn(); checks[key] = r }
+    catch { checks[key] = { status: 'error' } }
+  }
+  await Promise.all([
+    t('backend', async () => { const r = await fetch(`${BACKEND}/health`); return await r.json() }),
+    t('data', async () => { const r = await fetch(`${BACKEND}/api/analytic/data/status`); return await r.json() }),
+    t('kb', async () => { const r = await fetch(`${BACKEND}/api/kb/documents`); return await r.json() }),
+    t('regime', async () => { const r = await fetch(`${BACKEND}/api/analytic/market-regime`); return await r.json() }),
+  ])
+  return checks
+}
+
+function healthColor(s) {
+  if (s === 'green') return '#22c55e'
+  if (s === 'yellow') return '#eab308'
+  return '#ef4444'
+}
+
 export default function Header() {
   const { activeTab, setActiveTab, backendOnline, setBackendOnline } = useStore()
   const [time, setTime] = useState(new Date())
+  const [healthStatus, setHealthStatus] = useState(null)
+  const [checking, setChecking] = useState(false)
+  const [showDetail, setShowDetail] = useState(false)
+  const [healthDetail, setHealthDetail] = useState(null)
 
   useEffect(() => {
     const ping = async () => {
@@ -43,9 +70,32 @@ export default function Header() {
   }, [])
 
   const isOpen = () => {
-    const now = new Date(); const wib = new Date(now.getTime() + 7*60*60*1000); const m = wib.getUTCHours()*60+wib.getUTCMinutes()
+    const now = new Date()
+    const wib = new Date(now.getTime() + 7*60*60*1000)
+    const m = wib.getUTCHours()*60+wib.getUTCMinutes()
     return m>=540 && m<=960
   }
+
+  const doHealthCheck = async () => {
+    setChecking(true)
+    setShowDetail(false)
+    try {
+      const result = await runHealthCheck()
+      setHealthDetail(result)
+      const backendOk = result.backend?.status === 'ok' || result.backend?.returncode === 0
+      const dataOk = result.data?.status === 'ok'
+      const kbOk = Array.isArray(result.kb) && result.kb.length > 0
+      const regimeOk = !!(result.regime?.regime || result.regime?.status === 'ok')
+      const score = [backendOk, dataOk, kbOk, regimeOk].filter(Boolean).length
+      if (score === 4) setHealthStatus('green')
+      else if (score >= 2) setHealthStatus('yellow')
+      else setHealthStatus('red')
+      setShowDetail(true)
+    } catch { setHealthStatus('red') }
+    setChecking(false)
+  }
+
+  const hc = healthStatus ? healthColor(healthStatus) : '#94a3b8'
 
   return (
     <header className="sticky top-0 z-50 flex flex-col border-b border-border-dim bg-bg-primary/95 backdrop-blur-sm">
@@ -62,6 +112,43 @@ export default function Header() {
           </div>
         </div>
         <div className="flex items-center gap-4 shrink-0">
+          <div style={{position:'relative'}}>
+            <button onClick={doHealthCheck} disabled={checking} style={{
+              display:'flex', alignItems:'center', gap:6,
+              padding:'3px 10px', borderRadius:6, cursor:'pointer',
+              border:`1px solid ${hc}80`,
+              background:`${healthStatus ? hc+'15' : 'transparent'}`,
+              fontFamily:'monospace', fontSize:11, color:hc, transition:'all 0.3s'
+            }}>
+              <span style={{width:8,height:8,borderRadius:'50%',background:hc,display:'inline-block'}}/>
+              {checking ? 'CHECKING...' : healthStatus ? healthStatus.toUpperCase() : 'HEALTH CHECK'}
+            </button>
+            {showDetail && healthDetail && (
+              <div style={{
+                position:'absolute', top:'110%', right:0, zIndex:999,
+                background:'#0f172a', border:'1px solid #334155',
+                borderRadius:8, padding:12, minWidth:220,
+                boxShadow:'0 8px 32px rgba(0,0,0,0.5)'
+              }}>
+                <div style={{fontFamily:'monospace',fontSize:11,color:'#94a3b8',marginBottom:8}}>SYSTEM STATUS</div>
+                {[
+                  { label:'Backend API', ok: healthDetail.backend?.status==='ok'||healthDetail.backend?.returncode===0 },
+                  { label:'PostgreSQL Data', ok: healthDetail.data?.status==='ok' },
+                  { label:'Knowledge Base', ok: Array.isArray(healthDetail.kb)&&healthDetail.kb.length>0 },
+                  { label:'Market Regime', ok: !!(healthDetail.regime?.regime||healthDetail.regime?.status==='ok') },
+                ].map(({label,ok}) => (
+                  <div key={label} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0'}}>
+                    <span style={{width:8,height:8,borderRadius:'50%',background:ok?'#22c55e':'#ef4444',flexShrink:0}}/>
+                    <span style={{fontFamily:'monospace',fontSize:11,color:ok?'#22c55e':'#ef4444'}}>{label}</span>
+                  </div>
+                ))}
+                <button onClick={()=>setShowDetail(false)} style={{
+                  marginTop:8,width:'100%',fontFamily:'monospace',fontSize:10,
+                  color:'#64748b',background:'none',border:'none',cursor:'pointer'
+                }}>tutup</button>
+              </div>
+            )}
+          </div>
           <div className="flex items-center gap-1.5">
             <span className={clsx('w-1.5 h-1.5 rounded-full',isOpen()?'bg-accent-green animate-pulse':'bg-slate-500')}/>
             <span className="text-xs font-mono text-slate-400">{isOpen()?'IDX OPEN':'IDX CLOSED'}</span>
@@ -90,8 +177,8 @@ export default function Header() {
         </div>
         <nav className="flex gap-0">
           {TABS.map(({id,label,icon:Icon}) => (
-            <button key={id} onClick={() => setActiveTab(id)}
-              className={clsx('tab-btn flex items-center gap-2', activeTab===id?'tab-active':'tab-inactive')}>
+            <button key={id} onClick={()=>setActiveTab(id)}
+              className={clsx('tab-btn flex items-center gap-2',activeTab===id?'tab-active':'tab-inactive')}>
               <Icon className="w-3.5 h-3.5"/>{label}
             </button>
           ))}
