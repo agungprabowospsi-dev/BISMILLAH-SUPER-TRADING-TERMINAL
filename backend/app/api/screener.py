@@ -74,6 +74,7 @@ class ScreenerRequest(BaseModel):
     mode: Mode = Field(default="swing")
     limit: int = Field(default=5, ge=1, le=20)
     include_debug: bool = Field(default=True)
+    filter_intensity: int = Field(default=75, ge=50, le=100)
 
 
 MODE_CONFIG: Dict[str, Dict[str, Any]] = {
@@ -413,7 +414,7 @@ def calc_prefilter_metrics(ohlcv: List[Dict[str, Any]]) -> Optional[Dict[str, An
     }
 
 
-async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Semaphore) -> Optional[Dict[str, Any]]:
+async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Semaphore, filter_intensity: int = 75) -> Optional[Dict[str, Any]]:
     ticker = stock["ticker"]
     cfg = MODE_CONFIG[mode]
 
@@ -457,42 +458,49 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             candle_bullish = metrics.get("candle_bullish", False)
             candle_body_pct = metrics.get("candle_body_pct", 0)
             change_pct = metrics["change_pct"]
-            prev_price = price / (1 + change_pct / 100) if change_pct != -100 else price
+
+            # Intensity multiplier: 100%=ketat, 75%=sedang, 50%=longgar
+            intensity = filter_intensity
+            if intensity >= 100:
+                val_swing, val_intraday, val_scalping = 10_000_000_000, 5_000_000_000, 2_000_000_000
+                ma20_thr, ma5_thr = 0.98, 0.97
+                chg_swing, chg_intraday, chg_scalping = -2.0, -0.5, 1.0
+                body_min, price_min_scalping = 0.3, 200
+            elif intensity >= 75:
+                val_swing, val_intraday, val_scalping = 5_000_000_000, 2_000_000_000, 1_000_000_000
+                ma20_thr, ma5_thr = 0.95, 0.95
+                chg_swing, chg_intraday, chg_scalping = -3.0, -1.5, 0.5
+                body_min, price_min_scalping = 0.1, 100
+            else:  # 50%
+                val_swing, val_intraday, val_scalping = 1_000_000_000, 500_000_000, 200_000_000
+                ma20_thr, ma5_thr = 0.90, 0.90
+                chg_swing, chg_intraday, chg_scalping = -5.0, -3.0, 0.0
+                body_min, price_min_scalping = 0.0, 50
 
             if mode == "swing":
-                # Value >= 10 Miliar
-                if value < 10_000_000_000:
+                if value < val_swing:
                     return None
-                # Price >= MA20 (trend bullish menengah)
-                if price < ma20 * 0.98:
+                if price < ma20 * ma20_thr:
                     return None
-                # Tidak sedang turun tajam
-                if change_pct < -2.0:
+                if change_pct < chg_swing:
                     return None
 
             elif mode == "intraday":
-                # Value >= 5 Miliar
-                if value < 5_000_000_000:
+                if value < val_intraday:
                     return None
-                # Price >= MA5 (momentum jangka pendek)
-                if price < ma5 * 0.97:
+                if price < ma5 * ma5_thr:
                     return None
-                # Candle bullish atau minimal flat
-                if change_pct < -0.5:
+                if change_pct < chg_intraday:
                     return None
 
             elif mode == "scalping":
-                # Value >= 2 Miliar
-                if value < 2_000_000_000:
+                if value < val_scalping:
                     return None
-                # Price breakout >= 1% dari prev
-                if change_pct < 1.0:
+                if change_pct < chg_scalping:
                     return None
-                # Candle body cukup besar (momentum)
-                if candle_body_pct < 0.3:
+                if candle_body_pct < body_min:
                     return None
-                # Harga minimal 200 (hindari gorengan murahan)
-                if price < 200:
+                if price < price_min_scalping:
                     return None
 
             return {
@@ -504,9 +512,9 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             return None
 
 
-async def ohlcv_prefilter(universe: List[Dict[str, Any]], mode: Mode) -> List[Dict[str, Any]]:
+async def ohlcv_prefilter(universe: List[Dict[str, Any]], mode: Mode, filter_intensity: int = 75) -> List[Dict[str, Any]]:
     sem = asyncio.Semaphore(30)
-    tasks = [prefilter_one(stock, mode, sem) for stock in universe]
+    tasks = [prefilter_one(stock, mode, sem, filter_intensity) for stock in universe]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     candidates = [r for r in results if isinstance(r, dict)]
@@ -1409,7 +1417,7 @@ async def run_screener(request: ScreenerRequest) -> Dict[str, Any]:
     cfg = MODE_CONFIG[mode]
 
     universe = await build_universe(mode)
-    candidates = await ohlcv_prefilter(universe, mode)
+    candidates = await ohlcv_prefilter(universe, mode, req.filter_intensity)
     scored = await score_candidates(candidates, mode)
     qualified = apply_disqualifiers(scored, mode)
     top = rank_top(qualified, request.limit)

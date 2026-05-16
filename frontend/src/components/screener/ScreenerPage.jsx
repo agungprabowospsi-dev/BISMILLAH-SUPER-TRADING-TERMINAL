@@ -36,6 +36,7 @@ const PROGRESS_MESSAGES = [
 
 export default function ScreenerPage() {
   const [mode, setMode] = useState("swing");
+  const [filterIntensity, setFilterIntensity] = useState(75);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -74,7 +75,7 @@ export default function ScreenerPage() {
       const res = await fetch(`${BACKEND_URL}/api/screener/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: mode.toLowerCase(), limit: 5, include_debug: false }),
+        body: JSON.stringify({ mode: mode.toLowerCase(), limit: 5, include_debug: false, filter_intensity: filterIntensity }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -111,6 +112,25 @@ export default function ScreenerPage() {
         {MODE_OPTIONS.map((m) => (
           <button key={m} onClick={() => setMode(m)} style={{ ...S.modeBtn, ...(mode === m ? S.modeBtnActive : {}) }}>
             {m.toUpperCase()}
+          </button>
+        ))}
+      </div>
+      <div style={{display:"flex", gap:8, marginBottom:12, alignItems:"center"}}>
+        <span style={{fontFamily:"monospace", fontSize:11, color:"#64748b"}}>FILTER INTENSITY:</span>
+        {[
+          {val:100, label:"100%", desc:"Ketat"},
+          {val:75,  label:"75%",  desc:"Sedang"},
+          {val:50,  label:"50%",  desc:"Longgar"},
+        ].map(opt => (
+          <button key={opt.val} onClick={() => setFilterIntensity(opt.val)} style={{
+            fontFamily:"monospace", fontSize:11, padding:"4px 12px", borderRadius:6,
+            cursor:"pointer", transition:"all 0.2s",
+            border: filterIntensity===opt.val ? "1px solid #3b82f6" : "1px solid #cbd5e1",
+            background: filterIntensity===opt.val ? "#3b82f6" : "transparent",
+            color: filterIntensity===opt.val ? "#fff" : "#64748b",
+            fontWeight: filterIntensity===opt.val ? "bold" : "normal",
+          }}>
+            {opt.label} <span style={{fontSize:9, opacity:0.8}}>{opt.desc}</span>
           </button>
         ))}
       </div>
