@@ -37,26 +37,18 @@ export default function SystemHealthGauge() {
   const okCount = CHECKS.filter(c => results[c.key]).length
   const score = loading ? 50 : Math.round((okCount / total) * 100)
 
-  // Gauge arc SVG
-  const R = 70
-  const cx = 90, cy = 90
-  const startAngle = 180
-  const endAngle = 0
   const toRad = deg => (deg * Math.PI) / 180
-  const arcX = (deg) => cx + R * Math.cos(toRad(deg))
-  const arcY = (deg) => cy + R * Math.sin(toRad(deg))
+  const R = 70, cx = 90, cy = 85
+  const pt = (deg) => ({ x: cx + R * Math.cos(toRad(deg)), y: cy + R * Math.sin(toRad(deg)) })
 
-  // Background arc (gray)
-  const bgPath = `M ${arcX(180)} ${arcY(180)} A ${R} ${R} 0 0 1 ${arcX(0)} ${arcY(0)}`
+  const arc = (a1, a2) => {
+    const s = pt(a1), e = pt(a2)
+    return `M ${s.x} ${s.y} A ${R} ${R} 0 0 1 ${e.x} ${e.y}`
+  }
 
-  // Colored arc segments: red 180-120, yellow 120-60, green 60-0
-  const seg1 = `M ${arcX(180)} ${arcY(180)} A ${R} ${R} 0 0 1 ${arcX(120)} ${arcY(120)}`
-  const seg2 = `M ${arcX(120)} ${arcY(120)} A ${R} ${R} 0 0 1 ${arcX(60)} ${arcY(60)}`
-  const seg3 = `M ${arcX(60)} ${arcY(60)} A ${R} ${R} 0 0 1 ${arcX(0)} ${arcY(0)}`
-
-  // Needle: score 0-100 maps to 180-0 degrees
+  // Needle: score 0→left(180deg), 100→right(0deg)
   const needleAngle = 180 - (score / 100) * 180
-  const needleLen = 55
+  const needleLen = 52
   const nx = cx + needleLen * Math.cos(toRad(needleAngle))
   const ny = cy + needleLen * Math.sin(toRad(needleAngle))
 
@@ -70,26 +62,26 @@ export default function SystemHealthGauge() {
       display:'flex', alignItems:'center', gap:20, marginBottom:16
     }}>
       {/* GAUGE SVG */}
-      <svg width={180} height={100} style={{flexShrink:0}}>
+      <svg width={180} height={110} style={{flexShrink:0}}>
         {/* BG arc */}
-        <path d={bgPath} fill='none' stroke='#e2e8f0' strokeWidth={14} strokeLinecap='round'/>
-        {/* Colored segments */}
-        <path d={seg1} fill='none' stroke='#ef4444' strokeWidth={14} strokeLinecap='butt'/>
-        <path d={seg2} fill='none' stroke='#eab308' strokeWidth={14} strokeLinecap='butt'/>
-        <path d={seg3} fill='none' stroke='#22c55e' strokeWidth={14} strokeLinecap='butt'/>
+        <path d={arc(180,0)} fill='none' stroke='#e2e8f0' strokeWidth={14} strokeLinecap='round'/>
+        {/* Colored segments: merah kiri, kuning tengah, hijau kanan */}
+        <path d={arc(180,120)} fill='none' stroke='#ef4444' strokeWidth={13} strokeLinecap='butt'/>
+        <path d={arc(120,60)} fill='none' stroke='#eab308' strokeWidth={13} strokeLinecap='butt'/>
+        <path d={arc(60,0)} fill='none' stroke='#22c55e' strokeWidth={13} strokeLinecap='butt'/>
         {/* Needle */}
         <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={color} strokeWidth={3} strokeLinecap='round'/>
         <circle cx={cx} cy={cy} r={5} fill={color}/>
         {/* Score text */}
-        <text x={cx} y={cy-10} textAnchor='middle' fontSize={22} fontWeight='bold' fill={color} fontFamily='monospace'>
+        <text x={cx} y={cy-14} textAnchor='middle' fontSize={22} fontWeight='bold' fill={color} fontFamily='monospace'>
           {loading ? '...' : score}
         </text>
-        <text x={cx} y={cy+8} textAnchor='middle' fontSize={9} fill='#94a3b8' fontFamily='monospace'>HEALTH SCORE</text>
+        <text x={cx} y={cy+4} textAnchor='middle' fontSize={9} fill='#94a3b8' fontFamily='monospace'>HEALTH SCORE</text>
         {/* Labels */}
-        <text x={16} y={cy+20} fontSize={8} fill='#ef4444' fontFamily='monospace'>KRITIS</text>
-        <text x={148} y={cy+20} fontSize={8} fill='#22c55e' fontFamily='monospace'>SEHAT</text>
+        <text x={14} y={cy+22} fontSize={8} fill='#ef4444' fontFamily='monospace'>KRITIS</text>
+        <text x={146} y={cy+22} fontSize={8} fill='#22c55e' fontFamily='monospace'>SEHAT</text>
         {/* Status label */}
-        <text x={cx} y={cy+28} textAnchor='middle' fontSize={10} fontWeight='bold' fill={color} fontFamily='monospace'>
+        <text x={cx} y={cy+22} textAnchor='middle' fontSize={10} fontWeight='bold' fill={color} fontFamily='monospace'>
           {loading ? 'CHECKING...' : label}
         </text>
       </svg>
