@@ -103,7 +103,7 @@ export default function SystemHealthGauge() {
               <div key={c.key} style={{display:'flex',alignItems:'center',gap:8}}>
                 <span style={{width:8,height:8,borderRadius:'50%',background:col,display:'inline-block',flexShrink:0}}/>
                 <span style={{fontFamily:'monospace',fontSize:11,color:'#475569'}}>{c.label}</span>
-                <span style={{fontFamily:'monospace',fontSize:10,color:col,marginLeft:'auto'}}>{loading?'...':ok?'OK':'FAIL'}</span>
+
               </div>
             )
           })}
