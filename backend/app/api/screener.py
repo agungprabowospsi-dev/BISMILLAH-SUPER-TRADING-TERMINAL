@@ -381,17 +381,34 @@ def calc_prefilter_metrics(ohlcv: List[Dict[str, Any]]) -> Optional[Dict[str, An
     ma50 = sum(closes[-50:]) / 50 if len(closes) >= 50 else ma20
     downtrend_heavy = close < ma20 < ma50 and change_pct < -1.5
 
+    # MA5
+    ma5 = sum(closes[-5:]) / 5 if len(closes) >= 5 else close
+
+    # Value transaksi (price x volume)
+    last_open = to_float(last.get("open"))
+    value = close * last_volume
+
+    # Candle bullish
+    candle_bullish = last_open > 0 and close > last_open
+
+    # Candle body size %
+    candle_body_pct = abs(close - last_open) / last_open * 100 if last_open > 0 else 0
+
     return {
         "price": close,
-        "open": to_float(last.get("open")),
+        "open": last_open,
         "high": to_float(last.get("high")),
         "low": to_float(last.get("low")),
         "volume": last_volume,
         "avg_volume_20": avg_volume20,
         "rvol": round(rvol, 2),
         "change_pct": round(change_pct, 2),
+        "ma5": round(ma5, 2),
         "ma20": round(ma20, 2),
         "ma50": round(ma50, 2),
+        "value": value,
+        "candle_bullish": candle_bullish,
+        "candle_body_pct": round(candle_body_pct, 2),
         "downtrend_heavy": downtrend_heavy,
     }
 
@@ -431,6 +448,52 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
 
             if mode == "scalping" and metrics["downtrend_heavy"]:
                 return None
+
+            # ===== FASE 1: Smart Pre-Filter per Mode =====
+            price = metrics["price"]
+            value = metrics.get("value", 0)
+            ma5 = metrics.get("ma5", price)
+            ma20 = metrics.get("ma20", price)
+            candle_bullish = metrics.get("candle_bullish", False)
+            candle_body_pct = metrics.get("candle_body_pct", 0)
+            change_pct = metrics["change_pct"]
+            prev_price = price / (1 + change_pct / 100) if change_pct != -100 else price
+
+            if mode == "swing":
+                # Value >= 10 Miliar
+                if value < 10_000_000_000:
+                    return None
+                # Price >= MA20 (trend bullish menengah)
+                if price < ma20 * 0.98:
+                    return None
+                # Tidak sedang turun tajam
+                if change_pct < -2.0:
+                    return None
+
+            elif mode == "intraday":
+                # Value >= 5 Miliar
+                if value < 5_000_000_000:
+                    return None
+                # Price >= MA5 (momentum jangka pendek)
+                if price < ma5 * 0.97:
+                    return None
+                # Candle bullish atau minimal flat
+                if change_pct < -0.5:
+                    return None
+
+            elif mode == "scalping":
+                # Value >= 2 Miliar
+                if value < 2_000_000_000:
+                    return None
+                # Price breakout >= 1% dari prev
+                if change_pct < 1.0:
+                    return None
+                # Candle body cukup besar (momentum)
+                if candle_body_pct < 0.3:
+                    return None
+                # Harga minimal 200 (hindari gorengan murahan)
+                if price < 200:
+                    return None
 
             return {
                 **stock,
