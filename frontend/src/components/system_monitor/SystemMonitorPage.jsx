@@ -5,7 +5,7 @@ const BACKEND = 'https://backend-production-daed.up.railway.app'
 const CHECKS = [
   { key:'backend', label:'Backend API', endpoint:'/health', ok: d => d?.status==='ok'||d?.returncode===0 },
   { key:'data', label:'PostgreSQL Data', endpoint:'/api/analytic/data/status', ok: d => d?.status==='ok' },
-  { key:'kb', label:'Knowledge Base (12 buku)', endpoint:'/api/kb/documents', ok: d => Array.isArray(d)&&d.length>0 },
+  { key:'kb', label:'Knowledge Base (12 buku)', endpoint:'/api/kb/documents', ok: d => d?.success&&d?.documents?.length>0 },
   { key:'regime', label:'Market Regime Engine', endpoint:'/api/analytic/market-regime', ok: d => !!(d?.regime||d?.status==='ok') },
   { key:'foreign', label:'Foreign Flow Engine', endpoint:'/api/analytic/foreign-flow', ok: d => d?.status==='ok'||Array.isArray(d) },
 ]
@@ -126,7 +126,7 @@ export default function SystemMonitorPage() {
                 )}
                 {c.key==='kb' && r?.data && (
                   <div style={{fontFamily:'monospace',fontSize:10,color:'#64748b',marginTop:2}}>
-                    {Array.isArray(r.data) ? r.data.length : 0} buku tersedia
+                    {r.data?.documents?.length || 0} buku tersedia
                   </div>
                 )}
                 {c.key==='regime' && r?.data?.regime && (
