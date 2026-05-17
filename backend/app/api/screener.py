@@ -1320,7 +1320,7 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
 
 
 async def score_candidates(candidates: List[Dict[str, Any]], mode: Mode) -> List[Dict[str, Any]]:
-    sem = asyncio.Semaphore(10)
+    sem = asyncio.Semaphore(3)
     tasks = [score_one(c, mode, sem) for c in candidates]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     return [r for r in results if isinstance(r, dict)]
