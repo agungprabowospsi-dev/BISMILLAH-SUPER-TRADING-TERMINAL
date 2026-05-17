@@ -38,13 +38,15 @@ export default function ScreenerPage() {
   const [mode, setMode] = useState("swing");
   const [filterIntensity, setFilterIntensity] = useState(75);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [rawResponse, setRawResponse] = useState(null);
   const [progress, setProgress] = useState(0);
   const [progressMsg, setProgressMsg] = useState("");
   const progressRef = useRef(null);
-  const { sendToAnalytic } = useStore();
+  const { sendToAnalytic, screenerResults, setScreenerResults } = useStore();
+
+  // Gunakan hasil dari store supaya persist saat pindah halaman
+  const result = screenerResults;
 
   const startProgress = () => {
     setProgress(0);
@@ -68,7 +70,7 @@ export default function ScreenerPage() {
   const runScreener = async () => {
     setLoading(true);
     setError(null);
-    setResult(null);
+    // Tidak reset result — biarkan hasil lama tetap tampil saat refresh
     setRawResponse(null);
     startProgress();
     try {
@@ -81,7 +83,7 @@ export default function ScreenerPage() {
       const data = await res.json();
       setRawResponse(data);
       const stocks = data?.top_5 || data?.top5_stocks || data?.top_stocks || data?.stocks || data?.results || [];
-      setResult({
+      const newResult = {
         session_id: data?.session_id || "N/A",
         mode: data?.mode || mode,
         stocks: Array.isArray(stocks)
@@ -92,7 +94,9 @@ export default function ScreenerPage() {
             }))
           : [],
         total_scanned: data?.universe_count || data?.total_scanned || 0,
-      });
+        scanned_at: new Date().toLocaleTimeString("id-ID"),
+      };
+      setScreenerResults(newResult); // simpan ke store supaya persist
     } catch (err) {
       setError(err.message || "Unknown error");
     } finally {
@@ -134,9 +138,16 @@ export default function ScreenerPage() {
           </button>
         ))}
       </div>
+
       <button onClick={runScreener} disabled={loading} style={S.runBtn}>
-        {loading ? "SCANNING..." : "RUN SCREENER"}
+        {loading ? "SCANNING..." : result ? "🔄 REFRESH SCREENER" : "RUN SCREENER"}
       </button>
+
+      {result && !loading && (
+        <div style={{ textAlign: "center", marginBottom: 8, fontSize: 11, color: "#94a3b8" }}>
+          Hasil terakhir: {result.scanned_at || "-"} · Klik REFRESH untuk scan ulang
+        </div>
+      )}
 
       {loading && (
         <div style={S.progressBox}>
@@ -159,6 +170,7 @@ export default function ScreenerPage() {
             <span style={S.metaBadge}>Mode: {result.mode.toUpperCase()}</span>
             <span style={S.metaBadge}>Scanned: {result.total_scanned}</span>
             <span style={S.metaBadge}>Session: {result.session_id}</span>
+            {result.scanned_at && <span style={S.metaBadge}>⏱ {result.scanned_at}</span>}
           </div>
           {result.stocks.length === 0 ? (
             <div style={S.emptyBox}>
@@ -197,7 +209,6 @@ function StockCard({ stock, rank, onClick }) {
         <span style={{ ...S.signalBadge, backgroundColor: sc + "22", color: sc, border: "1px solid " + sc }}>{signal}</span>
       </div>
       <div style={S.cardBody}>
-
         <div
           style={{
             background: institutionalRank.color + "22",
@@ -211,7 +222,6 @@ function StockCard({ stock, rank, onClick }) {
           <div style={{ fontSize: 18, fontWeight: "bold" }}>
             {institutionalRank.grade}
           </div>
-
           <div style={{ fontSize: 11 }}>
             {institutionalRank.label}
           </div>
@@ -262,4 +272,4 @@ const S = {
   barBg: { backgroundColor: "#e2e8f0", height: 5, borderRadius: 3, overflow: "hidden" },
   barFill: { height: "100%", borderRadius: 3, transition: "width 0.5s ease" },
   initialBox: { textAlign: "center", padding: 48, border: "1px dashed #cbd5e1", borderRadius: 8, backgroundColor: "#ffffff" },
-};
+};I
