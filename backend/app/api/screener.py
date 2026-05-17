@@ -64,16 +64,6 @@ except Exception:
 
 router = APIRouter(tags=["screener"])
 
-@router.get("/debug-screener")
-async def debug_screener():
-    """Debug endpoint untuk cek import dan config"""
-    try:
-        from app.api.screener import MODE_CONFIG, ScreenerRequest
-        return {"status": "ok", "modes": list(MODE_CONFIG.keys()), "fields": list(ScreenerRequest.model_fields.keys())}
-    except Exception as e:
-        import traceback
-        return {"status": "error", "error": str(e), "trace": traceback.format_exc()}
-
 
 # ===== Request / config =====
 
