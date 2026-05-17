@@ -27,7 +27,7 @@ export const useStore = create((set) => ({
   monitoringInput: null,
   monitoringPositions: [],
   setMonitoringPositions: (p) => set({ monitoringPositions: p }),
-  sendToMonitoring: (data) => set({ monitoringInput: data, activeTab: 'monitoring' }),
+  sendToMonitoring: (data) => { set({ monitoringInput: null, activeTab: 'monitoring' }); setTimeout(() => set({ monitoringInput: data }), 50) },
   setMonitoringInput: (data) => set({ monitoringInput: data }),
   scalpingTicker: '',
   setScalpingTicker: (t) => set({ scalpingTicker: t }),
