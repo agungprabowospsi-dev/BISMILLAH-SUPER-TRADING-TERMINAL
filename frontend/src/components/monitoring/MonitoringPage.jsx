@@ -274,7 +274,7 @@ export default function MonitoringPage() {
                         status==='WARNING'?'text-accent-gold border-accent-gold/30 bg-accent-gold/5':
                         'text-slate-400 border-slate-600/30 bg-slate-600/5')}>{status}</span>
                     </div>
-                    {pos.name && pos.name !== pos.ticker && (
+                    {pos.name && (
                       <p className="text-[10px] font-mono text-slate-500 mt-0.5">{pos.name}</p>
                     )}
                   </div>
