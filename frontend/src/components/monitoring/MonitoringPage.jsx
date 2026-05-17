@@ -129,7 +129,7 @@ export default function MonitoringPage() {
     const poll = setInterval(async () => {
       const current = positionsRef.current
       if (!current.length) return
-      const updated = await Promise.all(current.map(refreshOne))
+      const updated = await Promise.all(current.map(async (pos) => (await refreshOne(pos)) || pos))
       setPositions(updated)
     }, POLL_INTERVAL)
     return () => clearInterval(poll)
@@ -167,7 +167,7 @@ export default function MonitoringPage() {
     }
     setShowForm(false)
     setForm({ ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'DAYTRADING',lot:'',broker:'' })
-    const enriched = await refreshOne(newPos)
+    const enriched = (await refreshOne(newPos)) || newPos
     setPositions(prev => [enriched, ...prev])
   }
 
