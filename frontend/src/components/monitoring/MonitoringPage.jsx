@@ -168,7 +168,11 @@ export default function MonitoringPage() {
     setShowForm(false)
     setForm({ ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'DAYTRADING',lot:'',broker:'' })
     const enriched = (await refreshOne(newPos)) || newPos
-    setPositions(prev => [enriched, ...prev])
+    setPositions(prev => {
+      const next = [enriched, ...prev]
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
   }
 
   const handleRemove = (id) => setPositions(prev => prev.filter(p => p.id !== id))
