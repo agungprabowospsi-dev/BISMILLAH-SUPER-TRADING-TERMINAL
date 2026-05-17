@@ -16,16 +16,18 @@ async def ask_claude(system: str, prompt: str, max_tokens: int = 300) -> str:
                     "content-type": "application/json",
                 },
                 json={
-                    "model": "claude-haiku-4-5",
+                    "model": "claude-haiku-4-5-20251001",
                     "max_tokens": max_tokens,
                     "system": system,
                     "messages": [{"role": "user", "content": prompt}],
                 }
             )
-            r.raise_for_status()
+            if r.status_code != 200:
+                logger.error(f"Claude API {r.status_code}: {r.text}")
+                return "AI analysis temporarily unavailable."
             data = r.json()
             return data["content"][0]["text"].strip()
     except Exception as e:
         logger.error(f"Claude API error: {e}")
         return "AI analysis temporarily unavailable."
-# model: claude-haiku-4-5
+# model: claude-haiku-4-5-20251001
