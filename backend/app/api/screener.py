@@ -1427,7 +1427,7 @@ async def run_screener(request: ScreenerRequest) -> Dict[str, Any]:
     cfg = MODE_CONFIG[mode]
 
     universe = await build_universe(mode)
-    candidates = await ohlcv_prefilter(universe, mode, req.filter_intensity)
+    candidates = await ohlcv_prefilter(universe, mode, request.filter_intensity)
     scored = await score_candidates(candidates, mode)
     qualified = apply_disqualifiers(scored, mode)
     top = rank_top(qualified, request.limit)
