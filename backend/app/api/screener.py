@@ -352,53 +352,12 @@ async def build_universe(mode: Mode) -> List[Dict[str, Any]]:
     return filtered[:200]
 
 
-# ===== Hari Bursa Helper =====
-
-HOLIDAYS_2026 = {
-    date(2026, 1, 1),
-    date(2026, 1, 27),
-    date(2026, 1, 28),
-    date(2026, 3, 20),
-    date(2026, 3, 28),
-    date(2026, 4, 2),
-    date(2026, 4, 3),
-    date(2026, 5, 1),
-    date(2026, 5, 14),  # Kenaikan Isa Al Masih
-    date(2026, 5, 15),  # Cuti Bersama
-    date(2026, 5, 20),
-    date(2026, 6, 1),
-    date(2026, 6, 17),
-    date(2026, 8, 17),
-    date(2026, 12, 25),
-}
-
-def get_last_trading_date() -> date:
-    """Return hari bursa terakhir yang valid (skip weekend + libur nasional)."""
-    candidate = date.today()
-    for _ in range(7):
-        if candidate.weekday() >= 5 or candidate in HOLIDAYS_2026:
-            candidate -= timedelta(days=1)
-            continue
-        break
-    return candidate
-
-
 # ===== Phase 2: OHLCV Pre-filter =====
 
 async def fetch_ohlcv_safe(ticker: str) -> List[Dict[str, Any]]:
-    """Fetch OHLCV dan trim ke hari bursa terakhir yang valid."""
+    # Known working endpoint according to master doc.
     raw = await invesgo_call("get_ohlcv_daily", ticker)
-    candles = normalize_ohlcv(raw)
-    if not candles:
-        return candles
-
-    last_trading = get_last_trading_date()
-    # Trim candles: hanya sampai hari bursa terakhir
-    valid_candles = [
-        c for c in candles
-        if str(c.get("date", ""))[:10] <= str(last_trading)
-    ]
-    return valid_candles if valid_candles else candles
+    return normalize_ohlcv(raw)
 
 
 def calc_prefilter_metrics(ohlcv: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
