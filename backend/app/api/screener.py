@@ -1250,14 +1250,8 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
 
         foreign = calculate_foreign_flow_proxy(ohlcv, bandarm)
         pattern = calculate_pattern_bonus(mode, ohlcv)
-        rag = await calculate_rag_boost(ticker, mode, {
-            "phase": bandarm.get("phase"),
-            "rvol": candidate.get("rvol"),
-            "patterns": pattern.get("patterns"),
-            "akumulasi_signals": bandar_early.get("signals", []),
-        })
 
-        # Fase 2B — Bandar Early Detection
+        # Fase 2B — Bandar Early Detection (harus sebelum rag)
         try:
             bandar_early = await asyncio.wait_for(
                 get_bandar_early_score(ticker, mode, ohlcv), timeout=10
@@ -1266,6 +1260,13 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
         except Exception:
             bandar_early = {"akumulasi_score": 50.0, "signals": [], "mode": mode}
             akumulasi_score = 50.0
+
+        rag = await calculate_rag_boost(ticker, mode, {
+            "phase": bandarm.get("phase"),
+            "rvol": candidate.get("rvol"),
+            "patterns": pattern.get("patterns"),
+            "akumulasi_signals": bandar_early.get("signals", []),
+        })
 
         fscore = final_score(
             mode=mode,
