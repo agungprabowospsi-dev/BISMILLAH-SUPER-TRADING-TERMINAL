@@ -79,21 +79,49 @@ async def backtest_single(ticker: str, candles: list, mode: str, min_score: floa
         if in_trade and current_trade:
             hold_days += 1
             price = current["close"]
+            entry = current_trade["entry"]
+            atr_entry = current_trade.get("atr_entry", entry * 0.02)
+
+            # ── Trailing SL: geser SL ke breakeven setelah profit > 1x ATR ──
+            current_pnl = ((price - entry) / entry) * 100
+            if current_pnl >= (atr_entry / entry * 100) and current_trade["sl"] < entry:
+                current_trade["sl"] = round(entry * 1.003)  # breakeven + 0.3% buffer
+
             hit_sl = price <= current_trade["sl"]
             hit_tp = price >= current_trade["tp1"]
             hit_max = hold_days >= MAX_HOLD
 
             if hit_sl or hit_tp or hit_max:
-                pnl_pct = ((price - current_trade["entry"]) / current_trade["entry"]) * 100
-                result = "WIN" if hit_tp else ("LOSS" if hit_sl else "EXPIRED")
+                pnl_pct = ((price - entry) / entry) * 100
+
+                # ── Dynamic threshold: komisi IDX 2x (beli+jual) ~0.35% ──
+                commission = 0.35
+                net_pnl = pnl_pct - commission
+                min_win_threshold = 2.0   # minimal net profit untuk dianggap WIN
+                loss_threshold = -1.0     # expired rugi > 1% tetap LOSS
+
+                if hit_tp:
+                    result = "WIN"
+                elif hit_sl:
+                    result = "LOSS"
+                elif hit_max:
+                    if net_pnl >= min_win_threshold:
+                        result = "WIN"       # expired tapi profit cukup = WIN
+                    elif net_pnl <= loss_threshold:
+                        result = "LOSS"      # expired tapi rugi = LOSS
+                    else:
+                        result = "EXPIRED"   # zona abu-abu (0% - 2%)
+
                 current_trade.update({
                     "exit_price": price,
                     "exit_date": current["date"],
                     "pnl_pct": round(pnl_pct, 2),
+                    "net_pnl_pct": round(net_pnl, 2),
                     "result": result,
-                    "hold_days": hold_days
+                    "hold_days": hold_days,
+                    "exit_reason": "TP" if hit_tp else ("SL" if hit_sl else "MAX_HOLD")
                 })
-                equity *= (1 + pnl_pct/100)
+                equity *= (1 + net_pnl/100)
                 trades.append(current_trade)
                 equity_curve.append({"date": current["date"], "equity": round(equity, 2)})
                 in_trade = False
@@ -124,6 +152,7 @@ async def backtest_single(ticker: str, candles: list, mode: str, min_score: floa
                         "ticker": ticker,
                         "entry_date": current["date"],
                         "entry": price,
+                        "atr_entry": atr,   # simpan ATR untuk trailing SL
                         "sl": round(price - sl_mult * atr),
                         "tp1": round(price + tp_mult * atr),
                         "tp2": round(price + (tp_mult + 1) * atr),
@@ -140,16 +169,28 @@ async def backtest_single(ticker: str, candles: list, mode: str, min_score: floa
 
     wins = [t for t in trades if t["result"] == "WIN"]
     losses = [t for t in trades if t["result"] == "LOSS"]
-    winrate = len(wins) / len(trades) * 100 if trades else 0
-    avg_win = sum(t["pnl_pct"] for t in wins) / len(wins) if wins else 0
-    avg_loss = sum(t["pnl_pct"] for t in losses) / len(losses) if losses else 0
+    expireds = [t for t in trades if t["result"] == "EXPIRED"]
+
+    total_decided = len(wins) + len(losses)  # exclude EXPIRED dari winrate
+    winrate = len(wins) / total_decided * 100 if total_decided > 0 else 0
+
+    avg_win = sum(t["net_pnl_pct"] for t in wins) / len(wins) if wins else 0
+    avg_loss = sum(t["net_pnl_pct"] for t in losses) / len(losses) if losses else 0
     profit_factor = abs(avg_win / avg_loss) if avg_loss != 0 else 999
+
+    # Expectancy per trade
+    wr = winrate / 100
+    expectancy = (wr * avg_win) + ((1 - wr) * avg_loss) if total_decided > 0 else 0
 
     return {
         "ticker": ticker,
         "total_trades": len(trades),
+        "total_wins": len(wins),
+        "total_losses": len(losses),
+        "total_expired": len(expireds),
         "winrate": round(winrate, 1),
         "profit_factor": round(profit_factor, 2),
+        "expectancy_pct": round(expectancy, 2),
         "avg_win_pct": round(avg_win, 2),
         "avg_loss_pct": round(avg_loss, 2),
         "final_equity": round(equity, 2),
@@ -171,14 +212,14 @@ async def run_universe_backtest(job_id: str, req: BacktestRequest):
         # 1. Ambil daftar saham
         await save_job(job_id, {"status": "running", "progress": 5, "message": "Mengambil daftar saham IDX..."})
         stock_list = await invesgo.get_stock_list()
-        
+
         # Filter liquid stocks
         tickers = []
         for s in stock_list:
             code = s.get("code") or s.get("ticker") or s.get("symbol")
             if code:
                 tickers.append(code)
-        
+
         # Limit universe
         tickers = tickers[:req.universe]
         total = len(tickers)
@@ -193,7 +234,7 @@ async def run_universe_backtest(job_id: str, req: BacktestRequest):
         # 2. Backtest per saham
         all_results = []
         all_trades = []
-        
+
         for idx, ticker in enumerate(tickers):
             try:
                 progress = 10 + int((idx / total) * 80)
@@ -238,17 +279,26 @@ async def run_universe_backtest(job_id: str, req: BacktestRequest):
         total_trades = len(all_trades)
         wins = [t for t in all_trades if t["result"] == "WIN"]
         losses = [t for t in all_trades if t["result"] == "LOSS"]
-        winrate = len(wins) / total_trades * 100
-        avg_win = sum(t["pnl_pct"] for t in wins) / len(wins) if wins else 0
-        avg_loss = sum(t["pnl_pct"] for t in losses) / len(losses) if losses else 0
+        expireds = [t for t in all_trades if t["result"] == "EXPIRED"]
+
+        # Winrate hanya dari trade yang decided (WIN/LOSS), exclude EXPIRED
+        total_decided = len(wins) + len(losses)
+        winrate = len(wins) / total_decided * 100 if total_decided > 0 else 0
+
+        avg_win = sum(t["net_pnl_pct"] for t in wins) / len(wins) if wins else 0
+        avg_loss = sum(t["net_pnl_pct"] for t in losses) / len(losses) if losses else 0
         profit_factor = abs(avg_win / avg_loss) if avg_loss != 0 else 999
 
-        # Max drawdown
+        # Expectancy per trade
+        wr = winrate / 100
+        expectancy = (wr * avg_win) + ((1 - wr) * avg_loss) if total_decided > 0 else 0
+
+        # Max drawdown pakai net_pnl
         equity = 100.0
         peak = 100.0
         max_dd = 0
         for t in sorted(all_trades, key=lambda x: x.get("exit_date","")):
-            equity *= (1 + t["pnl_pct"]/100)
+            equity *= (1 + t["net_pnl_pct"]/100)
             if equity > peak:
                 peak = equity
             dd = (peak - equity) / peak * 100
@@ -260,16 +310,23 @@ async def run_universe_backtest(job_id: str, req: BacktestRequest):
         for t in all_trades:
             year = t.get("exit_date","")[:4]
             if year not in yearly:
-                yearly[year] = {"trades": 0, "wins": 0, "total_pnl": 0}
+                yearly[year] = {"trades": 0, "wins": 0, "losses": 0, "expireds": 0, "total_pnl": 0}
             yearly[year]["trades"] += 1
             if t["result"] == "WIN":
                 yearly[year]["wins"] += 1
-            yearly[year]["total_pnl"] += t["pnl_pct"]
+            elif t["result"] == "LOSS":
+                yearly[year]["losses"] += 1
+            else:
+                yearly[year]["expireds"] += 1
+            yearly[year]["total_pnl"] += t["net_pnl_pct"]
 
         yearly_summary = {
             y: {
                 "trades": d["trades"],
-                "winrate": round(d["wins"]/d["trades"]*100, 1),
+                "wins": d["wins"],
+                "losses": d["losses"],
+                "expireds": d["expireds"],
+                "winrate": round(d["wins"] / max(d["wins"] + d["losses"], 1) * 100, 1),
                 "total_pnl": round(d["total_pnl"], 2)
             } for y, d in yearly.items() if d["trades"] > 0
         }
@@ -292,8 +349,12 @@ async def run_universe_backtest(job_id: str, req: BacktestRequest):
             "summary": {
                 "total_stocks_tested": len(all_results),
                 "total_trades": total_trades,
+                "total_wins": len(wins),
+                "total_losses": len(losses),
+                "total_expired": len(expireds),
                 "winrate": round(winrate, 1),
                 "profit_factor": round(profit_factor, 2),
+                "expectancy_pct": round(expectancy, 2),
                 "max_drawdown": round(max_dd, 1),
                 "avg_win_pct": round(avg_win, 2),
                 "avg_loss_pct": round(avg_loss, 2),
@@ -332,7 +393,7 @@ async def get_backtest_status(job_id: str):
 @router.post("/single/run")
 async def run_single_backtest(req: SingleBacktestRequest, background_tasks: BackgroundTasks):
     job_id = f"bt_{uuid.uuid4().hex[:8]}"
-    
+
     async def single_job(job_id, req):
         from app.core import invesgo
         await save_job(job_id, {"status": "running", "progress": 10, "message": f"Mengambil data {req.ticker}..."})
@@ -445,7 +506,7 @@ async def test_all_indices():
     key = os.environ["INVESGO_API_KEY"]
     headers = {"Authorization": f"Bearer {key}"}
     results = {}
-    
+
     indices = [
         "IHSG","LQ45","IDX30","IDXSMC","IDXBUMN",
         "IDXVESTA","IDXG30","IDXHIDIV","IDXESGL",
@@ -453,7 +514,7 @@ async def test_all_indices():
         "IDXFINANCE","IDXHEALTH","IDXINDUST","IDXINFRA",
         "IDXPROPERT","IDXTECHNO","IDXTRANS"
     ]
-    
+
     async with httpx.AsyncClient(timeout=15) as client:
         for idx in indices:
             try:
