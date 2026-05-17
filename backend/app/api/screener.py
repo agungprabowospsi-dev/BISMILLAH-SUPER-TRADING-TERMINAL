@@ -573,7 +573,7 @@ candidates.sort(key=lambda x: (to_float(x.get("rvol")), to_float(x.get("change_p
 return candidates[: MODE_CONFIG[mode]["candidate_max"]]
 
 
-===== Phase 3A: 34 Engines weighted score =====
+# ===== Phase 3A: 34 Engines weighted score =====
 
 def _extract_score_from_any(value: Any) -> Optional[float]:
 if isinstance(value, (int, float)):
