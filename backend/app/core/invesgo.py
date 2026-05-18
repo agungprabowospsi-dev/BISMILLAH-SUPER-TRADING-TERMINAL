@@ -5,7 +5,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-INVESGO_BASE_URL = os.environ.get("INVESGO_BASE_URL", "https://api.invesgo.id")
+INVESGO_BASE_URL = os.environ.get("INVESGO_BASE_URL", "https://api.invezgo.com")
 INVESGO_API_KEY = os.environ["INVESGO_API_KEY"]
 
 def _headers():
@@ -87,11 +87,25 @@ async def get_foreign_flow(ticker: str) -> dict:
         return r.json()
 
 async def get_tick(ticker: str) -> dict:
-    """Tick data realtime - dari price table"""
+    """Tick data — ambil dari OHLCV daily close terakhir (lebih stabil)"""
+    try:
+        ohlcv = await get_ohlcv_daily(ticker, period="5d")
+        if ohlcv and len(ohlcv) > 0:
+            last = ohlcv[-1]
+            close = float(last.get("close") or last.get("c") or 0)
+            if close > 0:
+                return {"last_price": close, "source": "ohlcv_daily"}
+    except Exception:
+        pass
+    # Fallback ke price-table
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(f"{INVESGO_BASE_URL}/analysis/price-table/{ticker}", headers=_headers())
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+        if isinstance(data, dict):
+            price = data.get("last_price") or data.get("close") or data.get("price") or 0
+            return {"last_price": float(price), "source": "price_table"}
+        return {"last_price": 0, "source": "unknown"}
 
 async def get_company_info(ticker: str) -> dict:
     """Info perusahaan"""
