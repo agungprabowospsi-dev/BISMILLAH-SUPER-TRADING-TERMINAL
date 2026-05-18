@@ -441,6 +441,13 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             if (metrics.get("high", 0) == metrics.get("low", 0) == metrics["price"] and metrics["volume"] < 1000):
                 return None
 
+            # Filter ARA/ARB — saham yang kena auto reject atas/bawah (suspended risk)
+            change_pct_now = metrics.get("change_pct", 0)
+            if change_pct_now >= 24.0:
+                return None  # ARA — potensi suspended/tidak bisa beli
+            if change_pct_now <= -24.0:
+                return None  # ARB — potensi suspended/tidak bisa jual
+
             if metrics["rvol"] < cfg["rvol_min"]:
                 return None
 
