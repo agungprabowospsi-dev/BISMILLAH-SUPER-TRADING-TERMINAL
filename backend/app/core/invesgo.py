@@ -5,7 +5,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-INVESGO_BASE_URL = os.environ.get("INVESGO_BASE_URL", "https://api.invezgo.com")
+INVESGO_BASE_URL = os.environ.get("INVESGO_BASE_URL", "https://api.invesgo.id")
 INVESGO_API_KEY = os.environ["INVESGO_API_KEY"]
 
 def _headers():
