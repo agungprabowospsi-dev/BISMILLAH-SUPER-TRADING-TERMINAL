@@ -50,3 +50,7 @@ app.include_router(kb_api.router)
 app.include_router(enhancement_api.router)
 app.include_router(data_api.router)
 # Fri May 15 19:26:37 WIB 2026
+
+# Enrichment Layer (REV21)
+from app.api.enrichment.router import router as enrich_router
+app.include_router(enrich_router, prefix="/api/enrich", tags=["enrichment"])
