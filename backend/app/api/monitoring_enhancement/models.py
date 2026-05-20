@@ -136,7 +136,7 @@ class MomentumResult(BaseModel):
     score_drop:       float           = 0.0
     rag_triggered:    bool            = False
 
-class RetestResult(BaseModel):
+class RetestResultOLD(BaseModel):
     classification:        RetestClassification
     fib_level_pct:         float
     pullback_points:       float
@@ -200,7 +200,7 @@ class MonitoringEnhancementResponse(BaseModel):
     bandar_type:        BandarTypeResult
     bandarmologi:       BandarmologiMonitorResult
     momentum:           MomentumResult
-    retest:             RetestResultV2
+    retest:             RetestResult
     tp_probability:     TPProbResult
     enrichment:         EnrichmentRealtimeResult
     rag_monitor:        RAGMonitorResult
@@ -240,7 +240,7 @@ class RetestVerdict(str, Enum):
     REDUCE_50   = "REDUCE_50"
     EXIT_ALL    = "EXIT_ALL"
 
-class RetestResultV2(BaseModel):
+class RetestResult(BaseModel):
     # Layer 1 — Fibonacci
     classification:        RetestClassification
     fib_level_pct:         float

@@ -14,7 +14,7 @@ import logging
 from typing import Optional
 
 from .models import (
-    RetestClassification, RetestResultV2,
+    RetestClassification, RetestResult,
     BandarRetestType, PatternName, RetestVerdict
 )
 
@@ -297,7 +297,7 @@ async def classify_retest(
     bandar_phase:     str   = "UNKNOWN",
     net_foreign_lot:  int   = 0,
     swing_lookback:   int   = 20,
-) -> RetestResultV2:
+) -> RetestResult:
     """
     Main function Engine 6 — Full 5 layer retest classifier.
     """
@@ -381,7 +381,7 @@ async def classify_retest(
             RetestClassification.REVERSAL_CONFIRMED,
         ) or bandar_retest_type == BandarRetestType.DISTRIBUSI_TERSELUBUNG
 
-        return RetestResultV2(
+        return RetestResult(
             classification        = classification,
             fib_level_pct         = round(fib_pct, 2),
             pullback_points       = pullback_points,
@@ -406,7 +406,7 @@ async def classify_retest(
 
     except Exception as e:
         logger.error(f"RetestClassifier error [{ticker}]: {e}")
-        return RetestResultV2(
+        return RetestResult(
             classification        = RetestClassification.MEDIUM_RETEST,
             fib_level_pct         = 50.0,
             pullback_points       = 0.0,
