@@ -16,4 +16,3 @@ scikit-learn==1.4.2
 joblib==1.4.2
 pandas==2.2.2
 # cache bust Fri May 15 19:44:26 WIB 2026
-Wed May 20 10:20:43 WIB 2026
