@@ -44,13 +44,13 @@ function PriceLadder({ kama }) {
   if (!kama?.current_price) return null
   const { lower3, lower2, lower1, basis, upper1, upper3, current_price } = kama
   const levels = [
-    { label:'Upper3', price: upper3, bg:'#450a0a' },
-    { label:'Upper1', price: upper1, bg:'#3f0000' },
-    { label:'Basis',  price: basis,  bg:'#1e293b' },
-    { label:'▶ Harga', price: current_price, bg:'#0c4a6e', bold:true },
-    { label:'L1 ✓',  price: lower1, bg:'#052e16' },
-    { label:'L2',    price: lower2, bg:'#042315' },
-    { label:'L3 ✗',  price: lower3, bg:'#450a0a' },
+    { label:'Upper3', price: upper3, bg:'#fee2e2' },
+    { label:'Upper1', price: upper1, bg:'#fecaca' },
+    { label:'Basis',  price: basis,  bg:'#f1f5f9' },
+    { label:'▶ Harga', price: current_price, bg:'#bfdbfe', bold:true },
+    { label:'L1 ✓',  price: lower1, bg:'#dcfce7' },
+    { label:'L2',    price: lower2, bg:'#bbf7d0' },
+    { label:'L3 ✗',  price: lower3, bg:'#fee2e2' },
   ].sort((a,b) => b.price - a.price)
 
   return (
