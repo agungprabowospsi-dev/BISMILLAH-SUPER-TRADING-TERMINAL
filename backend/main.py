@@ -55,6 +55,3 @@ app.include_router(data_api.router)
 from app.api.enrichment.router import router as enrich_router
 app.include_router(enrich_router, prefix="/api/enrich", tags=["enrichment"])
 
-@app.get("/api/version")
-def version():
-    return {"version": "REV21-enrichment", "commit": "9d1db11"}
