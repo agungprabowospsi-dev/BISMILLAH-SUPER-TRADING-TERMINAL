@@ -117,7 +117,7 @@ export default function EnrichmentPanel({ ticker }) {
           <span style={{ padding:'2px 8px', borderRadius:4, background:'#f8fafc', fontSize:10, fontFamily:'monospace', color:'#fbbf24' }}>
             Score: {ctx?.bandar_score}
           </span>
-          <span style={{ padding:'2px 8px', borderRadius:4, background:'#f8fafc', fontSize:10, fontFamily:'monospace', color:'#64748b' }}>
+          <span style={{ padding:'2px 8px', borderRadius:4, background:'#f8fafc', fontSize:10, fontFamily:'monospace', color:'#374151' }}>
             {ctx?.signal_tier}
           </span>
           {ctx?.phase_2b_active && (
@@ -131,7 +131,7 @@ export default function EnrichmentPanel({ ticker }) {
         <div style={{ border:`1px solid ${vs.border}`, background:vs.bg, borderRadius:6, padding:'8px 12px' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
             <span style={{ fontSize:14, fontWeight:900, color:vs.text }}>{vs.label}</span>
-            <span style={{ fontSize:10, fontFamily:'monospace', color:'#64748b' }}>{summary?.confidence}</span>
+            <span style={{ fontSize:10, fontFamily:'monospace', color:'#374151' }}>{summary?.confidence}</span>
           </div>
           <div style={{ display:'flex', gap:12, marginTop:4, fontSize:10, color:'#475569' }}>
             <span>🟢 {summary?.bullish_count}/4 bullish</span>
@@ -143,7 +143,7 @@ export default function EnrichmentPanel({ ticker }) {
             </div>
           )}
           {summary?.rag_insight && (
-            <div style={{ marginTop:6, padding:'4px 8px', background:'#ffffff', borderRadius:4, borderLeft:'2px solid #0369a1', fontSize:10, color:'#64748b', fontStyle:'italic' }}>
+            <div style={{ marginTop:6, padding:'4px 8px', background:'#ffffff', borderRadius:4, borderLeft:'2px solid #0369a1', fontSize:10, color:'#374151', fontStyle:'italic' }}>
               📚 {summary.rag_insight}
             </div>
           )}
