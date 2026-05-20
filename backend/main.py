@@ -9,6 +9,7 @@ from app.core.knowledge_base import init_knowledge_base
 from app.api import screener, analytic, monitoring, scalping, health, backtest
 from app.api import knowledge_base as kb_api
 from app.api import enhancement as enhancement_api
+from app.api.monitoring_enhancement.router import router as monitoring_enhancement_router
 from app.api import data_accumulation as data_api
 import logging
 
@@ -48,6 +49,7 @@ app.include_router(scalping.router, prefix="/ws")
 app.include_router(scalping.router, prefix="/api")
 app.include_router(kb_api.router)
 app.include_router(enhancement_api.router)
+app.include_router(monitoring_enhancement_router, prefix="/api", tags=["Monitoring Enhancement"])
 app.include_router(data_api.router)
 # Fri May 15 19:26:37 WIB 2026
 
