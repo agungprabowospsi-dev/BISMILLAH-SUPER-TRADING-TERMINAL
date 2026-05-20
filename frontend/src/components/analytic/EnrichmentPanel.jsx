@@ -3,9 +3,9 @@ import React, { useEffect, useState } from 'react'
 const BACKEND = import.meta.env.VITE_BACKEND_URL || 'https://backend-production-daed.up.railway.app'
 
 const VERDICT_STYLE = {
-  PROCEED: { bg: '#052e16', border: '#16a34a', text: '#4ade80', label: '✅ PROCEED' },
-  CAUTION: { bg: '#422006', border: '#d97706', text: '#fbbf24', label: '⚠️ CAUTION' },
-  SKIP:    { bg: '#450a0a', border: '#dc2626', text: '#f87171', label: '🚫 SKIP' },
+  PROCEED: { bg: '#f0fdf4', border: '#16a34a', text: '#15803d', label: '✅ PROCEED' },
+  CAUTION: { bg: '#fffbeb', border: '#d97706', text: '#b45309', label: '⚠️ CAUTION' },
+  SKIP:    { bg: '#fef2f2', border: '#dc2626', text: '#dc2626', label: '🚫 SKIP' },
 }
 
 const SIG_COLOR = { BULLISH:'#4ade80', NEUTRAL_POSITIVE:'#22d3ee', NEUTRAL:'#94a3b8', BEARISH:'#f87171', ERROR:'#64748b', 'N/A':'#64748b' }
@@ -57,8 +57,8 @@ function PriceLadder({ kama }) {
     <div style={{ marginTop:6, display:'flex', flexDirection:'column', gap:1 }}>
       {levels.map(({ label, price, bg, bold }) => (
         <div key={label} style={{ display:'flex', justifyContent:'space-between', padding:'2px 6px', borderRadius:3, background:bg }}>
-          <span style={{ fontSize:10, color: bold ? '#7dd3fc' : '#94a3b8', fontWeight: bold ? 700 : 400 }}>{label}</span>
-          <span style={{ fontSize:10, fontFamily:'monospace', color: bold ? '#7dd3fc' : '#cbd5e1', fontWeight: bold ? 700 : 400 }}>
+          <span style={{ fontSize:10, color: bold ? '#1e40af' : '#94a3b8', fontWeight: bold ? 700 : 400 }}>{label}</span>
+          <span style={{ fontSize:10, fontFamily:'monospace', color: bold ? '#1e40af' : '#cbd5e1', fontWeight: bold ? 700 : 400 }}>
             {price?.toLocaleString('id-ID')}
           </span>
         </div>
@@ -109,7 +109,7 @@ export default function EnrichmentPanel({ ticker }) {
       <div style={{ ...box }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
           <span style={{ fontSize:11, fontWeight:700, letterSpacing:2, color:'#475569', textTransform:'uppercase' }}>⚡ Enrichment Layer</span>
-          <span style={{ fontSize:10, fontFamily:'monospace', color:'#334155' }}>{ticker}</span>
+          <span style={{ fontSize:10, fontFamily:'monospace', color:'#1e293b' }}>{ticker}</span>
         </div>
 
         {/* Bandar context badges */}
@@ -190,7 +190,7 @@ export default function EnrichmentPanel({ ticker }) {
         <div style={{ fontSize:10, color:'#475569', marginTop:6, fontStyle:'italic', lineHeight:1.4 }}>{div?.interpretation}</div>
       </div>
 
-      <div style={{ fontSize:9, color:'#334155', fontFamily:'monospace', textAlign:'right' }}>
+      <div style={{ fontSize:9, color:'#1e293b', fontFamily:'monospace', textAlign:'right' }}>
         {data?.timestamp ? new Date(data.timestamp).toLocaleTimeString('id-ID') : ''}
       </div>
     </div>
