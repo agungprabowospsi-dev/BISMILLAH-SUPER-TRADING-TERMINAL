@@ -200,7 +200,7 @@ class MonitoringEnhancementResponse(BaseModel):
     bandar_type:        BandarTypeResult
     bandarmologi:       BandarmologiMonitorResult
     momentum:           MomentumResult
-    retest:             RetestResult
+    retest:             RetestResultV2
     tp_probability:     TPProbResult
     enrichment:         EnrichmentRealtimeResult
     rag_monitor:        RAGMonitorResult
