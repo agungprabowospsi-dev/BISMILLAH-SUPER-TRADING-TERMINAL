@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { BarChart2, ChevronRight, RefreshCw, ArrowRight } from 'lucide-react'
 import { useStore } from '../../stores/useStore'
 import { analyzeStock } from '../../utils/api'
 import { ScoreGauge, ScoreBar, SignalBadge, LoadingSpinner, ErrorBox, ConfidenceBar } from '../shared/ScoreComponents'
 import clsx from 'clsx'
+const EnrichmentPanel = lazy(() => import("./EnrichmentPanel"))
 
 const MODES = ['SWING','DAYTRADING','SCALPING']
 const GROUPS = [
@@ -526,6 +527,7 @@ export default function AnalyticPage() {
               </div>
             </div>
           )}
+          {r && <Suspense fallback={null}><EnrichmentPanel ticker={analyticTicker} /></Suspense>}
         </div>
       )}
 
