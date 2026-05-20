@@ -57,8 +57,8 @@ function PriceLadder({ kama }) {
     <div style={{ marginTop:6, display:'flex', flexDirection:'column', gap:1 }}>
       {levels.map(({ label, price, bg, bold }) => (
         <div key={label} style={{ display:'flex', justifyContent:'space-between', padding:'2px 6px', borderRadius:3, background:bg }}>
-          <span style={{ fontSize:10, color: bold ? '#1e40af' : '#94a3b8', fontWeight: bold ? 700 : 400 }}>{label}</span>
-          <span style={{ fontSize:10, fontFamily:'monospace', color: bold ? '#1e40af' : '#cbd5e1', fontWeight: bold ? 700 : 400 }}>
+          <span style={{ fontSize:10, color: bold ? '#1e40af' : '#374151', fontWeight: bold ? 700 : 400 }}>{label}</span>
+          <span style={{ fontSize:10, fontFamily:'monospace', color: bold ? '#1e40af' : '#111827', fontWeight: bold ? 700 : 400 }}>
             {price?.toLocaleString('id-ID')}
           </span>
         </div>
