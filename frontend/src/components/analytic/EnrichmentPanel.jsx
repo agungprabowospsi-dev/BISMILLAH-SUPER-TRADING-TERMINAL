@@ -15,7 +15,7 @@ const DIV_COLOR = { CLEAR:'#4ade80', BULLISH_DIV:'#86efac', HIDDEN_BULL:'#22d3ee
 function Row({ label, value, color }) {
   return (
     <div style={{ display:'flex', justifyContent:'space-between', padding:'4px 0', borderBottom:'1px solid #1e293b' }}>
-      <span style={{ fontSize:11, color:'#64748b' }}>{label}</span>
+      <span style={{ fontSize:11, color:'#475569' }}>{label}</span>
       <span style={{ fontSize:11, fontFamily:'monospace', color: color || '#e2e8f0' }}>{value}</span>
     </div>
   )
@@ -83,7 +83,7 @@ export default function EnrichmentPanel({ ticker }) {
     return () => { cancelled = true }
   }, [ticker])
 
-  const box = { background:'#0f172a', border:'1px solid #1e293b', borderRadius:8, padding:12, marginBottom:8 }
+  const box = { background:'#ffffff', border:'1px solid #e2e8f0', borderRadius:8, padding:12, marginBottom:8 }
   const sectionTitle = { fontSize:10, fontWeight:700, letterSpacing:2, textTransform:'uppercase', color:'#475569', marginBottom:6 }
 
   if (!ticker) return null
@@ -114,10 +114,10 @@ export default function EnrichmentPanel({ ticker }) {
 
         {/* Bandar context badges */}
         <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:8 }}>
-          <span style={{ padding:'2px 8px', borderRadius:4, background:'#1e293b', fontSize:10, fontFamily:'monospace', color:'#fbbf24' }}>
+          <span style={{ padding:'2px 8px', borderRadius:4, background:'#f8fafc', fontSize:10, fontFamily:'monospace', color:'#fbbf24' }}>
             Score: {ctx?.bandar_score}
           </span>
-          <span style={{ padding:'2px 8px', borderRadius:4, background:'#1e293b', fontSize:10, fontFamily:'monospace', color:'#94a3b8' }}>
+          <span style={{ padding:'2px 8px', borderRadius:4, background:'#f8fafc', fontSize:10, fontFamily:'monospace', color:'#64748b' }}>
             {ctx?.signal_tier}
           </span>
           {ctx?.phase_2b_active && (
@@ -131,9 +131,9 @@ export default function EnrichmentPanel({ ticker }) {
         <div style={{ border:`1px solid ${vs.border}`, background:vs.bg, borderRadius:6, padding:'8px 12px' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
             <span style={{ fontSize:14, fontWeight:900, color:vs.text }}>{vs.label}</span>
-            <span style={{ fontSize:10, fontFamily:'monospace', color:'#94a3b8' }}>{summary?.confidence}</span>
+            <span style={{ fontSize:10, fontFamily:'monospace', color:'#64748b' }}>{summary?.confidence}</span>
           </div>
-          <div style={{ display:'flex', gap:12, marginTop:4, fontSize:10, color:'#64748b' }}>
+          <div style={{ display:'flex', gap:12, marginTop:4, fontSize:10, color:'#475569' }}>
             <span>🟢 {summary?.bullish_count}/4 bullish</span>
             <span>🔴 {summary?.warning_count} warning</span>
           </div>
@@ -143,7 +143,7 @@ export default function EnrichmentPanel({ ticker }) {
             </div>
           )}
           {summary?.rag_insight && (
-            <div style={{ marginTop:6, padding:'4px 8px', background:'#0f172a', borderRadius:4, borderLeft:'2px solid #0369a1', fontSize:10, color:'#94a3b8', fontStyle:'italic' }}>
+            <div style={{ marginTop:6, padding:'4px 8px', background:'#ffffff', borderRadius:4, borderLeft:'2px solid #0369a1', fontSize:10, color:'#64748b', fontStyle:'italic' }}>
               📚 {summary.rag_insight}
             </div>
           )}
