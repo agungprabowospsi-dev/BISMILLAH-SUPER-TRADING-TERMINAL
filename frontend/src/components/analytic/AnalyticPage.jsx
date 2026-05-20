@@ -1,5 +1,5 @@
-import EnrichmentPanel from "./EnrichmentPanel"
 import React, { useState, useEffect, useRef } from 'react'
+import { BarChart2, ChevronRight, RefreshCw, ArrowRight } from 'lucide-react'
 import { useStore } from '../../stores/useStore'
 import { analyzeStock } from '../../utils/api'
 import { ScoreGauge, ScoreBar, SignalBadge, LoadingSpinner, ErrorBox, ConfidenceBar } from '../shared/ScoreComponents'
@@ -526,7 +526,6 @@ export default function AnalyticPage() {
               </div>
             </div>
           )}
-          {r && <EnrichmentPanel ticker={analyticTicker} />}
         </div>
       )}
 
