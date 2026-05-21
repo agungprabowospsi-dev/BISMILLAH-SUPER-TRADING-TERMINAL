@@ -1,3 +1,4 @@
+import MonitoringEnhancementPanel from "./MonitoringEnhancementPanel"
 import React, { useState, useEffect, useRef } from 'react'
 import { useStore } from '../../stores/useStore'
 import { Activity, Plus, Trash2, AlertTriangle, WifiOff, ChevronDown, ChevronUp, Brain } from 'lucide-react'
@@ -530,6 +531,11 @@ export default function MonitoringPage() {
                     <AlertTriangle className="w-3 h-3 shrink-0"/>{a.message||a}
                   </div>
                 ))}
+
+                {/* REV22 Monitoring Enhancement Panel */}
+                <div className="mt-3">
+                  <MonitoringEnhancementPanel position={pos} />
+                </div>
 
               </div>
             )
