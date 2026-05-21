@@ -519,14 +519,108 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             return None
 
 
+def calc_bfd_presort_score(candidate: Dict[str, Any]) -> float:
+    """
+    Bandar Flow Detector Pre-Sort Score
+    Berdasarkan formula dari 3 buku bandarmologi IDX:
+    - E-Book Bandar Flow Secrets (FSI framework)
+    - Bandarmology Basic by Koko Trader
+    - Bandarmology Advanced by Koko Trader
+
+    Komponen (FSI 0-4 karena foreign_net tidak tersedia di prefilter):
+    A. VSR  : Volume Spike Ratio >= 1.5x avg10
+    B. VII  : Value Inflow Index — value tinggi + harga stabil
+    C. SAP  : Silent Accumulation Pattern — vol naik, harga tidak spike
+    D. ANTI : Anti Climax Distribution — filter gorengan
+    """
+    score = 50.0
+
+    rvol       = to_float(candidate.get("rvol", 1.0))
+    change_pct = to_float(candidate.get("change_pct", 0))
+    value      = to_float(candidate.get("value", 0))
+    avg_vol    = to_float(candidate.get("avg_volume_20", 1))
+    volume     = to_float(candidate.get("volume", 0))
+    price      = to_float(candidate.get("price", 0))
+    ma20       = to_float(candidate.get("ma20", price))
+
+    # A. VSR — Volume Spike Ratio (Bandar Flow Secrets hal.60)
+    # VSR >= 1.5 = flow mulai bekerja
+    if rvol >= 2.0:
+        score += 20   # Strong flow
+    elif rvol >= 1.5:
+        score += 12   # Early flow
+    elif rvol >= 1.2:
+        score += 5    # Mulai meningkat
+
+    # B. VII — Value Inflow + Silent Accumulation (hal.26,36)
+    # Volume naik tapi harga tidak spike = akumulasi diam
+    # "Volume > 150% avg + harga tidak naik > 3%"
+    if rvol >= 1.5 and abs(change_pct) <= 3.0:
+        score += 20   # Silent accumulation pattern
+    elif rvol >= 1.5 and abs(change_pct) <= 5.0:
+        score += 10   # Moderate accumulation
+
+    # C. Price position vs MA20 (hal.19 — harga di area bawah = akumulasi)
+    if price > 0 and ma20 > 0:
+        price_vs_ma = (price - ma20) / ma20 * 100
+        if -5 <= price_vs_ma <= 5:
+            score += 8    # Harga di sekitar MA20 = zona akumulasi
+        elif price_vs_ma > 5:
+            score += 3    # Sedikit di atas MA20 = markup awal
+        elif price_vs_ma < -15:
+            score -= 10   # Terlalu jauh di bawah = downtrend
+
+    # D. ANTI Climax Distribution (hal.26 — BAPA case)
+    # "Climax distribution: volume ekstrem + candle hijau besar + harga melonjak"
+    if change_pct > 15 and rvol > 2.0:
+        score -= 45   # Climax distribution — sangat berbahaya
+    elif change_pct > 10 and rvol > 1.8:
+        score -= 25   # Potensi distribusi
+    elif change_pct > 7 and rvol > 1.5:
+        score -= 10   # Waspada
+
+    # E. Harga positif tapi tidak berlebihan (hal.19 — candle hijau kecil konsisten)
+    if 0 < change_pct <= 3:
+        score += 8    # Ideal: naik pelan = bandar kontrol harga
+    elif change_pct > 0:
+        score += 3    # Positif tapi perlu hati-hati
+    elif change_pct < -5:
+        score -= 8    # Tekanan jual cukup besar
+
+    # F. Value besar = uang besar (hal.36 — value meningkat = validasi flow)
+    if value > 50_000_000_000:   # > 50 miliar
+        score += 8
+    elif value > 10_000_000_000: # > 10 miliar
+        score += 4
+
+    return max(0.0, min(100.0, round(score, 2)))
+
+
 async def ohlcv_prefilter(universe: List[Dict[str, Any]], mode: Mode, filter_intensity: int = 75) -> List[Dict[str, Any]]:
     sem = asyncio.Semaphore(30)
     tasks = [prefilter_one(stock, mode, sem, filter_intensity) for stock in universe]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     candidates = [r for r in results if isinstance(r, dict)]
-    candidates.sort(key=lambda x: (to_float(x.get("rvol")), to_float(x.get("change_pct"))), reverse=True)
-    return candidates[: MODE_CONFIG[mode]["candidate_max"]]
+
+    # BFD Pre-Sort — Bandar Flow Detector dari 3 buku IDX
+    # Sort berdasarkan BFD score sebelum ambil top N
+    # Ini memastikan 200 kandidat terbaik secara bandarmologi
+    for c in candidates:
+        c["bfd_presort_score"] = calc_bfd_presort_score(c)
+
+    candidates.sort(key=lambda x: x.get("bfd_presort_score", 0), reverse=True)
+
+    limit = MODE_CONFIG[mode]["candidate_max"]
+    top = candidates[:limit]
+
+    logger.info(
+        f"BFD PreSort: {len(candidates)} kandidat → top {limit} "
+        f"| BFD range: {top[-1]['bfd_presort_score']:.1f}–{top[0]['bfd_presort_score']:.1f}"
+        if top else f"BFD PreSort: 0 kandidat"
+    )
+
+    return top
 
 
 # ===== Phase 3A: 34 Engines weighted score =====
