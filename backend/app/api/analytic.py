@@ -104,6 +104,93 @@ async def analyze(req: AnalyticRequest):
         current = ohlcv[-1]["close"]
         score   = all_engines["composite_score"]
 
+        # ── Enrichment + Phase 2 Integration ──────────────────────
+        enrichment_verdict  = "CAUTION"
+        phase2_verdict      = "HOLD"
+        wyckoff_phase       = "UNKNOWN"
+        weinstein_stage     = 0
+        vsa_signal          = "NONE"
+
+        try:
+            from app.api.enrichment.router import _run_phase2
+            from app.api.enrichment.smart_mfi import SmartMFI
+            from app.api.enrichment.kama_bands import KAMABands
+            from app.api.enrichment.lele_exhaustion import LeleExhaustion
+            from app.api.enrichment.divergence import DivergenceStateMachine
+
+            mfi_r  = SmartMFI().compute(ohlcv)
+            kama_r = KAMABands().compute(ohlcv)
+            lele_r = LeleExhaustion().compute(ohlcv)
+            redis  = None
+            div_r  = await DivergenceStateMachine().compute(ohlcv, redis, req.ticker)
+
+            warn = sum([
+                mfi_r.get("signal") == "BEARISH",
+                kama_r.get("entry_signal") in ("BELOW_LOWER3", "BELOW_LOWER2"),
+                lele_r.get("detected", False),
+                div_r.get("state") in ("BEARISH_WARN", "HIDDEN_BEAR"),
+            ])
+            enrichment_verdict = "SKIP" if warn >= 3 else "CAUTION" if warn == 2 else "PROCEED"
+
+            p2 = _run_phase2(ohlcv)
+            if p2:
+                phase2_verdict  = p2.phase2_verdict
+                wyckoff_phase   = p2.wyckoff.phase
+                weinstein_stage = p2.weinstein.stage
+                vsa_signal      = p2.vsa.signal
+
+        except Exception as e:
+            logger.warning(f"Enrichment/Phase2 in analytic failed: {e}")
+
+        # ── GO / NO GO Logic ────────────────────────────────────────
+        go_reasons    = []
+        no_go_reasons = []
+
+        if score >= 65:
+            go_reasons.append(f"Bandar score {score:.0f} — TIER {'1' if score >= 80 else '2'}")
+        else:
+            no_go_reasons.append(f"Bandar score {score:.0f} terlalu rendah (min 65)")
+
+        if enrichment_verdict == "PROCEED":
+            go_reasons.append("Enrichment PROCEED — timing entry valid")
+        elif enrichment_verdict == "SKIP":
+            no_go_reasons.append("Enrichment SKIP — sinyal kontradiksi")
+
+        if wyckoff_phase in ("ACCUMULATION", "MARKUP", "REACCUMULATION"):
+            go_reasons.append(f"Wyckoff {wyckoff_phase} — fase bullish")
+        elif wyckoff_phase in ("DISTRIBUTION", "MARKDOWN"):
+            no_go_reasons.append(f"Wyckoff {wyckoff_phase} — fase bearish")
+
+        if weinstein_stage == 2:
+            go_reasons.append("Weinstein Stage 2 — ADVANCING")
+        elif weinstein_stage == 4:
+            no_go_reasons.append("Weinstein Stage 4 — DECLINING")
+
+        if vsa_signal in ("STOPPING_VOLUME", "NO_SUPPLY", "TEST"):
+            go_reasons.append(f"VSA {vsa_signal} — bullish microstructure")
+        elif vsa_signal in ("UP_THRUST", "NO_DEMAND"):
+            no_go_reasons.append(f"VSA {vsa_signal} — bearish microstructure")
+
+        # Final GO/NO GO
+        go_score = len(go_reasons)
+        no_score = len(no_go_reasons)
+
+        if enrichment_verdict == "SKIP" or weinstein_stage == 4 or score < 55:
+            go_no_go = "NO GO"
+            go_confidence = max(0, 100 - (no_score * 20))
+        elif go_score >= 3 and no_score == 0:
+            go_no_go = "STRONG GO"
+            go_confidence = min(95, 70 + go_score * 5)
+        elif go_score >= 2 and go_score > no_score:
+            go_no_go = "GO"
+            go_confidence = min(85, 60 + go_score * 5)
+        elif no_score >= 2:
+            go_no_go = "WAIT"
+            go_confidence = max(30, 60 - no_score * 10)
+        else:
+            go_no_go = "WAIT"
+            go_confidence = 50
+
         # ── Setup Type Detector (additive) ─────────────────────────
         closes = [c["close"] for c in ohlcv]
         highs = [c["high"] for c in ohlcv]
@@ -288,6 +375,17 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "rag_used": bool(kb_context),
             "rag_context_count": len(kb_parts) if "kb_parts" in locals() else 0,
             "rag_engines": analytic_engines if "analytic_engines" in locals() else [],
+            # GO / NO GO
+            "go_no_go":          go_no_go,
+            "go_confidence":     go_confidence,
+            "go_reasons":        go_reasons,
+            "no_go_reasons":     no_go_reasons,
+            # Enrichment + Phase 2
+            "enrichment_verdict": enrichment_verdict,
+            "phase2_verdict":    phase2_verdict,
+            "wyckoff_phase":     wyckoff_phase,
+            "weinstein_stage":   weinstein_stage,
+            "vsa_signal":        vsa_signal,
         }
 
         # ML — Win Probability
