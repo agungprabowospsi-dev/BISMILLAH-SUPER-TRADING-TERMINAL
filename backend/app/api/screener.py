@@ -1210,7 +1210,43 @@ async def calculate_rag_boost(ticker: str, mode: Mode, context: Dict[str, Any]) 
 
     # Inject bandarmologi insight ke query
     if bandarm_insight:
-        query = f"{query} {bandarm_insight[:200]}" 
+        query = f"{query} {bandarm_insight[:200]}"
+
+    # ── Buku teknikal spesifik per phase ────────────────────
+    try:
+        from app.core.knowledge_base import query_murphy_ta, query_coulling_vpa, query_trade_setup
+        import asyncio as _asyncio
+
+        phase_val = context.get("phase", "neutral")
+        rvol_val  = context.get("rvol", 1.0)
+
+        murphy_q = (
+            f"Setup {phase_val} dengan RVOL {rvol_val:.1f}x. "
+            f"Technical analysis confirmation untuk IDX stock screening?"
+        )
+        vpa_q = (
+            f"Volume {rvol_val:.1f}x average di fase {phase_val}. "
+            f"Apakah volume mengkonfirmasi akumulasi atau distribusi?"
+        )
+        setup_q = (
+            f"Screening criteria untuk fase {phase_val} di IDX. "
+            f"Setup entry yang valid dengan RVOL {rvol_val:.1f}x?"
+        )
+
+        murphy_ctx, vpa_ctx, setup_ctx = await _asyncio.gather(
+            query_murphy_ta(murphy_q, n=1),
+            query_coulling_vpa(vpa_q, n=1),
+            query_trade_setup(setup_q, n=1),
+        )
+
+        tech_insights = " ".join([
+            t[:150] for t in [murphy_ctx, vpa_ctx, setup_ctx] if t
+        ])
+        if tech_insights:
+            query = f"{query} {tech_insights}"
+
+    except Exception:
+        pass
 
     # Keywords scoring — lebih komprehensif
     bullish_keywords = [

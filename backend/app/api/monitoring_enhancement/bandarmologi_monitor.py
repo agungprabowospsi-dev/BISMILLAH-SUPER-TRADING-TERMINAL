@@ -413,3 +413,45 @@ def run_bandarmologi_monitor(
             rag_triggered         = True,
             status_message        = f"Error: {str(e)}",
         )
+
+
+async def get_bandarmologi_kb_context(
+    ticker:               str,
+    phase:                str,
+    distribution_signals: list,
+    obv_trend:            str,
+    score_delta:          float,
+) -> str:
+    """
+    Query Coulling VPA + 3 buku bandarmologi IDX
+    untuk konfirmasi fase dan sinyal distribusi.
+    """
+    try:
+        from app.core.knowledge_base import query_coulling_vpa, query_bandarmologi_kb
+        import asyncio
+
+        dist_str = ", ".join(distribution_signals) if distribution_signals else "none"
+        query = (
+            f"Fase bandar {phase}, OBV trend {obv_trend}, "
+            f"score delta {score_delta:.1f}, "
+            f"sinyal distribusi: {dist_str}. "
+            f"Apakah ini distribusi nyata atau reaccumulation? "
+            f"Bagaimana volume spread analysis mengkonfirmasi fase ini?"
+        )
+
+        bandar_query = (
+            f"Fase {phase} dengan sinyal {dist_str}. "
+            f"Ciri-ciri distribusi bandar IDX vs reaccumulation."
+        )
+
+        coulling, bandarmologi = await asyncio.gather(
+            query_coulling_vpa(query, n=2),
+            query_bandarmologi_kb(bandar_query, n_results=2),
+        )
+
+        parts = [p for p in [bandarmologi, coulling] if p]
+        return "\n\n---\n\n".join(parts)
+
+    except Exception as e:
+        logger.warning(f"BandarmologiMonitor KB query failed [{ticker}]: {e}")
+        return ""

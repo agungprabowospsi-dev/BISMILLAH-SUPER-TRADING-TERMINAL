@@ -282,12 +282,32 @@ async def run_rag_monitor(
                 rate_limited   = False,
             )
 
-        # Query knowledge base
+        # Query knowledge base — gabungkan semua buku relevan
         try:
-            from app.core.knowledge_base import query_knowledge_base
+            from app.core.knowledge_base import (
+                query_bandarmologi_kb,
+                query_kb_for_engine,
+                query_all_technical,
+            )
+            import asyncio
 
-            result_text = await query_knowledge_base("bandarmologi", query, n_results=4)
-            result = {"answer": result_text} if result_text else None
+            # Selalu query 3 buku bandarmologi IDX
+            bandar_text = await query_bandarmologi_kb(query, n_results=3)
+
+            # Query buku teknikal berdasarkan trigger
+            if trigger in (RAGTrigger.BANDAR_TYPE_UNCLEAR, RAGTrigger.DISTRIBUTION_DETECTED):
+                tech_text = await query_kb_for_engine("BandarTypeClassifier", query)
+            elif trigger in (RAGTrigger.RETEST_UNCLEAR, RAGTrigger.RETEST_DEEP_BUT_VALID):
+                tech_text = await query_kb_for_engine("RetestClassifier", query)
+            elif trigger == RAGTrigger.MOMENTUM_DROP:
+                tech_text = await query_kb_for_engine("MomentumStrength", query)
+            elif trigger == RAGTrigger.TP_PROB_DROP:
+                tech_text = await query_kb_for_engine("TPProbability", query)
+            else:
+                tech_text = await query_all_technical(query, n_per_book=1)
+
+            combined = "\n\n===\n\n".join([t for t in [bandar_text, tech_text] if t])
+            result = {"answer": combined} if combined else None
 
             insight = None
             confidence_boost = 0.0

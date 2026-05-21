@@ -274,11 +274,47 @@ async def analyze(req: AnalyticRequest):
                     f"=== BANDARMOLOGI IDX (3 Buku Khusus IDX) ===\n{bandar_ctx}"
                 )
 
-            # Engine teknikal lainnya
-            for eng in analytic_engines:
-                ctx = await kb_service.get_kb_context_for_engine(eng, req.ticker)
+            # Buku teknikal spesifik per fungsi
+            from app.core.knowledge_base import (
+                query_trade_setup, query_murphy_ta,
+                query_coulling_vpa, query_lopezdeprado
+            )
+            import asyncio as _asyncio
+
+            setup_query = (
+                f"Setup {setup_type} untuk {req.mode} trading, "
+                f"score {score:.0f}, signal {all_engines.get('signal','NEUTRAL')}. "
+                f"Apakah setup ini valid? Kriteria entry dan manajemen risiko?"
+            )
+            murphy_query = (
+                f"Trend analysis {setup_type}, MA20={ma20:.0f}, MA50={ma50:.0f}, "
+                f"harga {'di atas' if trend_up else 'di bawah'} MA. "
+                f"Konfirmasi technical analysis?"
+            )
+            vpa_query = (
+                f"Volume {rvol:.1f}x average, setup {setup_type}. "
+                f"Apakah volume mengkonfirmasi price movement ini?"
+            )
+            ml_query = (
+                f"Score {score:.0f}/100, win probability setup {setup_type}. "
+                f"Statistical edge dan feature importance?"
+            )
+
+            setup_ctx, murphy_ctx, vpa_ctx, ml_ctx = await _asyncio.gather(
+                query_trade_setup(setup_query, n=2),
+                query_murphy_ta(murphy_query, n=2),
+                query_coulling_vpa(vpa_query, n=2),
+                query_lopezdeprado(ml_query, n=1),
+            )
+
+            for label, ctx in [
+                ("Trade Setup Handbook", setup_ctx),
+                ("Murphy TA", murphy_ctx),
+                ("Coulling VPA", vpa_ctx),
+                ("Lopez de Prado ML", ml_ctx),
+            ]:
                 if ctx:
-                    kb_parts.append(ctx)
+                    kb_parts.append(f"=== {label} ===\n{ctx}")
             if kb_parts:
                 kb_context = "\n\n=== REFERENSI KNOWLEDGE BASE ===\n" + "\n---\n".join(kb_parts[:4])
                 logger.info(f"[RAG] Analytic {req.ticker}: {len(kb_parts)} KB contexts injected")
