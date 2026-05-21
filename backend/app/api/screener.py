@@ -339,7 +339,11 @@ async def build_universe(mode: Mode) -> List[Dict[str, Any]]:
     if not stocks:
         stocks = fallback_stock_universe()
     filtered = [s for s in stocks if sector_allowed(mode, s.get("sector", ""))]
-    return filtered[:200]
+
+    # Naikkan universe — BFD pre-sort akan filter yang terbaik
+    # SWING butuh universe lebih besar karena cari quiet accumulation
+    limit = {"swing": 600, "intraday": 400, "scalping": 200}.get(mode, 400)
+    return filtered[:limit]
 
 
 # ===== Phase 2: OHLCV Pre-filter =====
