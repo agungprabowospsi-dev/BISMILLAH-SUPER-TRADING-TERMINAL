@@ -101,7 +101,6 @@ def _check_alert(last_price: float, req) -> AlertResult:
 async def _run_enrichment(ticker: str, data):
     """Reuse enrichment engine dari REV21"""
     try:
-    try:
         from app.api.enrichment.smart_mfi import SmartMFI
         from app.api.enrichment.kama_bands import KAMABands
         from app.api.enrichment.lele_exhaustion import LeleExhaustion
