@@ -136,6 +136,7 @@ class MomentumResult(BaseModel):
     score_drop:       float           = 0.0
     rag_triggered:    bool            = False
 
+# RetestResultOLD — tidak dipakai
 class RetestResultOLD(BaseModel):
     classification:        RetestClassification
     fib_level_pct:         float
@@ -191,6 +192,58 @@ class FinalRecommendation(BaseModel):
     sl_hit:     bool                = False
     tp_hit:     Optional[AlertType] = None
 
+
+class BandarRetestType(str, Enum):
+    NORMAL_BANDAR_RETEST   = "NORMAL_BANDAR_RETEST"
+    DISTRIBUSI_TERSELUBUNG = "DISTRIBUSI_TERSELUBUNG"
+    PARKING                = "PARKING"
+    UNCLEAR                = "UNCLEAR"
+
+
+class PatternName(str, Enum):
+    BULL_FLAG       = "BULL_FLAG"
+    WYCKOFF_SPRING  = "WYCKOFF_SPRING"
+    HIGHER_LOW      = "HIGHER_LOW"
+    DEAD_CAT_BOUNCE = "DEAD_CAT_BOUNCE"
+    BEAR_FLAG       = "BEAR_FLAG"
+    NONE            = "NONE"
+
+
+class RetestVerdict(str, Enum):
+    STRONG_HOLD = "STRONG_HOLD"
+    HOLD        = "HOLD"
+    REDUCE_50   = "REDUCE_50"
+    EXIT_ALL    = "EXIT_ALL"
+
+
+class RetestResult(BaseModel):
+    # Layer 1 — Fibonacci
+    classification:        RetestClassification
+    fib_level_pct:         float
+    pullback_points:       float
+    pullback_pct:          float
+    swing_high:            float
+    swing_low:             float
+    fib_levels:            dict
+    # Layer 2 — VSA
+    volume_ratio_pullback: float
+    vsa_signal:            Optional[str] = None
+    # Layer 3 — Bandar Context RAG
+    bandar_retest_type:    BandarRetestType = BandarRetestType.UNCLEAR
+    bandar_still_holding:  bool             = False
+    kb_insight_bandar:     Optional[str]    = None
+    confidence_bandar:     float            = 0.0
+    # Layer 4 — Chart Pattern RAG
+    pattern_name:          PatternName      = PatternName.NONE
+    pattern_win_rate:      float            = 0.0
+    pattern_implication:   str              = "NEUTRAL"
+    kb_insight_pattern:    Optional[str]    = None
+    # Layer 5 — Synthesis
+    retest_verdict:        RetestVerdict    = RetestVerdict.HOLD
+    retest_confidence:     float            = 0.0
+    rag_triggered:         bool             = False
+
+
 class MonitoringEnhancementResponse(BaseModel):
     ticker:             str
     trade_mode:         Literal["SWING", "DAYTRADING", "SCALPING"]
@@ -219,50 +272,3 @@ class MonitoringEnhancementRequest(BaseModel):
     entry_score: float = 0.0
     lots:        int   = 10
 
-
-class BandarRetestType(str, Enum):
-    NORMAL_BANDAR_RETEST   = "NORMAL_BANDAR_RETEST"
-    DISTRIBUSI_TERSELUBUNG = "DISTRIBUSI_TERSELUBUNG"
-    PARKING                = "PARKING"
-    UNCLEAR                = "UNCLEAR"
-
-class PatternName(str, Enum):
-    BULL_FLAG       = "BULL_FLAG"
-    WYCKOFF_SPRING  = "WYCKOFF_SPRING"
-    HIGHER_LOW      = "HIGHER_LOW"
-    DEAD_CAT_BOUNCE = "DEAD_CAT_BOUNCE"
-    BEAR_FLAG       = "BEAR_FLAG"
-    NONE            = "NONE"
-
-class RetestVerdict(str, Enum):
-    STRONG_HOLD = "STRONG_HOLD"
-    HOLD        = "HOLD"
-    REDUCE_50   = "REDUCE_50"
-    EXIT_ALL    = "EXIT_ALL"
-
-class RetestResult(BaseModel):
-    # Layer 1 — Fibonacci
-    classification:        RetestClassification
-    fib_level_pct:         float
-    pullback_points:       float
-    pullback_pct:          float
-    swing_high:            float
-    swing_low:             float
-    fib_levels:            dict
-    # Layer 2 — VSA
-    volume_ratio_pullback: float
-    vsa_signal:            Optional[str] = None
-    # Layer 3 — Bandar Context RAG
-    bandar_retest_type:    BandarRetestType = BandarRetestType.UNCLEAR
-    bandar_still_holding:  bool             = False
-    kb_insight_bandar:     Optional[str]    = None
-    confidence_bandar:     float            = 0.0
-    # Layer 4 — Chart Pattern RAG
-    pattern_name:          PatternName      = PatternName.NONE
-    pattern_win_rate:      float            = 0.0
-    pattern_implication:   str              = "NEUTRAL"
-    kb_insight_pattern:    Optional[str]    = None
-    # Layer 5 — Synthesis
-    retest_verdict:        RetestVerdict    = RetestVerdict.HOLD
-    retest_confidence:     float            = 0.0
-    rag_triggered:         bool             = False
