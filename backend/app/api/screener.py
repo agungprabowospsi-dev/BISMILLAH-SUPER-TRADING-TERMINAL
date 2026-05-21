@@ -1092,6 +1092,21 @@ async def calculate_rag_boost(ticker: str, mode: Mode, context: Dict[str, Any]) 
     if kb_service is None:
         return {"boost": 0, "reason": "kb_service unavailable"}
 
+    # ── Bandarmologi IDX — query khusus 3 buku sebelum query umum ──
+    bandarm_insight = ""
+    try:
+        from app.core.knowledge_base import query_bandarmologi_kb
+        phase_val = context.get("phase", "neutral")
+        rvol_val  = context.get("rvol", 1.0)
+        bandarm_query = (
+            f"Fase bandar IDX: {phase_val}, volume relatif {rvol_val:.1f}x. "
+            f"Apakah ini tanda akumulasi atau distribusi bandar IDX? "
+            f"Bagaimana ciri-ciri bandar IDX di fase ini?"
+        )
+        bandarm_insight = await query_bandarmologi_kb(bandarm_query, n_results=3)
+    except Exception as e:
+        pass
+
     # Build query spesifik berdasarkan konteks deteksi
     phase = context.get("phase", "neutral")
     rvol = context.get("rvol", 1.0)
@@ -1125,13 +1140,17 @@ async def calculate_rag_boost(ticker: str, mode: Mode, context: Dict[str, Any]) 
     # Akumulasi signal context
     akum_ctx = " ".join(akumulasi_signals[:3]) if akumulasi_signals else ""
 
-    # Build final query
+    # Build final query — gabungkan dengan insight bandarmologi IDX
     query = (
         f"{phase_queries.get(phase, phase_queries['neutral'])} "
         f"{mode_context.get(mode, '')} "
         f"rvol {rvol} {pattern_ctx} {akum_ctx} "
         f"IDX saham Indonesia trading setup"
     ).strip()
+
+    # Inject bandarmologi insight ke query
+    if bandarm_insight:
+        query = f"{query} {bandarm_insight[:200]}" 
 
     # Keywords scoring — lebih komprehensif
     bullish_keywords = [
