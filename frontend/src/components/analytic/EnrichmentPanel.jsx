@@ -190,6 +190,158 @@ export default function EnrichmentPanel({ ticker }) {
         <div style={{ fontSize:10, color:'#475569', marginTop:6, fontStyle:'italic', lineHeight:1.4 }}>{div?.interpretation}</div>
       </div>
 
+      {/* ── PHASE 2 ENRICHMENT ── */}
+      {data?.phase2 && (
+        <div>
+          {/* Phase 2 Header */}
+          <div style={{ fontSize:10, fontWeight:700, color:'#7c3aed', fontFamily:'monospace',
+            letterSpacing:'0.1em', marginBottom:6, marginTop:4,
+            borderTop:'1px solid #334155', paddingTop:8 }}>
+            ⚡ PHASE 2 ENRICHMENT
+          </div>
+
+          {/* Phase 2 Verdict Banner */}
+          <div style={{
+            padding:'6px 10px', borderRadius:6, marginBottom:8,
+            background: data.phase2.phase2_verdict === 'STRONG_BUY' ? '#052e16' :
+                        data.phase2.phase2_verdict === 'BUY' ? '#052e16' :
+                        data.phase2.phase2_verdict === 'AVOID' ? '#450a0a' :
+                        data.phase2.phase2_verdict === 'REDUCE' ? '#431407' : '#1e293b',
+            border: `1px solid ${
+                        data.phase2.phase2_verdict === 'STRONG_BUY' ? '#16a34a' :
+                        data.phase2.phase2_verdict === 'BUY' ? '#4ade80' :
+                        data.phase2.phase2_verdict === 'AVOID' ? '#ef4444' :
+                        data.phase2.phase2_verdict === 'REDUCE' ? '#f97316' : '#334155'}`,
+          }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <span style={{ fontSize:12, fontWeight:700, fontFamily:'monospace',
+                color: data.phase2.phase2_verdict === 'STRONG_BUY' ? '#4ade80' :
+                       data.phase2.phase2_verdict === 'BUY' ? '#4ade80' :
+                       data.phase2.phase2_verdict === 'AVOID' ? '#f87171' :
+                       data.phase2.phase2_verdict === 'REDUCE' ? '#fb923c' : '#94a3b8'
+              }}>
+                {data.phase2.phase2_verdict === 'STRONG_BUY' ? '🟢 STRONG BUY' :
+                 data.phase2.phase2_verdict === 'BUY' ? '🟢 BUY' :
+                 data.phase2.phase2_verdict === 'AVOID' ? '🔴 AVOID' :
+                 data.phase2.phase2_verdict === 'REDUCE' ? '🟠 REDUCE' : '🟡 HOLD'}
+              </span>
+              <span style={{ fontSize:10, color:'#94a3b8', fontFamily:'monospace' }}>
+                {data.phase2.phase2_confidence?.toFixed(0)}% confidence
+              </span>
+            </div>
+            <div style={{ fontSize:9, color:'#64748b', fontFamily:'monospace', marginTop:3 }}>
+              {data.phase2.phase2_summary}
+            </div>
+          </div>
+
+          {/* Wyckoff Card */}
+          <div style={{ ...box, borderLeft:'2px solid #7c3aed' }}>
+            <div style={sectionTitle}>🌊 Wyckoff Phase</div>
+            <Row label="Phase" value={data.phase2.wyckoff?.phase}
+              color={data.phase2.wyckoff?.phase === 'ACCUMULATION' ? '#4ade80' :
+                     data.phase2.wyckoff?.phase === 'MARKUP' ? '#4ade80' :
+                     data.phase2.wyckoff?.phase === 'DISTRIBUTION' ? '#f87171' :
+                     data.phase2.wyckoff?.phase === 'MARKDOWN' ? '#f87171' :
+                     data.phase2.wyckoff?.phase === 'REACCUMULATION' ? '#fbbf24' : '#94a3b8'} />
+            <Row label="Event" value={data.phase2.wyckoff?.sub_event} />
+            <Row label="Implication" value={data.phase2.wyckoff?.implication}
+              color={data.phase2.wyckoff?.implication === 'BUY' ? '#4ade80' :
+                     data.phase2.wyckoff?.implication === 'EXIT' ? '#f87171' :
+                     data.phase2.wyckoff?.implication === 'REDUCE' ? '#fb923c' : '#94a3b8'} />
+            <Row label="Confidence" value={`${data.phase2.wyckoff?.confidence?.toFixed(0)}%`} />
+            <Row label="Support" value={`Rp ${data.phase2.wyckoff?.support_level?.toLocaleString('id-ID')}`} />
+            <Row label="Resistance" value={`Rp ${data.phase2.wyckoff?.resistance_level?.toLocaleString('id-ID')}`} />
+            {data.phase2.wyckoff?.is_spring && (
+              <div style={{ fontSize:10, color:'#4ade80', marginTop:4, fontWeight:700 }}>✅ SPRING DETECTED</div>
+            )}
+            {data.phase2.wyckoff?.is_sos && (
+              <div style={{ fontSize:10, color:'#4ade80', marginTop:4, fontWeight:700 }}>✅ SIGN OF STRENGTH</div>
+            )}
+            {data.phase2.wyckoff?.is_upthrust && (
+              <div style={{ fontSize:10, color:'#f87171', marginTop:4, fontWeight:700 }}>⚠️ UPTHRUST DETECTED</div>
+            )}
+            <div style={{ fontSize:10, color:'#475569', marginTop:6, fontStyle:'italic' }}>
+              {data.phase2.wyckoff?.phase_label}
+            </div>
+          </div>
+
+          {/* Weinstein Card */}
+          <div style={{ ...box, borderLeft:'2px solid #0ea5e9' }}>
+            <div style={sectionTitle}>📊 Weinstein Stage</div>
+            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+              <div style={{
+                width:36, height:36, borderRadius:'50%', display:'flex',
+                alignItems:'center', justifyContent:'center', fontWeight:700,
+                fontSize:16, fontFamily:'monospace',
+                background: data.phase2.weinstein?.stage === 2 ? '#052e16' :
+                            data.phase2.weinstein?.stage === 4 ? '#450a0a' :
+                            data.phase2.weinstein?.stage === 1 ? '#1e293b' : '#431407',
+                border: `2px solid ${
+                            data.phase2.weinstein?.stage === 2 ? '#4ade80' :
+                            data.phase2.weinstein?.stage === 4 ? '#f87171' :
+                            data.phase2.weinstein?.stage === 1 ? '#64748b' : '#f97316'}`,
+                color: data.phase2.weinstein?.stage === 2 ? '#4ade80' :
+                       data.phase2.weinstein?.stage === 4 ? '#f87171' :
+                       data.phase2.weinstein?.stage === 1 ? '#94a3b8' : '#fb923c',
+              }}>
+                {data.phase2.weinstein?.stage}
+              </div>
+              <div>
+                <div style={{ fontSize:11, fontWeight:700, fontFamily:'monospace',
+                  color: data.phase2.weinstein?.stage === 2 ? '#4ade80' :
+                         data.phase2.weinstein?.stage === 4 ? '#f87171' :
+                         data.phase2.weinstein?.stage === 1 ? '#94a3b8' : '#fb923c' }}>
+                  {data.phase2.weinstein?.stage_name}
+                </div>
+                <div style={{ fontSize:9, color:'#64748b', fontFamily:'monospace' }}>
+                  {data.phase2.weinstein?.weeks_in_stage} candle di stage ini
+                </div>
+              </div>
+            </div>
+            <Row label="MA30" value={`Rp ${data.phase2.weinstein?.ma30?.toLocaleString('id-ID')}`} />
+            <Row label="Price vs MA" value={data.phase2.weinstein?.price_vs_ma}
+              color={data.phase2.weinstein?.price_vs_ma === 'ABOVE' ? '#4ade80' :
+                     data.phase2.weinstein?.price_vs_ma === 'BELOW' ? '#f87171' : '#fbbf24'} />
+            <Row label="MA Slope" value={data.phase2.weinstein?.ma_slope}
+              color={data.phase2.weinstein?.ma_slope === 'RISING' ? '#4ade80' :
+                     data.phase2.weinstein?.ma_slope === 'FALLING' ? '#f87171' : '#fbbf24'} />
+            <Row label="Vol Confirm" value={data.phase2.weinstein?.volume_confirmation ? 'YA ✅' : 'TIDAK'}
+              color={data.phase2.weinstein?.volume_confirmation ? '#4ade80' : '#64748b'} />
+            {data.phase2.weinstein?.breakout_detected && (
+              <div style={{ fontSize:10, color:'#4ade80', marginTop:4, fontWeight:700 }}>🚀 BREAKOUT DETECTED!</div>
+            )}
+            {data.phase2.weinstein?.breakdown_detected && (
+              <div style={{ fontSize:10, color:'#f87171', marginTop:4, fontWeight:700 }}>⚠️ BREAKDOWN DETECTED!</div>
+            )}
+          </div>
+
+          {/* VSA Card */}
+          <div style={{ ...box, borderLeft:'2px solid #f59e0b' }}>
+            <div style={sectionTitle}>📈 VSA Signal</div>
+            <Row label="Signal" value={data.phase2.vsa?.signal}
+              color={['STOPPING_VOLUME','NO_SUPPLY','TEST'].includes(data.phase2.vsa?.signal) ? '#4ade80' :
+                     ['UP_THRUST','NO_DEMAND'].includes(data.phase2.vsa?.signal) ? '#f87171' :
+                     data.phase2.vsa?.signal === 'EFFORT_VS_RESULT' ? '#fbbf24' : '#94a3b8'} />
+            <Row label="Background" value={data.phase2.vsa?.background}
+              color={data.phase2.vsa?.background === 'BULLISH' ? '#4ade80' :
+                     data.phase2.vsa?.background === 'BEARISH' ? '#f87171' : '#94a3b8'} />
+            <Row label="Strength" value={data.phase2.vsa?.strength} />
+            <Row label="Vol Ratio" value={`${data.phase2.vsa?.vol_ratio?.toFixed(2)}x`}
+              color={data.phase2.vsa?.vol_ratio >= 1.5 ? '#4ade80' :
+                     data.phase2.vsa?.vol_ratio < 0.6 ? '#f87171' : '#94a3b8'} />
+            <Row label="Spread Ratio" value={`${data.phase2.vsa?.spread_ratio?.toFixed(2)}x`} />
+            {data.phase2.vsa?.tradeable && (
+              <div style={{ fontSize:10, color:'#4ade80', marginTop:4, fontWeight:700 }}>✅ TRADEABLE SIGNAL</div>
+            )}
+            {data.phase2.vsa?.description && (
+              <div style={{ fontSize:10, color:'#475569', marginTop:6, fontStyle:'italic', lineHeight:1.4 }}>
+                {data.phase2.vsa.description}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div style={{ fontSize:9, color:'#1e293b', fontFamily:'monospace', textAlign:'right' }}>
         {data?.timestamp ? new Date(data.timestamp).toLocaleTimeString('id-ID') : ''}
       </div>
