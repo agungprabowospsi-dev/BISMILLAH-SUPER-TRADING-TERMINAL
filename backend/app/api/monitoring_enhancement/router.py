@@ -163,6 +163,10 @@ async def _run_enrichment(ticker: str, data):
             verdict           = verdict,
             warning_count     = warnings,
         )
+    except Exception as e:
+        logger.warning(f"Enrichment failed [{ticker}]: {e}")
+        from .models import EnrichmentRealtimeResult
+        return EnrichmentRealtimeResult(mfi_signal="NEUTRAL", mfi_value=50.0, kama_zone="AT_BASIS", kama_distance_pct=0.0, lele_signal="NONE", divergence_state="CLEAR", verdict=EnrichmentVerdict.CAUTION)
 
 
 # ─────────────────────────────────────────────
