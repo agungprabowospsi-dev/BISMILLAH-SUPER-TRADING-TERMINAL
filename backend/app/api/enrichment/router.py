@@ -11,6 +11,9 @@ from app.api.enrichment.kama_bands import KAMABands
 from app.api.enrichment.lele_exhaustion import LeleExhaustion
 from app.api.enrichment.divergence import DivergenceStateMachine
 from app.core.redis_client import get_redis
+from app.api.enrichment.wyckoff_phase import classify_wyckoff
+from app.api.enrichment.weinstein_stage import classify_weinstein
+from app.api.enrichment.vsa_engine import analyze_vsa
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -53,6 +56,137 @@ class EnrichResponse(BaseModel):
     bandar_context:BandarCtx; smart_mfi:SmartMFIResult
     kama_bands:KAMABandsResult; lele_exhaustion:LeleResult
     divergence:DivResult; summary:EnrichSummary
+
+# ── Phase 2 Models ──────────────────────────────────────────────────────────
+
+class WyckoffResult(BaseModel):
+    phase: str; sub_event: str; confidence: float; implication: str
+    phase_label: str; is_spring: bool; is_sos: bool
+    is_upthrust: bool; is_distribution: bool
+    support_level: float; resistance_level: float
+
+class WeinsteinResult(BaseModel):
+    stage: int; stage_name: str; ma30: float
+    price_vs_ma: str; ma_slope: str
+    volume_confirmation: bool; implication: str
+    confidence: float; breakout_detected: bool
+    breakdown_detected: bool; weeks_in_stage: int
+
+class VSAResult(BaseModel):
+    signal: str; background: str; strength: str
+    tradeable: bool; description: str
+    vol_ratio: float; spread_ratio: float; close_position: float
+
+class Phase2Result(BaseModel):
+    wyckoff: WyckoffResult
+    weinstein: WeinsteinResult
+    vsa: VSAResult
+    phase2_verdict: str          # STRONG_BUY / BUY / HOLD / REDUCE / AVOID
+    phase2_confidence: float
+    phase2_summary: str
+
+class EnrichResponseV2(BaseModel):
+    ticker: str; timestamp: str; enabled: bool
+    bandar_context: BandarCtx; smart_mfi: SmartMFIResult
+    kama_bands: KAMABandsResult; lele_exhaustion: LeleResult
+    divergence: DivResult; summary: EnrichSummary
+    phase2: Optional[Phase2Result] = None
+
+# ── Helper: Phase 2 ─────────────────────────────────────────────────────────
+
+def _run_phase2(ohlcv: list) -> Phase2Result:
+    """Jalankan 3 engine Phase 2 dari ohlcv list of dict"""
+    try:
+        opens   = [float(c.get("open",   0) or 0) for c in ohlcv]
+        highs   = [float(c.get("high",   0) or 0) for c in ohlcv]
+        lows    = [float(c.get("low",    0) or 0) for c in ohlcv]
+        closes  = [float(c.get("close",  0) or 0) for c in ohlcv]
+        volumes = [int(float(c.get("volume", 0) or 0)) for c in ohlcv]
+
+        wyckoff  = classify_wyckoff(opens, highs, lows, closes, volumes)
+        weinstein = classify_weinstein(closes, volumes)
+        vsa      = analyze_vsa(opens, highs, lows, closes, volumes)
+
+        # Phase 2 verdict synthesis
+        buy_signals  = 0
+        sell_signals = 0
+
+        if wyckoff.implication in ("BUY",):         buy_signals  += 2
+        if wyckoff.implication in ("EXIT","REDUCE"): sell_signals += 2
+        if weinstein.implication in ("BUY",):        buy_signals  += 2
+        if weinstein.implication in ("AVOID","EXIT"): sell_signals += 2
+        if vsa.background == "BULLISH":              buy_signals  += 1
+        if vsa.background == "BEARISH":              sell_signals += 1
+        if vsa.signal in ("STOPPING_VOLUME","NO_SUPPLY","TEST"): buy_signals += 1
+        if vsa.signal in ("UP_THRUST","NO_DEMAND"):  sell_signals += 1
+
+        if buy_signals >= 4:
+            verdict    = "STRONG_BUY"
+            confidence = min(90.0, 60 + buy_signals * 5)
+        elif buy_signals >= 2 and buy_signals > sell_signals:
+            verdict    = "BUY"
+            confidence = min(80.0, 50 + buy_signals * 5)
+        elif sell_signals >= 4:
+            verdict    = "AVOID"
+            confidence = min(90.0, 60 + sell_signals * 5)
+        elif sell_signals >= 2 and sell_signals > buy_signals:
+            verdict    = "REDUCE"
+            confidence = min(75.0, 50 + sell_signals * 5)
+        else:
+            verdict    = "HOLD"
+            confidence = 50.0
+
+        summary = (
+            f"Wyckoff:{wyckoff.phase}({wyckoff.sub_event}) "
+            f"Weinstein:Stage{weinstein.stage}({weinstein.stage_name}) "
+            f"VSA:{vsa.signal}({vsa.background})"
+        )
+
+        return Phase2Result(
+            wyckoff  = WyckoffResult(
+                phase            = wyckoff.phase,
+                sub_event        = wyckoff.sub_event,
+                confidence       = wyckoff.confidence,
+                implication      = wyckoff.implication,
+                phase_label      = wyckoff.phase_label,
+                is_spring        = wyckoff.is_spring,
+                is_sos           = wyckoff.is_sos,
+                is_upthrust      = wyckoff.is_upthrust,
+                is_distribution  = wyckoff.is_distribution,
+                support_level    = wyckoff.support_level,
+                resistance_level = wyckoff.resistance_level,
+            ),
+            weinstein = WeinsteinResult(
+                stage               = weinstein.stage,
+                stage_name          = weinstein.stage_name,
+                ma30                = weinstein.ma30,
+                price_vs_ma         = weinstein.price_vs_ma,
+                ma_slope            = weinstein.ma_slope,
+                volume_confirmation = weinstein.volume_confirmation,
+                implication         = weinstein.implication,
+                confidence          = weinstein.confidence,
+                breakout_detected   = weinstein.breakout_detected,
+                breakdown_detected  = weinstein.breakdown_detected,
+                weeks_in_stage      = weinstein.weeks_in_stage,
+            ),
+            vsa = VSAResult(
+                signal        = vsa.signal,
+                background    = vsa.background,
+                strength      = vsa.strength,
+                tradeable     = vsa.tradeable,
+                description   = vsa.description,
+                vol_ratio     = vsa.vol_ratio,
+                spread_ratio  = vsa.spread_ratio,
+                close_position = vsa.close_position,
+            ),
+            phase2_verdict    = verdict,
+            phase2_confidence = confidence,
+            phase2_summary    = summary,
+        )
+    except Exception as e:
+        logger.error(f"Phase2 error: {e}")
+        return None
+
 
 # ── Helper: bandar context ───────────────────────────────────────────────────
 
@@ -202,9 +336,12 @@ async def get_enrichment(ticker: str):
 
     summary = _verdict(mfi_r, kama_r, lele_r, div_r, ctx, rag)
 
-    logger.info(f"[{ticker}] verdict={summary['verdict']} bull={summary['bullish_count']} warn={summary['warning_count']}")
+    # Phase 2 — Wyckoff + Weinstein + VSA
+    phase2 = await asyncio.to_thread(_run_phase2, ohlcv)
 
-    return EnrichResponse(
+    logger.info(f"[{ticker}] verdict={summary['verdict']} bull={summary['bullish_count']} warn={summary['warning_count']} phase2={phase2.phase2_verdict if phase2 else 'N/A'}")
+
+    return EnrichResponseV2(
         ticker=ticker,
         timestamp=datetime.now(timezone.utc).isoformat(),
         enabled=True,
@@ -214,4 +351,5 @@ async def get_enrichment(ticker: str):
         lele_exhaustion=LeleResult(**lele_r),
         divergence=DivResult(**div_r),
         summary=EnrichSummary(**summary),
+        phase2=phase2,
     )
