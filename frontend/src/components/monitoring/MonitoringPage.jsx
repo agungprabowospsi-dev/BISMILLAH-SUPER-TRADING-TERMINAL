@@ -66,7 +66,7 @@ export default function MonitoringPage() {
       lot: String(mi.lot || ''),
       broker: mi.broker || ''
     }
-    return { ticker: '', entry_price: '', stop_loss: '', take_profit_1: '', take_profit_2: '', take_profit_3: '', mode: 'DAYTRADING', lot: '', broker: '' }
+    return { ticker: '', entry_price: '', stop_loss: '', take_profit_1: '', take_profit_2: '', take_profit_3: '', mode: 'DAYTRADING', lot: '', broker: '', entry_score: '' }
   })
   const positionsRef = useRef([])
   const { monitoringInput, setMonitoringInput } = useStore()
@@ -156,6 +156,7 @@ export default function MonitoringPage() {
       current_price: entry,
       lot: parseFloat(form.lot) || 1,
       broker: form.broker || '',
+      entry_score: parseFloat(form.entry_score) || 0,
       modal: entry * (parseFloat(form.lot) || 1) * 100,
       name: ticker,
       status: 'HOLD',
@@ -167,7 +168,7 @@ export default function MonitoringPage() {
       kb_context: (useStore.getState().monitoringInput || {}).kb_context || '',
     }
     setShowForm(false)
-    setForm({ ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'DAYTRADING',lot:'',broker:'' })
+    setForm({ ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'DAYTRADING',lot:'',broker:'',entry_score:'' })
     const enriched = (await refreshOne(newPos)) || newPos
     setPositions(prev => {
       const next = [enriched, ...prev]
@@ -220,6 +221,7 @@ export default function MonitoringPage() {
               ['Take Profit 3','take_profit_3','text','7000'],
               ['Lot (lembar/100) *','lot','text','10'],
               ['Broker','broker','text','BCA Sekuritas'],
+              ['Entry Score (0-100)','entry_score','text','70'],
             ].map(([label,key,type,ph]) => (
               <div key={key}>
                 <label className="label-xs block mb-1.5">{label}</label>

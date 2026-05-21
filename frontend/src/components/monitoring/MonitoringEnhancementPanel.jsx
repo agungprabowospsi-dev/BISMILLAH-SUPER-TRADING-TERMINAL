@@ -251,6 +251,36 @@ const RecommendationCard = ({ data }) => (
   </div>
 )
 
+const Phase2Card = ({ data }) => {
+  if (!data?.wyckoff_phase || data.wyckoff_phase === 'UNKNOWN') return null
+  return (
+    <Section title="Phase 2 — Wyckoff + Weinstein + VSA"
+      icon={<Brain size={14} className="text-violet-400" />}
+      alert={data.wyckoff_phase === 'DISTRIBUTION' || data.weinstein_stage === 4}
+    >
+      <Row label="Wyckoff Phase" value={data.wyckoff_phase}
+        valueClass={['ACCUMULATION','MARKUP','REACCUMULATION'].includes(data.wyckoff_phase) ? 'text-green-400' :
+          ['DISTRIBUTION','MARKDOWN'].includes(data.wyckoff_phase) ? 'text-red-400' : 'text-yellow-400'}
+      />
+      <div className="flex items-center justify-between py-0.5">
+        <span className="text-xs text-gray-500">Weinstein Stage</span>
+        <span className={clx('text-xs font-bold px-2 py-0.5 rounded',
+          data.weinstein_stage === 2 ? 'bg-green-400/20 text-green-400' :
+          data.weinstein_stage === 4 ? 'bg-red-400/20 text-red-400' :
+          data.weinstein_stage === 3 ? 'bg-orange-400/20 text-orange-400' :
+          'bg-gray-700 text-gray-400'
+        )}>
+          Stage {data.weinstein_stage}
+        </span>
+      </div>
+      <Row label="VSA Background" value={data.vsa_background}
+        valueClass={data.vsa_background === 'BULLISH' ? 'text-green-400' :
+          data.vsa_background === 'BEARISH' ? 'text-red-400' : 'text-gray-400'}
+      />
+    </Section>
+  )
+}
+
 // ─── MAIN COMPONENT ────────────────────────────────────────
 
 export default function MonitoringEnhancementPanel({ position }) {
@@ -294,14 +324,19 @@ export default function MonitoringEnhancementPanel({ position }) {
     }
   }
 
-  // Auto-poll setiap 5 menit
+  // Auto-poll per trade mode
+  // SWING=5min, DAYTRADING=1min, SCALPING=30sec
   useEffect(() => {
     if (!position?.ticker) return
+    const mode = position?.mode || 'SWING'
+    const intervalMs = mode === 'SCALPING' ? 30 * 1000
+                     : mode === 'DAYTRADING' ? 60 * 1000
+                     : 5 * 60 * 1000
     fetchData()
-    const interval = setInterval(fetchData, 5 * 60 * 1000)
+    const interval = setInterval(fetchData, intervalMs)
     setPollInterval(interval)
     return () => clearInterval(interval)
-  }, [position?.ticker])
+  }, [position?.ticker, position?.mode])
 
   if (!position?.ticker) return (
     <div className="flex items-center justify-center h-32 text-gray-500 text-sm">
@@ -362,6 +397,7 @@ export default function MonitoringEnhancementPanel({ position }) {
           <BandarmologiCard data={data.bandarmologi} />
           <MomentumCard data={data.momentum} />
           <RetestCard data={data.retest} />
+          <Phase2Card data={data.retest} />
           <TPProbCard data={data.tp_probability} />
           <RAGCard data={data.rag_monitor} />
 
