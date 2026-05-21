@@ -134,7 +134,7 @@ export default function Header() {
                 {[
                   { label:'Backend API', ok: healthDetail.backend?.status==='ok'||healthDetail.backend?.returncode===0 },
                   { label:'PostgreSQL Data', ok: healthDetail.data?.status==='ok' },
-                  { label:'Knowledge Base', ok: Array.isArray(healthDetail.kb)&&healthDetail.kb.length>0 },
+                  { label:'Knowledge Base', ok: healthDetail.kb?.success===true&&healthDetail.kb?.documents?.length>0 },
                   { label:'Market Regime', ok: !!(healthDetail.regime?.regime||healthDetail.regime?.status==='ok') },
                 ].map(({label,ok}) => (
                   <div key={label} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0'}}>
