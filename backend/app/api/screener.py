@@ -813,6 +813,64 @@ async def bandarmology_composite(ticker: str, mode: Mode, ohlcv: List[Dict[str, 
     raw_score = 50 + big_accumulation_bonus(bandarm_score) + bandar_macd["bonus"] + phase["bonus"] + freq["bonus"]
     composite = clamp(raw_score)
 
+    # ── Phase 2 Integration ──────────────────────────────────
+    wyckoff_phase   = "UNKNOWN"
+    weinstein_stage = 0
+    vsa_signal      = "NONE"
+    phase2_bonus    = 0
+    phase2_disqualify = False
+
+    try:
+        from app.api.enrichment.wyckoff_phase import classify_wyckoff
+        from app.api.enrichment.weinstein_stage import classify_weinstein
+        from app.api.enrichment.vsa_engine import analyze_vsa
+
+        opens   = [float(c.get("open",   0) or 0) for c in ohlcv]
+        highs   = [float(c.get("high",   0) or 0) for c in ohlcv]
+        lows    = [float(c.get("low",    0) or 0) for c in ohlcv]
+        closes  = [float(c.get("close",  0) or 0) for c in ohlcv]
+        volumes = [int(float(c.get("volume", 0) or 0)) for c in ohlcv]
+
+        p2_wyckoff   = classify_wyckoff(opens, highs, lows, closes, volumes)
+        p2_weinstein = classify_weinstein(closes, volumes)
+        p2_vsa       = analyze_vsa(opens, highs, lows, closes, volumes)
+
+        wyckoff_phase   = p2_wyckoff.phase
+        weinstein_stage = p2_weinstein.stage
+        vsa_signal      = p2_vsa.signal
+
+        # Bonus/penalty dari Phase 2
+        if wyckoff_phase in ("ACCUMULATION", "MARKUP"):
+            phase2_bonus += 10
+        elif wyckoff_phase == "REACCUMULATION":
+            phase2_bonus += 5
+        elif wyckoff_phase == "DISTRIBUTION":
+            phase2_bonus -= 15
+            phase2_disqualify = True
+        elif wyckoff_phase == "MARKDOWN":
+            phase2_bonus -= 20
+            phase2_disqualify = True
+
+        if weinstein_stage == 2:
+            phase2_bonus += 10
+        elif weinstein_stage == 1:
+            phase2_bonus += 3
+        elif weinstein_stage == 3:
+            phase2_bonus -= 10
+        elif weinstein_stage == 4:
+            phase2_bonus -= 20
+            phase2_disqualify = True
+
+        if vsa_signal in ("STOPPING_VOLUME", "NO_SUPPLY", "TEST"):
+            phase2_bonus += 8
+        elif vsa_signal in ("UP_THRUST", "NO_DEMAND"):
+            phase2_bonus -= 8
+
+        composite = clamp(composite + phase2_bonus)
+
+    except Exception as e:
+        pass
+
     return {
         "score": round(composite, 2),
         "base_bandarm_score": bandarm_score,
@@ -821,7 +879,11 @@ async def bandarmology_composite(ticker: str, mode: Mode, ohlcv: List[Dict[str, 
         "frequency_spike": freq,
         "phase": phase["phase"],
         "phase_bonus": phase["bonus"],
-        "disqualify": bool(phase["disqualify"] or bandar_macd.get("disqualify")),
+        "disqualify": bool(phase["disqualify"] or bandar_macd.get("disqualify") or phase2_disqualify),
+        "wyckoff_phase":   wyckoff_phase,
+        "weinstein_stage": weinstein_stage,
+        "vsa_signal":      vsa_signal,
+        "phase2_bonus":    phase2_bonus,
     }
 
 
