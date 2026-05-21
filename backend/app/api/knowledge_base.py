@@ -168,3 +168,23 @@ async def get_kb_stats():
         """)
         return {"success":True,"stats":dict(stats) if stats else {},"top_engines":[{"engine_name":r["engine_name"],"approved_books":r["approved_books"],"avg_score":round(float(r["avg_score"])*100,1)} for r in top]}
     finally: await conn.close()
+
+@router.get("/chunks/{document_id}")
+async def get_document_chunks(document_id: int, limit: int = 20):
+    from ..knowledge_base.kb_service import get_db_conn
+    conn = await get_db_conn()
+    try:
+        rows = await conn.fetch("""
+            SELECT c.page_number, c.engine_tags, c.content
+            FROM kb_chunks c
+            WHERE c.document_id = $1
+            ORDER BY c.page_number
+            LIMIT $2
+        """, document_id, limit)
+        return {
+            "success": True,
+            "document_id": document_id,
+            "chunks": [{"page": r["page_number"], "tags": r["engine_tags"], "content": r["content"][:500]} for r in rows]
+        }
+    finally:
+        await conn.close()
