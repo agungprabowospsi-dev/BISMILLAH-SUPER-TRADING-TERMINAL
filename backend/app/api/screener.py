@@ -458,6 +458,13 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             if metrics["change_pct"] < cfg["change_min"]:
                 return None
 
+            # Anti Climax Distribution Filter (Bandar Flow Secrets hal.26)
+            # "Climax distribution: change > 15% + volume meledak = bandar pamit"
+            # Hanya untuk SWING — intraday/scalping lebih toleran momentum
+            if mode == "swing":
+                if change_pct_now > 15 and metrics["rvol"] > 2.0:
+                    return None  # Climax distribution — gorengan
+
             if mode == "scalping" and metrics["downtrend_heavy"]:
                 return None
 
