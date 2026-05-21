@@ -614,11 +614,12 @@ async def ohlcv_prefilter(universe: List[Dict[str, Any]], mode: Mode, filter_int
     limit = MODE_CONFIG[mode]["candidate_max"]
     top = candidates[:limit]
 
-    logger.info(
-        f"BFD PreSort: {len(candidates)} kandidat → top {limit} "
-        f"| BFD range: {top[-1]['bfd_presort_score']:.1f}–{top[0]['bfd_presort_score']:.1f}"
-        if top else f"BFD PreSort: 0 kandidat"
-    )
+    if top:
+        import logging as _log
+        _log.getLogger(__name__).info(
+            f"BFD PreSort: {len(candidates)} kandidat → top {limit} "
+            f"| BFD range: {top[-1]['bfd_presort_score']:.1f}–{top[0]['bfd_presort_score']:.1f}"
+        )
 
     return top
 
