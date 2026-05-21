@@ -112,21 +112,56 @@ def _normalize_orderbook(raw: dict) -> OrderbookData:
     )
 
 def _calc_net_foreign(broker_summary: list) -> int:
+    """
+    Hitung net foreign dari broker_summary Invesgo.
+    Support dua format: {broker_code, buy_lot, sell_lot} atau {broker, buy_value, sell_value}
+    """
     FOREIGN_BROKERS = {
         "DB","CS","ML","UBS","MS","JP","CG","RX",
-        "YP","BK","AK","KZ","KI","DP","LG","OD"
+        "YP","BK","AK","KZ","KI","DP","LG","OD",
+        "ZP","GW","EP","HD","OT","RF","CC","FZ"
     }
     net = 0
     for b in broker_summary:
         try:
-            code = str(b.get("broker_code", "") or "").upper()
+            # Format 1: broker_code + buy_lot/sell_lot
+            code = str(b.get("broker_code", "") or b.get("broker", "") or "").upper()
             if code in FOREIGN_BROKERS:
-                buy  = int(float(b.get("buy_lot",  0) or 0))
-                sell = int(float(b.get("sell_lot", 0) or 0))
-                net += (buy - sell)
+                # Coba lot dulu, fallback ke value/1000
+                buy_lot  = b.get("buy_lot")
+                sell_lot = b.get("sell_lot")
+                if buy_lot is not None:
+                    net += int(float(buy_lot or 0)) - int(float(sell_lot or 0))
+                else:
+                    # Pakai net_value dibagi harga estimasi (proxy)
+                    net_val = float(b.get("net_value", 0) or 0)
+                    net += int(net_val / 100000)  # estimasi kasar
         except Exception:
             continue
     return net
+
+
+async def _fetch_foreign_net(ticker: str) -> int:
+    """Fetch net foreign lot dari endpoint foreign-flow yang lebih akurat"""
+    try:
+        async with __import__("httpx").AsyncClient(timeout=10) as client:
+            from app.core.invesgo import _headers, INVESGO_BASE_URL
+            r = await client.get(
+                f"{INVESGO_BASE_URL}/analysis/summary/stock/{ticker}",
+                headers=_headers(),
+                params={"investor": "foreign", "market": "RG",
+                        "from": (__import__("datetime").datetime.now() - __import__("datetime").timedelta(days=1)).strftime("%Y-%m-%d"),
+                        "to": __import__("datetime").datetime.now().strftime("%Y-%m-%d")}
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, list) and data:
+                    total_buy  = sum(int(float(x.get("buy_lot", 0) or 0)) for x in data)
+                    total_sell = sum(int(float(x.get("sell_lot", 0) or 0)) for x in data)
+                    return total_buy - total_sell
+    except Exception:
+        pass
+    return 0
 
 def _build_series(candles: list) -> tuple:
     opens   = [c.open   for c in candles]

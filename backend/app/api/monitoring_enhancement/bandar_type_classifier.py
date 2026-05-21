@@ -53,6 +53,17 @@ RETAIL_CROWD_WEIGHTS = {
     "pump_pattern":      15,
 }
 
+# Market cap estimasi dalam miliar Rupiah (update berkala)
+MARKET_CAP_BILLION = {
+    "BBCA": 900000, "BBRI": 600000, "BMRI": 550000, "BBNI": 200000,
+    "TLKM": 250000, "ASII": 180000, "UNVR": 150000, "ICBP": 120000,
+    "INDF": 80000,  "KLBF": 70000,  "HMSP": 90000,  "GGRM": 60000,
+    "PGAS": 50000,  "PTBA": 40000,  "ANTM": 35000,  "INCO": 45000,
+    "ADRO": 80000,  "ITMG": 30000,  "SMGR": 25000,  "WIKA": 15000,
+    "BSDE": 20000,  "CTRA": 18000,  "JSMR": 35000,  "TOWR": 40000,
+    "MDKA": 55000,  "ESSA": 20000,  "GOTO": 70000,  "BYAN": 120000,
+}
+
 # LQ45 list (subset representatif — update berkala)
 LQ45_TICKERS = {
     "BBCA", "BBRI", "BMRI", "BBNI", "TLKM", "ASII", "UNVR", "ICBP",
@@ -186,6 +197,11 @@ def classify_bandar_type(
         ticker_upper = ticker.upper()
         is_lq45 = ticker_upper in LQ45_TICKERS
         is_peak = _is_peak_hour()
+
+        # Gunakan market cap dari lookup table kalau tidak dipass
+        if market_cap_billion is None or market_cap_billion <= 0:
+            market_cap_billion = MARKET_CAP_BILLION.get(ticker_upper, None)
+
         price_impact = _calculate_price_impact(
             total_volume, price_change_pct, market_cap_billion
         )
