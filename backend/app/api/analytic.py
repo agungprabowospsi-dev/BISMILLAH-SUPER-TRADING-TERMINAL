@@ -255,12 +255,26 @@ async def analyze(req: AnalyticRequest):
         # ── RAG KB CONTEXT ──────────────────────────────────────────
         kb_context = ""
         try:
+            from app.core.knowledge_base import query_bandarmologi_specific
             analytic_engines = [
                 "PriceActionEngine", "VolumeIntelligenceEngine",
-                "BandarmologyEngine", "TrendStructureEngine",
-                "RiskManagementEngine"
+                "TrendStructureEngine", "RiskManagementEngine"
             ]
             kb_parts = []
+
+            # Bandarmologi IDX — query khusus 3 buku murni IDX
+            bandar_ctx = await query_bandarmologi_specific(
+                ticker       = req.ticker,
+                bandar_score = float(score),
+                phase        = wyckoff_phase,
+                signal       = all_engines.get('signal', 'NEUTRAL'),
+            )
+            if bandar_ctx:
+                kb_parts.append(
+                    f"=== BANDARMOLOGI IDX (3 Buku Khusus IDX) ===\n{bandar_ctx}"
+                )
+
+            # Engine teknikal lainnya
             for eng in analytic_engines:
                 ctx = await kb_service.get_kb_context_for_engine(eng, req.ticker)
                 if ctx:
