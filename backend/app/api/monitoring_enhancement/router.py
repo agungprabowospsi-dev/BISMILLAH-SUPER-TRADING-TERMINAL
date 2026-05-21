@@ -297,6 +297,11 @@ async def monitoring_enhancement(
             swing_lookback  = req.trade_mode == "SWING" and 20 or 15,
         )
 
+        # ── Phase 2 dari retest_result ──
+        wyckoff_phase   = getattr(retest_result, 'wyckoff_phase',   'UNKNOWN')
+        weinstein_stage = getattr(retest_result, 'weinstein_stage', 0)
+        vsa_background  = getattr(retest_result, 'vsa_background',  'NEUTRAL')
+
         # ── Step 7: TP Probability (Engine 7) ──
         tp_result = calculate_tp_probability(
             ticker                 = ticker,
@@ -316,6 +321,9 @@ async def monitoring_enhancement(
             vwap                   = data.vwap,
             orderbook_imbalance    = data.orderbook.imbalance if data.orderbook else 1.0,
             lots                   = req.lots,
+            wyckoff_phase          = wyckoff_phase,
+            weinstein_stage        = weinstein_stage,
+            vsa_background         = vsa_background,
         )
 
         # ── Step 8: Enrichment REV21 ──
@@ -340,6 +348,9 @@ async def monitoring_enhancement(
             vwap                   = data.vwap,
             orderbook_imbalance    = data.orderbook.imbalance if data.orderbook else 1.0,
             lots                   = req.lots,
+            wyckoff_phase          = wyckoff_phase,
+            weinstein_stage        = weinstein_stage,
+            vsa_background         = vsa_background,
         )
 
         # ── Step 9: RAG Monitor (Engine 9) ──

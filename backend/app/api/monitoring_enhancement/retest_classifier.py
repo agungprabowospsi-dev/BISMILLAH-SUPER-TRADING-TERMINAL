@@ -13,6 +13,10 @@ Path: backend/app/api/monitoring_enhancement/retest_classifier.py
 import logging
 from typing import Optional
 
+from app.api.enrichment.wyckoff_phase import classify_wyckoff
+from app.api.enrichment.weinstein_stage import classify_weinstein
+from app.api.enrichment.vsa_engine import analyze_vsa
+
 from .models import (
     RetestClassification, RetestResult,
     BandarRetestType, PatternName, RetestVerdict
@@ -324,7 +328,7 @@ async def classify_retest(
         fib_levels      = _calc_fib_prices(swing_high, swing_low)
         classification  = _classify_fib(fib_pct)
 
-        # Layer 2 — VSA
+        # Layer 2 — VSA (lokal + Phase 2 VSA Engine)
         vol_ratio = round(current_volume / avg_volume, 2) if avg_volume > 0 else 1.0
         price_change_pct = (
             ((current_close - closes[-2]) / closes[-2] * 100)
@@ -335,6 +339,31 @@ async def classify_retest(
             current_close, current_low, current_high,
             price_change_pct,
         )
+
+        # Phase 2 — Wyckoff + Weinstein + VSA Engine (lokal, non-blocking)
+        try:
+            opens_proxy = closes  # proxy kalau opens tidak tersedia
+            p2_wyckoff   = classify_wyckoff(opens_proxy, highs, lows, closes, volumes)
+            p2_weinstein = classify_weinstein(closes, volumes)
+            p2_vsa       = analyze_vsa(opens_proxy, highs, lows, closes, volumes)
+
+            # Override vsa_signal kalau Phase 2 VSA lebih kuat
+            if p2_vsa.signal != "NONE" and vsa_signal is None:
+                vsa_signal = p2_vsa.signal
+
+            # Wyckoff context untuk bandar_retest_type
+            wyckoff_phase   = p2_wyckoff.phase
+            wyckoff_impl    = p2_wyckoff.implication
+            weinstein_stage = p2_weinstein.stage
+            weinstein_impl  = p2_weinstein.implication
+            vsa_background  = p2_vsa.background
+        except Exception as e:
+            logger.warning(f"Phase2 in retest failed [{ticker}]: {e}")
+            wyckoff_phase   = "UNKNOWN"
+            wyckoff_impl    = "NEUTRAL"
+            weinstein_stage = 0
+            weinstein_impl  = "NEUTRAL"
+            vsa_background  = "NEUTRAL" 
 
         # RAG rate limit check
         now         = time.time()
@@ -367,12 +396,30 @@ async def classify_retest(
         if use_rag:
             _rag_cache[ticker] = now
 
-        # Layer 5 — Synthesis
+        # Layer 5 — Synthesis (dengan Phase 2 context)
         verdict, confidence = _synthesize(
             classification, bandar_retest_type,
             pattern_name, pattern_impl,
             vsa_signal, conf_bandar,
         )
+
+        # Phase 2 confidence boost/penalty
+        if wyckoff_impl == "BUY" and verdict in ("STRONG_HOLD", "HOLD"):
+            confidence = min(95.0, confidence + 8.0)
+        elif wyckoff_impl in ("EXIT", "REDUCE") and verdict == "HOLD":
+            verdict    = RetestVerdict.REDUCE_50
+            confidence = min(80.0, confidence + 5.0)
+
+        if weinstein_stage == 2 and verdict in ("STRONG_HOLD", "HOLD"):
+            confidence = min(95.0, confidence + 5.0)
+        elif weinstein_stage == 4 and verdict not in ("EXIT_ALL",):
+            verdict    = RetestVerdict.REDUCE_50
+            confidence = min(85.0, confidence + 5.0)
+
+        if vsa_background == "BULLISH" and verdict in ("STRONG_HOLD", "HOLD"):
+            confidence = min(95.0, confidence + 5.0)
+        elif vsa_background == "BEARISH" and verdict == "HOLD":
+            verdict    = RetestVerdict.REDUCE_50
 
         rag_triggered = classification in (
             RetestClassification.DEEP_BUT_VALID,
@@ -401,6 +448,9 @@ async def classify_retest(
             retest_verdict        = verdict,
             retest_confidence     = confidence,
             rag_triggered         = rag_triggered,
+            wyckoff_phase         = wyckoff_phase,
+            weinstein_stage       = weinstein_stage,
+            vsa_background        = vsa_background,
         )
 
     except Exception as e:

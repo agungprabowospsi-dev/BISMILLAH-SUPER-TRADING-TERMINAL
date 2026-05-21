@@ -229,6 +229,9 @@ def calculate_tp_probability(
     vwap:            float            = 0.0,
     orderbook_imbalance: float        = 1.0,
     lots:            int              = 10,
+    wyckoff_phase:   str              = "UNKNOWN",
+    weinstein_stage: int              = 0,
+    vsa_background:  str              = "NEUTRAL",
 ) -> TPProbResult:
     """
     Hitung probabilitas TP1/TP2/TP3 dengan multiplier stack.
@@ -272,6 +275,30 @@ def calculate_tp_probability(
         m_distribution = 0.70 if distribution_detected else 1.0
         multiplier_stack["distribution"] = m_distribution
 
+        # ── Phase 2 multipliers ──
+        m_wyckoff = 1.0
+        if wyckoff_phase in ("ACCUMULATION", "MARKUP", "REACCUMULATION"):
+            m_wyckoff = 1.10
+        elif wyckoff_phase in ("DISTRIBUTION", "MARKDOWN"):
+            m_wyckoff = 0.75
+        multiplier_stack["wyckoff"] = m_wyckoff
+
+        m_weinstein = 1.0
+        if weinstein_stage == 2:
+            m_weinstein = 1.10
+        elif weinstein_stage == 4:
+            m_weinstein = 0.75
+        elif weinstein_stage == 3:
+            m_weinstein = 0.90
+        multiplier_stack["weinstein"] = m_weinstein
+
+        m_vsa = 1.0
+        if vsa_background == "BULLISH":
+            m_vsa = 1.05
+        elif vsa_background == "BEARISH":
+            m_vsa = 0.85
+        multiplier_stack["vsa_background"] = m_vsa
+
         # ── Mode-specific multipliers ──
         m_vwap     = 1.0
         m_orderbook = 1.0
@@ -294,7 +321,10 @@ def calculate_tp_probability(
             m_enrichment *
             m_distribution *
             m_vwap *
-            m_orderbook
+            m_orderbook *
+            m_wyckoff *
+            m_weinstein *
+            m_vsa
         )
         multiplier_stack["total"] = round(total_multiplier, 4)
 

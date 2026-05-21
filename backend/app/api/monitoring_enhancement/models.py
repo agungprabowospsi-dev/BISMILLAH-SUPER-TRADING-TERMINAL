@@ -242,6 +242,10 @@ class RetestResult(BaseModel):
     retest_verdict:        RetestVerdict    = RetestVerdict.HOLD
     retest_confidence:     float            = 0.0
     rag_triggered:         bool             = False
+    # Phase 2 context
+    wyckoff_phase:         str              = "UNKNOWN"
+    weinstein_stage:       int              = 0
+    vsa_background:        str              = "NEUTRAL" 
 
 
 class MonitoringEnhancementResponse(BaseModel):
