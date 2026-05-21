@@ -297,7 +297,13 @@ def classify_bandar_type(
             bandar_type = BandarType.UNCLEAR
             confidence = 0.0
         else:
-            winner = max(score_breakdown, key=score_breakdown.get)
+            # Tie-breaking: LQ45 besar dengan large_lot_spread = INSTITUTIONAL
+            inst_score = score_breakdown["INSTITUTIONAL"]
+            rb_score   = score_breakdown["RETAIL_BIG"]
+            if inst_score == rb_score and signals.lq45_member and signals.large_lot_spread:
+                winner = "INSTITUTIONAL"
+            else:
+                winner = max(score_breakdown, key=score_breakdown.get)
             bandar_type = BandarType(winner)
             confidence = round((max_score / total_possible) * 100, 1)
             confidence = min(confidence, 99.0)
