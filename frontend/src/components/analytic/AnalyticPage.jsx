@@ -209,6 +209,87 @@ export default function AnalyticPage() {
                 <p className="font-mono text-xs text-slate-500 mt-0.5">{r.mode||analyticMode} MODE</p>
               </div>
               {r.signal && <SignalBadge signal={r.signal}/>}
+
+              {/* GO / NO GO Banner */}
+              {r.go_no_go && (
+                <div className={`w-full rounded-xl border-2 px-4 py-3 text-center ${
+                  r.go_no_go === 'STRONG GO' ? 'border-green-500 bg-green-500/10' :
+                  r.go_no_go === 'GO'         ? 'border-green-400 bg-green-400/10' :
+                  r.go_no_go === 'WAIT'       ? 'border-yellow-400 bg-yellow-400/10' :
+                                                'border-red-500 bg-red-500/10'
+                }`}>
+                  <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500 mb-1">
+                    Setup Decision
+                  </p>
+                  <p className={`font-display text-2xl font-bold ${
+                    r.go_no_go === 'STRONG GO' ? 'text-green-400' :
+                    r.go_no_go === 'GO'         ? 'text-green-400' :
+                    r.go_no_go === 'WAIT'       ? 'text-yellow-400' :
+                                                  'text-red-400'
+                  }`}>
+                    {r.go_no_go === 'STRONG GO' ? '🟢 STRONG GO' :
+                     r.go_no_go === 'GO'         ? '🟢 GO' :
+                     r.go_no_go === 'WAIT'       ? '🟡 WAIT' :
+                                                   '🔴 NO GO'}
+                  </p>
+                  <p className="font-mono text-xs text-slate-400 mt-1">
+                    Confidence: {r.go_confidence}%
+                  </p>
+                  {r.go_reasons?.length > 0 && (
+                    <div className="mt-2 text-left space-y-0.5">
+                      {r.go_reasons.map((reason, i) => (
+                        <p key={i} className="font-mono text-[10px] text-green-400">✅ {reason}</p>
+                      ))}
+                    </div>
+                  )}
+                  {r.no_go_reasons?.length > 0 && (
+                    <div className="mt-1 text-left space-y-0.5">
+                      {r.no_go_reasons.map((reason, i) => (
+                        <p key={i} className="font-mono text-[10px] text-red-400">❌ {reason}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Phase 2 Summary */}
+              {r.wyckoff_phase && r.wyckoff_phase !== 'UNKNOWN' && (
+                <div className="w-full rounded-xl border border-violet-500/30 bg-violet-500/5 px-3 py-2">
+                  <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500 mb-1">Phase 2</p>
+                  <div className="flex justify-between items-center">
+                    <span className="font-mono text-xs text-slate-400">Wyckoff</span>
+                    <span className={`font-mono text-xs font-bold ${
+                      ['ACCUMULATION','MARKUP','REACCUMULATION'].includes(r.wyckoff_phase) ? 'text-green-400' :
+                      ['DISTRIBUTION','MARKDOWN'].includes(r.wyckoff_phase) ? 'text-red-400' : 'text-yellow-400'
+                    }`}>{r.wyckoff_phase}</span>
+                  </div>
+                  <div className="flex justify-between items-center mt-0.5">
+                    <span className="font-mono text-xs text-slate-400">Weinstein</span>
+                    <span className={`font-mono text-xs font-bold ${
+                      r.weinstein_stage === 2 ? 'text-green-400' :
+                      r.weinstein_stage === 4 ? 'text-red-400' :
+                      r.weinstein_stage === 3 ? 'text-orange-400' : 'text-slate-400'
+                    }`}>Stage {r.weinstein_stage}</span>
+                  </div>
+                  {r.vsa_signal && r.vsa_signal !== 'NONE' && (
+                    <div className="flex justify-between items-center mt-0.5">
+                      <span className="font-mono text-xs text-slate-400">VSA</span>
+                      <span className={`font-mono text-xs font-bold ${
+                        ['STOPPING_VOLUME','NO_SUPPLY','TEST'].includes(r.vsa_signal) ? 'text-green-400' :
+                        ['UP_THRUST','NO_DEMAND'].includes(r.vsa_signal) ? 'text-red-400' : 'text-yellow-400'
+                      }`}>{r.vsa_signal}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center mt-0.5">
+                    <span className="font-mono text-xs text-slate-400">Enrichment</span>
+                    <span className={`font-mono text-xs font-bold ${
+                      r.enrichment_verdict === 'PROCEED' ? 'text-green-400' :
+                      r.enrichment_verdict === 'SKIP' ? 'text-red-400' : 'text-yellow-400'
+                    }`}>{r.enrichment_verdict}</span>
+                  </div>
+                </div>
+              )}
+
               {r.market_regime && (
                 <div className={`mt-1 rounded-xl border px-3 py-2 text-center ${
                   r.market_regime.includes('BULL') ? 'border-accent-green/30 bg-accent-green/10' :
