@@ -846,10 +846,9 @@ async def bandarmology_composite(ticker: str, mode: Mode, ohlcv: List[Dict[str, 
             phase2_bonus += 5
         elif wyckoff_phase == "DISTRIBUTION":
             phase2_bonus -= 15
-            phase2_disqualify = True
+            # Tidak langsung disqualify — biarkan apply_disqualifiers yang handle
         elif wyckoff_phase == "MARKDOWN":
             phase2_bonus -= 20
-            phase2_disqualify = True
 
         if weinstein_stage == 2:
             phase2_bonus += 10
@@ -859,7 +858,6 @@ async def bandarmology_composite(ticker: str, mode: Mode, ohlcv: List[Dict[str, 
             phase2_bonus -= 10
         elif weinstein_stage == 4:
             phase2_bonus -= 20
-            phase2_disqualify = True
 
         if vsa_signal in ("STOPPING_VOLUME", "NO_SUPPLY", "TEST"):
             phase2_bonus += 8
@@ -879,7 +877,7 @@ async def bandarmology_composite(ticker: str, mode: Mode, ohlcv: List[Dict[str, 
         "frequency_spike": freq,
         "phase": phase["phase"],
         "phase_bonus": phase["bonus"],
-        "disqualify": bool(phase["disqualify"] or bandar_macd.get("disqualify") or phase2_disqualify),
+        "disqualify": bool(phase["disqualify"] or bandar_macd.get("disqualify")),
         "wyckoff_phase":   wyckoff_phase,
         "weinstein_stage": weinstein_stage,
         "vsa_signal":      vsa_signal,
