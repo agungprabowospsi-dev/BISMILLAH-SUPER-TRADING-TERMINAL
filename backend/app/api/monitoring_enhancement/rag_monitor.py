@@ -286,11 +286,8 @@ async def run_rag_monitor(
         try:
             from app.core.knowledge_base import query_knowledge_base
 
-            result = await query_knowledge_base(
-                query         = query,
-                source_filter = sources,
-                top_k         = 4,
-            )
+            result_text = await query_knowledge_base("bandarmologi", query, n_results=4)
+            result = {"answer": result_text} if result_text else None
 
             insight = None
             confidence_boost = 0.0

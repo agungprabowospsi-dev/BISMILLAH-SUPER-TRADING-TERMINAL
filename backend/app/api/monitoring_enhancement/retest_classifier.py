@@ -119,11 +119,13 @@ async def _rag_bandar_context(
             "E-Book Bandar Flow Secrets.pdf",
         ]
 
-        result = await query_knowledge_base(
-            query=query,
-            source_filter=sources,
-            top_k=3,
-        )
+        result_text = await query_knowledge_base("bandarmologi", query, n_results=3)
+        result = {"answer": result_text} if result_text else None
+
+
+
+
+
 
         if not result or not result.get("answer"):
             return BandarRetestType.UNCLEAR, False, None, 0.0
@@ -179,11 +181,8 @@ async def _rag_chart_pattern(
             f"Chart pattern name, win rate percentage, dan target measured move?"
         )
 
-        result = await query_knowledge_base(
-            query=query,
-            source_filter=["Encyclopedia of Chart Patterns"],
-            top_k=2,
-        )
+        result_text = await query_knowledge_base("technical", query, n_results=2)
+        result = {"answer": result_text} if result_text else None
 
         if not result or not result.get("answer"):
             return PatternName.NONE, 0.0, "NEUTRAL", None

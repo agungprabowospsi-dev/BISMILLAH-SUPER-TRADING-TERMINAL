@@ -101,26 +101,68 @@ def _check_alert(last_price: float, req) -> AlertResult:
 async def _run_enrichment(ticker: str, data):
     """Reuse enrichment engine dari REV21"""
     try:
-        from app.api.enrichment.engine import run_enrichment_realtime
-        result = await run_enrichment_realtime(
-            ticker  = ticker,
-            closes  = data.closes,
-            highs   = data.highs,
-            lows    = data.lows,
-            volumes = data.volumes,
-        )
-        return result
-    except Exception as e:
-        logger.warning(f"Enrichment REV21 failed [{ticker}]: {e}")
+    try:
+        from app.api.enrichment.smart_mfi import SmartMFI
+        from app.api.enrichment.kama_bands import KAMABands
+        from app.api.enrichment.lele_exhaustion import LeleExhaustion
+        from app.api.enrichment.divergence import DivergenceStateMachine
         from .models import EnrichmentRealtimeResult
+
+        # Build ohlcv list of dict
+        ohlcv = [
+            {"open": o, "high": h, "low": l, "close": c, "volume": v}
+            for o, h, l, c, v in zip(
+                data.opens, data.highs, data.lows, data.closes, data.volumes
+            )
+        ]
+
+        try:
+            mfi_result = SmartMFI().compute(ohlcv)
+            mfi_val    = float(mfi_result.get("mfi", 50.0))
+            mfi_signal = "BULLISH" if mfi_val > 60 else "BEARISH" if mfi_val < 40 else "NEUTRAL"
+        except Exception:
+            mfi_val, mfi_signal = 50.0, "NEUTRAL"
+
+        try:
+            kama_result = KAMABands().compute(ohlcv)
+            kama_val    = float(kama_result.get("basis", data.closes[-1] if data.closes else 0))
+            last        = data.closes[-1] if data.closes else kama_val
+            kama_dist   = ((last - kama_val) / kama_val * 100) if kama_val else 0
+            kama_zone   = "ABOVE_BASIS" if kama_dist > 0.5 else "BELOW_BASIS" if kama_dist < -0.5 else "AT_BASIS"
+        except Exception:
+            kama_zone, kama_dist = "AT_BASIS", 0.0
+
+        try:
+            lele_result = LeleExhaustion().compute(ohlcv)
+            lele_signal = lele_result.get("signal", "NONE")
+        except Exception:
+            lele_signal = "NONE"
+
+        try:
+            div_result = DivergenceStateMachine().compute(ohlcv)
+            div_state  = div_result.get("state", "CLEAR")
+        except Exception:
+            div_state = "CLEAR"
+
+        warnings = sum([
+            mfi_signal == "BEARISH",
+            kama_zone == "BELOW_BASIS",
+            lele_signal != "NONE",
+            div_state != "CLEAR",
+        ])
+        verdict = EnrichmentVerdict.PROCEED if warnings == 0 else \
+                  EnrichmentVerdict.CAUTION if warnings <= 2 else \
+                  EnrichmentVerdict.SKIP
+
         return EnrichmentRealtimeResult(
-            mfi_signal          = "NEUTRAL",
-            mfi_value           = 50.0,
-            kama_zone           = "AT_BASIS",
-            kama_distance_pct   = 0.0,
-            lele_signal         = "NONE",
-            divergence_state    = "CLEAR",
-            verdict             = EnrichmentVerdict.CAUTION,
+            mfi_signal        = mfi_signal,
+            mfi_value         = mfi_val,
+            kama_zone         = kama_zone,
+            kama_distance_pct = kama_dist,
+            lele_signal       = lele_signal,
+            divergence_state  = div_state,
+            verdict           = verdict,
+            warning_count     = warnings,
         )
 
 
