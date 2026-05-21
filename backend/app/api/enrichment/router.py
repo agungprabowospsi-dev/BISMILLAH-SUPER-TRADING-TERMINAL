@@ -296,7 +296,7 @@ def _verdict(mfi, kama, lele, div, ctx, rag) -> dict:
 
 # ── Endpoint ─────────────────────────────────────────────────────────────────
 
-@router.get("/{ticker}", response_model=EnrichResponse)
+@router.get("/{ticker}", response_model=EnrichResponseV2)
 async def get_enrichment(ticker: str):
     ticker = ticker.upper().strip()
 
