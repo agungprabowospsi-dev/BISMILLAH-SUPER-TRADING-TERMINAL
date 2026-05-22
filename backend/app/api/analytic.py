@@ -419,6 +419,57 @@ Top Losers: {", ".join([s.get("code","") for s in (top_loser[:3] if top_loser el
             logger.debug(f"[REGIME] skip: {regime_err}")
             market_regime_context = ""
 
+        # BE-1/2/3: Bandar Engines — Broker Concentration + Value Inflow + Bid-Offer
+        bandar_engines_context = ""
+        try:
+            from app.engines.broker_concentration_engine import analyze_broker_concentration
+            from app.engines.value_inflow_engine import analyze_value_inflow
+            from app.engines.bid_offer_depth_engine import analyze_bid_offer_depth
+
+            broker_data = await invesgo.get_broker_summary(req.ticker)
+            intraday    = await invesgo.get_ohlcv_intraday(req.ticker, market="RG")
+
+            # BE-1: Broker Concentration
+            broker_conc = analyze_broker_concentration(broker_data) if broker_data else {}
+            # BE-2: Value Inflow
+            value_inflow = analyze_value_inflow(broker_data) if broker_data else {}
+            # BE-3: Bid-Offer Depth
+            bid_offer = analyze_bid_offer_depth(intraday) if intraday else {}
+
+            # Masuk GO/NO GO
+            bc_signal = broker_conc.get("signal", "")
+            vi_signal = value_inflow.get("signal", "")
+            bo_signal = bid_offer.get("signal", "")
+
+            if bc_signal in ("BANDAR_STRONG", "BANDAR_ACTIVE", "FOREIGN_BANDAR_STRONG", "FOREIGN_BANDAR_ACTIVE"):
+                go_reasons.append(f"Broker Konsentrasi {bc_signal} (HHI {broker_conc.get('hhi',0):.2f}) — {broker_conc.get('dominant_broker','')} dominasi {broker_conc.get('dominant_share_pct',0):.0f}%")
+            elif bc_signal == "RETAIL_MARKET":
+                no_go_reasons.append("Broker tersebar merata — tidak ada bandar aktif")
+
+            if vi_signal in ("SMART_MONEY_INFLOW", "INSTITUTIONAL_BUYING"):
+                go_reasons.append(f"Value Inflow {vi_signal} — institusi net {value_inflow.get('institutional_net_bil',0):+.1f}B")
+            elif vi_signal in ("SMART_MONEY_OUTFLOW", "RETAIL_CHASING_DISTRIBUTION"):
+                no_go_reasons.append(f"Value Inflow {vi_signal} — smart money keluar")
+
+            if bo_signal == "ABSORPTION":
+                go_reasons.append(f"Bid-Offer ABSORPTION (ratio {bid_offer.get('depth_ratio',1):.1f}x) — bandar absorb supply")
+            elif bo_signal == "DISTRIBUTION_PRESSURE":
+                no_go_reasons.append(f"Bid-Offer DISTRIBUTION PRESSURE — tekanan jual dominan")
+
+            if bid_offer.get("fake_bid_wall"):
+                no_go_reasons.append("FAKE BID WALL terdeteksi — waspadai jebakan")
+
+            bandar_engines_context = f"""
+=== BANDAR ENGINES ===
+Broker Concentration: {bc_signal} | HHI: {broker_conc.get('hhi',0):.3f} | Dominant: {broker_conc.get('dominant_broker','')} ({broker_conc.get('dominant_share_pct',0):.0f}%) | Type: {broker_conc.get('bandar_type','')}
+Value Inflow: {vi_signal} | Inst Net: {value_inflow.get('institutional_net_bil',0):+.1f}B | Foreign Net: {value_inflow.get('foreign_net_bil',0):+.1f}B | SM Ratio: {value_inflow.get('smart_money_ratio',0):.0f}%
+Bid-Offer: {bo_signal} | Depth Ratio: {bid_offer.get('depth_ratio',1):.2f}x | Spread: {bid_offer.get('spread_pct',0):.2f}% | Fake Wall: {bid_offer.get('fake_bid_wall',False)}
+Divergence: {value_inflow.get('divergence','')}
+"""
+        except Exception as be_err:
+            logger.debug(f"[BANDAR_ENGINES] skip: {be_err}")
+            bandar_engines_context = ""
+
         # PT-3: Price Distribution Analysis
         price_dist = {}
         price_dist_context = ""
@@ -493,6 +544,7 @@ Engine: {all_engines.get('bullish_count', 0)} bullish, {all_engines.get('bearish
 {market_regime_context}
 {foreign_flow_context}
 {price_dist_context}
+{bandar_engines_context}
 Phase2: {wyckoff_phase} | Weinstein: {weinstein_stage} | VSA: {vsa_signal} | Verdict: {phase2_verdict}
 Screener: {f"Grade {req.screener_context.grade} Score {req.screener_context.score:.1f} Phase {req.screener_context.phase}" if req.screener_context and req.screener_context.grade else "Direct analysis (no screener context)"}
 LQ45 Change: {lq45_chg:+.2f}% | Market Breadth: {breadth:.0f}%
@@ -562,6 +614,9 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "foreign_signal":    foreign_signal if 'foreign_signal' in locals() else "N/A",
             "price_distribution": price_dist if 'price_dist' in locals() else {},
             "poc_price":         price_dist.get("poc_price", 0) if 'price_dist' in locals() and price_dist else 0,
+            "broker_concentration": broker_conc if 'broker_conc' in locals() else {},
+            "value_inflow":         value_inflow if 'value_inflow' in locals() else {},
+            "bid_offer_depth":      bid_offer if 'bid_offer' in locals() else {},
             "foreign_net_bil":   round(foreign_net_val / 1e9, 2) if 'foreign_net_val' in locals() else 0,
             "lq45_change":       round(lq45_chg, 2) if 'lq45_chg' in locals() else 0,
             "market_breadth":    round(breadth, 1) if 'breadth' in locals() else 50,
