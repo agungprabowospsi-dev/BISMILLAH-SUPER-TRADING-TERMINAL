@@ -37,6 +37,31 @@ async def get_stock_list() -> list:
         r.raise_for_status()
         return r.json()
 
+async def get_ohlcv_from_db(ticker: str, days: int = 90) -> list:
+    """Ambil OHLCV dari PostgreSQL — zero Invesgo request."""
+    try:
+        import os, sys
+        from app.core.database import AsyncSessionLocal
+        from sqlalchemy import text as _sql_text
+        from datetime import datetime as _dt, timedelta as _td
+        from_date = (_dt.now() - _td(days=days)).strftime("%Y-%m-%d")
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(_sql_text("""
+                SELECT date, open, high, low, close, volume
+                FROM ohlcv_daily
+                WHERE ticker = :ticker AND date >= :from_date
+                ORDER BY date ASC
+            """), {"ticker": ticker, "from_date": from_date})
+            rows = result.fetchall()
+        if not rows:
+            return []
+        return [{"date": str(r[0]), "open": float(r[1] or 0), "high": float(r[2] or 0),
+                 "low": float(r[3] or 0), "close": float(r[4] or 0), "volume": float(r[5] or 0)}
+                for r in rows]
+    except Exception as e:
+        return []
+
+
 async def get_ohlcv_daily(ticker: str, period: str = "3mo", from_date: str = None, to_date: str = None) -> list:
     """OHLCV harian - support period atau from/to date. RC-1: Redis cache 4 jam."""
     from datetime import datetime, timedelta
@@ -45,6 +70,7 @@ async def get_ohlcv_daily(ticker: str, period: str = "3mo", from_date: str = Non
     use_cache = not (from_date and to_date)
     cache_key = f"ohlcv:{ticker}:{period}"
     if use_cache:
+        # Tier 1: Redis cache
         cached = await _cache_get(cache_key)
         if cached:
             try:
@@ -52,6 +78,30 @@ async def get_ohlcv_daily(ticker: str, period: str = "3mo", from_date: str = Non
                 return _j.loads(cached)
             except Exception:
                 pass
+
+        # Tier 2: PostgreSQL primary source
+        _period_map = {"1mo":30,"3mo":90,"6mo":180,"1y":365,"2y":730,"3y":1095,"5y":1825,"10y":3650,"15y":5475}
+        _days_needed = _period_map.get(period, 90)
+        db_data = await get_ohlcv_from_db(ticker, days=_days_needed + 10)
+        if len(db_data) >= max(20, _days_needed // 3):
+            # DB cukup — inject harga hari ini dari get_tick (1 request ringan)
+            try:
+                from datetime import datetime as _dtnow
+                _tick = await get_tick(ticker)
+                if _tick and float(_tick.get("last_price", 0) or 0) > 0:
+                    _rt = float(_tick["last_price"])
+                    _today = _dtnow.now().strftime("%Y-%m-%d")
+                    if db_data[-1]["date"] == _today:
+                        db_data[-1]["close"] = _rt
+                        db_data[-1]["high"] = max(db_data[-1]["high"], _rt)
+                        db_data[-1]["low"] = min(db_data[-1]["low"] if db_data[-1]["low"] > 0 else _rt, _rt)
+                    else:
+                        db_data.append({"date": _today, "open": _rt, "high": _rt, "low": _rt, "close": _rt, "volume": 0})
+            except Exception:
+                pass
+            import json as _j
+            await _cache_set(cache_key, _j.dumps(db_data), ttl=300)
+            return db_data
 
     if from_date and to_date:
         params = {"from": from_date, "to": to_date}
