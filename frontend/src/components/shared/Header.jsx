@@ -11,8 +11,6 @@ const TABS = [
   { id:'scalping', label:'Scalping', icon:Zap },
   { id:'kb', label:'Knowledge Base', icon:BookOpen },
   { id:'backtest', label:'Backtest', icon:Activity },
-  { id:'regime', label:'Market Regime', icon:Activity },
-  { id:'foreignflow', label:'Foreign Flow', icon:TrendingUp },
   { id:'sysmonitor', label:'System Monitor', icon:Heart },
 ]
 
@@ -35,7 +33,6 @@ async function runHealthCheck() {
     t('backend', async () => { const r = await fetch(`${BACKEND}/health`); return await r.json() }),
     t('data', async () => { const r = await fetch(`${BACKEND}/api/analytic/data/status`); return await r.json() }),
     t('kb', async () => { const r = await fetch(`${BACKEND}/api/kb/documents`); return await r.json() }),
-    t('regime', async () => { const r = await fetch(`${BACKEND}/api/analytic/market-regime`); return await r.json() }),
   ])
   return checks
 }
@@ -135,7 +132,6 @@ export default function Header() {
                   { label:'Backend API', ok: healthDetail.backend?.status==='ok'||healthDetail.backend?.returncode===0 },
                   { label:'PostgreSQL Data', ok: healthDetail.data?.status==='ok' },
                   { label:'Knowledge Base', ok: healthDetail.kb?.success===true&&healthDetail.kb?.documents?.length>0 },
-                  { label:'Market Regime', ok: !!(healthDetail.regime?.regime||healthDetail.regime?.status==='ok') },
                 ].map(({label,ok}) => (
                   <div key={label} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0'}}>
                     <span style={{width:8,height:8,borderRadius:'50%',background:ok?'#22c55e':'#ef4444',flexShrink:0}}/>

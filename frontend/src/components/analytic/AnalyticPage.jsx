@@ -296,7 +296,7 @@ export default function AnalyticPage() {
                   r.market_regime.includes('BEAR') ? 'border-accent-red/30 bg-accent-red/10' :
                   'border-slate-600/30 bg-slate-600/10'
                 }`}>
-                  <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">Market Regime</p>
+                  <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">Market Context</p>
                   <p className={`font-display text-sm font-bold ${
                     r.market_regime.includes('BULL') ? 'text-accent-green' :
                     r.market_regime.includes('BEAR') ? 'text-accent-red' :

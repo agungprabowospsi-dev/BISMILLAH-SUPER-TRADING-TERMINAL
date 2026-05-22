@@ -6,8 +6,6 @@ import MonitoringPage from './components/monitoring/MonitoringPage'
 import ScalpingPage from './components/scalping/ScalpingPage'
 import KnowledgeBasePage from './components/knowledge_base/KnowledgeBasePage'
 import BacktestPage from './components/backtest/BacktestPage'
-import MarketRegimePage from './components/market_regime/MarketRegimePage'
-import ForeignFlowPage from './components/market_regime/ForeignFlowPage'
 import SystemMonitorPage from './components/system_monitor/SystemMonitorPage'
 import { useStore } from './stores/useStore'
 
@@ -23,8 +21,6 @@ export default function App() {
         {activeTab==='scalping' && <ScalpingPage/>}
         {activeTab==='kb' && <KnowledgeBasePage/>}
         {activeTab==='backtest' && <BacktestPage/>}
-        {activeTab==='regime' && <MarketRegimePage/>}
-        {activeTab==='foreignflow' && <ForeignFlowPage/>}
         {activeTab==='sysmonitor' && <SystemMonitorPage/>}
       </main>
       <footer style={{ borderTop: '1px solid #e2e8f0', marginTop: 32, padding: '12px 24px', display: 'flex', justifyContent: 'space-between' }}>

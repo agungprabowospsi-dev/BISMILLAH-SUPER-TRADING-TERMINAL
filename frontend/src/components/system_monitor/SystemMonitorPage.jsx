@@ -6,8 +6,6 @@ const CHECKS = [
   { key:'backend', label:'Backend API', endpoint:'/health', ok: d => d?.status==='ok'||d?.returncode===0 },
   { key:'data', label:'PostgreSQL Data', endpoint:'/api/analytic/data/status', ok: d => d?.status==='ok' },
   { key:'kb', label:'Knowledge Base (12 buku)', endpoint:'/api/kb/documents', ok: d => d?.success&&d?.documents?.length>0 },
-  { key:'regime', label:'Market Regime Engine', endpoint:'/api/analytic/market-regime', ok: d => !!(d?.regime||d?.status==='ok') },
-  { key:'foreign', label:'Foreign Flow Engine', endpoint:'/api/analytic/foreign-flow', ok: d => d?.status==='ok'||Array.isArray(d) },
 ]
 
 function dot(color, pulse=false) {
@@ -127,11 +125,6 @@ export default function SystemMonitorPage() {
                 {c.key==='kb' && r?.data && (
                   <div style={{fontFamily:'monospace',fontSize:10,color:'#64748b',marginTop:2}}>
                     {r.data?.documents?.length || 0} buku tersedia
-                  </div>
-                )}
-                {c.key==='regime' && r?.data?.regime && (
-                  <div style={{fontFamily:'monospace',fontSize:10,color:'#64748b',marginTop:2}}>
-                    Regime: {r.data.regime}
                   </div>
                 )}
               </div>

@@ -455,7 +455,7 @@ export default function MonitoringPage() {
                   </div>
                 )}
 
-                {/* Broker & Foreign Flow Data */}
+                {/* Broker Flow Data */}
                 {pos.engine_context?.engine_details && (
                   (() => {
                     const bandar = pos.engine_context.engine_details.BandarmologyEngine
@@ -469,7 +469,7 @@ export default function MonitoringPage() {
                           {foreign?.data && (
                             <>
                               <div>
-                                <p className="text-slate-600">Foreign Flow</p>
+                                <p className="text-slate-600">Broker Flow</p>
                                 <p className={foreign.data.trend==='net_buy'?'text-accent-green font-bold':'text-accent-red font-bold'}>
                                   {foreign.data.trend==='net_buy'?'NET BUY ↑':'NET SELL ↓'}
                                 </p>

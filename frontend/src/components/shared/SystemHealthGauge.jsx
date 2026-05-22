@@ -6,8 +6,6 @@ const CHECKS = [
   { key:'backend', label:'API', endpoint:'/health', ok: d => d?.status==='ok'||d?.returncode===0 },
   { key:'data', label:'DB', endpoint:'/api/analytic/data/status', ok: d => d?.status==='ok' },
   { key:'kb', label:'KB', endpoint:'/api/kb/documents', ok: d => d?.success&&d?.documents?.length>0 },
-  { key:'regime', label:'Regime', endpoint:'/api/analytic/market-regime', ok: d => !!(d?.regime||d?.status==='ok') },
-  { key:'foreign', label:'Flow', endpoint:'/api/analytic/foreign-flow', ok: d => d?.status==='ok'||Array.isArray(d) },
 ]
 
 export default function SystemHealthGauge() {
