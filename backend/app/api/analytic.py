@@ -66,9 +66,21 @@ async def debug():
             results[f"step_{name}"] = f"ERROR: {str(e)[:80]}"
     return {"all_ok": True, "results": results}
 
+class ScreenerContext(BaseModel):
+    grade: str = ""
+    score: float = 0.0
+    wyckoff_phase: str = ""
+    weinstein_stage: int = 0
+    vsa_signal: str = ""
+    phase: str = ""
+    akumulasi_score: float = 50.0
+    foreign_signal: str = ""
+    bandarmology_score: float = 0.0
+
 class AnalyticRequest(BaseModel):
     ticker: str
     mode: str = "swing"
+    screener_context: ScreenerContext = None  # SA-1: dari screener
 
 @router.post("/analyze")
 async def analyze(req: AnalyticRequest):
@@ -176,6 +188,24 @@ async def analyze(req: AnalyticRequest):
             go_reasons.append(f"Phase2 verdict {phase2_verdict} — konfirmasi bullish")
         elif phase2_verdict in ("SELL", "STRONG_SELL"):
             no_go_reasons.append(f"Phase2 verdict {phase2_verdict} — konfirmasi bearish")
+
+        # SA-2: screener_grade masuk GO/NO GO sebagai sinyal
+        if req.screener_context and req.screener_context.grade:
+            sc_grade = req.screener_context.grade.upper()
+            sc_score = req.screener_context.score
+            if sc_grade == "A" and sc_score >= 75:
+                go_reasons.append(f"Screener Grade A (score {sc_score:.1f}) — fully pre-validated")
+            elif sc_grade == "B" and sc_score >= 65:
+                go_reasons.append(f"Screener Grade B (score {sc_score:.1f}) — qualified candidate")
+            elif sc_grade in ("C", "D"):
+                no_go_reasons.append(f"Screener Grade {sc_grade} — kandidat lemah dari screener")
+            # Phase 2 dari screener — pakai jika analytic Phase 2 tidak ada data
+            if req.screener_context.wyckoff_phase and wyckoff_phase == "UNKNOWN":
+                wyckoff_phase = req.screener_context.wyckoff_phase
+            if req.screener_context.weinstein_stage and weinstein_stage == 0:
+                weinstein_stage = req.screener_context.weinstein_stage
+            if req.screener_context.vsa_signal and vsa_signal == "NONE":
+                vsa_signal = req.screener_context.vsa_signal
 
         # Final GO/NO GO
         go_score = len(go_reasons)
@@ -442,6 +472,7 @@ Engine: {all_engines.get('bullish_count', 0)} bullish, {all_engines.get('bearish
 {market_regime_context}
 {foreign_flow_context}
 Phase2: {wyckoff_phase} | Weinstein: {weinstein_stage} | VSA: {vsa_signal} | Verdict: {phase2_verdict}
+Screener: {f"Grade {req.screener_context.grade} Score {req.screener_context.score:.1f} Phase {req.screener_context.phase}" if req.screener_context and req.screener_context.grade else "Direct analysis (no screener context)"}
 LQ45 Change: {lq45_chg:+.2f}% | Market Breadth: {breadth:.0f}%
 {kb_context}
 
@@ -562,7 +593,11 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
                 market_regime=str(result.get("market_regime", "SIDEWAYS")),
                 final_score=float(score),
                 mode=req.mode,
-                akumulasi_score=float(score)  # SW-1: pakai composite_score dari 34 engines
+                akumulasi_score=float(
+                    req.screener_context.akumulasi_score
+                    if req.screener_context and req.screener_context.akumulasi_score > 50
+                    else score
+                )  # SA-3: pakai screener akumulasi_score jika tersedia
             )
             result["dynamic_sltp"] = dynamic
         except Exception as e:

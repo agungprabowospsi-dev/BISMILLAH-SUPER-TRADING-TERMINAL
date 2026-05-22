@@ -23,7 +23,14 @@ export const useStore = create((set) => ({
   setAnalyticResult: (r) => set({ analyticResult: r }),
   setAnalyticLoading: (v) => set({ analyticLoading: v }),
   setAnalyticError: (e) => set({ analyticError: e }),
-  sendToAnalytic: (ticker, mode) => set({ analyticTicker: ticker, activeTab: 'analytic', ...(mode ? { analyticMode: mode.toLowerCase() } : {}) }),
+  screenerSelectedStock: null,
+  setScreenerSelectedStock: (s) => set({ screenerSelectedStock: s }),
+  sendToAnalytic: (ticker, mode, screenerStock) => set({
+    analyticTicker: ticker,
+    activeTab: 'analytic',
+    ...(mode ? { analyticMode: mode.toLowerCase() } : {}),
+    screenerSelectedStock: screenerStock || null,  // SA-4: pass full screener result
+  }),
   monitoringInput: null,
   monitoringPositions: [],
   setMonitoringPositions: (p) => set({ monitoringPositions: p }),

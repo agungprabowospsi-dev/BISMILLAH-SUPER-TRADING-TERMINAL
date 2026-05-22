@@ -15,7 +15,7 @@ const GROUPS = [
 ]
 
 export default function AnalyticPage() {
-  const { analyticTicker, setAnalyticTicker, analyticMode, setAnalyticMode,
+  const { analyticTicker, setAnalyticTicker, analyticMode, setAnalyticMode, screenerSelectedStock,
     analyticResult, setAnalyticResult, analyticLoading, setAnalyticLoading,
     analyticError, setAnalyticError, sendToMonitoring } = useStore()
   const [activeGroup, setActiveGroup] = useState('group1')
@@ -26,7 +26,24 @@ export default function AnalyticPage() {
     if(!analyticTicker.trim()) return
     setAnalyticLoading(true); setAnalyticError(null); setAnalyticResult(null); setMarketCtx(null)
     try {
-      const res = await analyzeStock(analyticTicker.toUpperCase().trim(), analyticMode)
+      // SA-6: Build screener_context jika ada
+      let screenerCtx = null
+      if (screenerSelectedStock) {
+        const s = screenerSelectedStock
+        const sc = s.final_score || s.score || 0
+        screenerCtx = {
+          grade: sc >= 75 ? 'A' : sc >= 65 ? 'B' : sc >= 55 ? 'C' : 'D',
+          score: sc,
+          wyckoff_phase: s.bandarmology?.wyckoff_phase || s.wyckoff_phase || '',
+          weinstein_stage: s.bandarmology?.weinstein_stage || s.weinstein_stage || 0,
+          vsa_signal: s.bandarmology?.vsa_signal || s.vsa_signal || '',
+          phase: s.phase || s.bandarmology?.phase || '',
+          akumulasi_score: s.akumulasi_score || 50.0,
+          foreign_signal: s.foreign_flow?.signal || '',
+          bandarmology_score: s.bandarmology_composite || s.bandarmology?.score || 0,
+        }
+      }
+      const res = await analyzeStock(analyticTicker.toUpperCase().trim(), analyticMode, screenerCtx)
       setAnalyticResult(res)
       // Fetch market context 4 box
       try {
@@ -383,13 +400,18 @@ export default function AnalyticPage() {
               )}
               <button onClick={() => sendToMonitoring({
                 ticker:r.ticker||analyticTicker,
-                entry_price:r.entry, stop_loss:r.stop_loss||r.sl,
-                take_profit_1:r.tp1,
-                take_profit_2:r.tp2, take_profit_3:r.tp3,
+                entry_price:r.entry,
+                stop_loss:r.dynamic_sltp?.sl||r.stop_loss||r.sl,
+                take_profit:r.dynamic_sltp?.tp1||r.tp1,
+                take_profit_1:r.dynamic_sltp?.tp1||r.tp1,
+                take_profit_2:r.dynamic_sltp?.tp2||r.tp2,
+                take_profit_3:r.dynamic_sltp?.tp3||r.tp3,
                 mode:analyticMode,
                 final_score:r.score||r.composite_score||50,
                 market_regime:r.market_regime||'SIDEWAYS',
                 engine_scores:r.engines?.engines||{},
+                lq45_change:r.lq45_change||0,
+                breadth_ratio:r.market_breadth||50,
                 kb_context:r.rag_used?'rag_active':''
               })} className="btn-primary w-full flex items-center justify-center gap-2 mt-2">
                 Monitor Posisi<ArrowRight className="w-4 h-4"/>

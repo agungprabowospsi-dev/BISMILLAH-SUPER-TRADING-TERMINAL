@@ -169,7 +169,7 @@ export default function ScreenerPage() {
           ) : (
             <div style={S.stockGrid}>
               {result.stocks.map((stock, idx) => (
-                <StockCard key={stock.ticker || idx} stock={stock} rank={idx + 1} onClick={() => sendToAnalytic(stock.ticker, mode)} />
+                <StockCard key={stock.ticker || idx} stock={stock} rank={idx + 1} onClick={() => sendToAnalytic(stock.ticker, mode, stock)} />
               ))}
             </div>
           )}

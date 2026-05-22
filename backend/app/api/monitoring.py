@@ -47,6 +47,9 @@ class MonitoringRequest(BaseModel):
     entry_price: float
     stop_loss: float
     take_profit: float
+    take_profit_1: float = 0.0  # M-1: TP1
+    take_profit_2: float = 0.0  # M-1: TP2
+    take_profit_3: float = 0.0  # M-1: TP3
     mode: str = "swing"
     # ML Training fields — diisi otomatis dari Analytic
     engine_scores: dict = {}
@@ -457,9 +460,13 @@ async def stateless_monitoring_check(req: MonitoringRequest):
     if current <= req.stop_loss:
         position_status = "exit"
         warnings.append({"level": "high", "msg": f"STOP LOSS HIT at {current}"})
-    elif current >= req.take_profit:
+    elif req.take_profit_3 and current >= req.take_profit_3:
         position_status = "exit"
-        warnings.append({"level": "high", "msg": f"TAKE PROFIT HIT at {current}"})
+        warnings.append({"level": "high", "msg": f"✅ TP3 HIT at {current} — full target tercapai!"})
+    elif req.take_profit_2 and current >= req.take_profit_2:
+        warnings.append({"level": "high", "msg": f"✅ TP2 HIT at {current} — partial exit, trail SL ke entry"})
+    elif current >= req.take_profit or (req.take_profit_1 and current >= req.take_profit_1):
+        warnings.append({"level": "high", "msg": f"✅ TP1 HIT at {current} — partial exit 50%, trail SL ke breakeven"})
     elif current <= req.entry_price * 0.97:
         warnings.append({"level": "medium", "msg": "Price down 3% from entry — monitor closely"})
 
@@ -529,5 +536,76 @@ def extract_early_warnings(engine_context: dict) -> list:
         warnings.append({"level": "MEDIUM", "type": "BANDAR_AKUMULASI", "message": f"Bandar akumulasi aktif ({big_up} hari big vol naik). Posisi aligned dengan smart money."})
     elif phase == "early_accumulation":
         warnings.append({"level": "LOW", "type": "BANDAR_EARLY_AKUMULASI", "message": "Sinyal awal akumulasi bandar. Monitor volume besar hari berikutnya."})
+
+    # M-2: Phase 2 warnings dari engine details
+    try:
+        phase2_data = engine_details.get("Phase2Engine", {}) or engine_details.get("WyckoffEngine", {})
+        wyckoff = phase2_data.get("data", {}).get("wyckoff_phase", "") or phase2_data.get("wyckoff_phase", "")
+        weinstein = phase2_data.get("data", {}).get("weinstein_stage", 0) or phase2_data.get("weinstein_stage", 0)
+        vsa = phase2_data.get("data", {}).get("vsa_signal", "") or phase2_data.get("vsa_signal", "")
+
+        if wyckoff in ("DISTRIBUTION", "MARKDOWN"):
+            warnings.append({"level": "HIGH", "type": "PHASE2_EXIT",
+                "message": f"⚠️ Wyckoff {wyckoff} terdeteksi — pertimbangkan exit posisi!"})
+        elif wyckoff in ("ACCUMULATION", "MARKUP", "REACCUMULATION"):
+            warnings.append({"level": "LOW", "type": "PHASE2_HOLD",
+                "message": f"Wyckoff {wyckoff} — posisi aligned dengan fase market"})
+        if weinstein == 4:
+            warnings.append({"level": "HIGH", "type": "WEINSTEIN_DECLINE",
+                "message": "Weinstein Stage 4 DECLINING — pertimbangkan exit segera!"})
+        if vsa in ("UP_THRUST", "NO_DEMAND"):
+            warnings.append({"level": "MEDIUM", "type": "VSA_BEARISH",
+                "message": f"VSA {vsa} — tekanan jual microstructure terdeteksi"})
+    except Exception:
+        pass
+
+    # M-3: TrendStructure warnings
+    try:
+        trend = engine_details.get("TrendStructureEngine", {})
+        trend_data = trend.get("data", {})
+        trend_dir = trend_data.get("trend", "") or trend_data.get("direction", "")
+        ma_cross = trend_data.get("ma_cross", "")
+        if trend_dir in ("DOWNTREND", "BEARISH"):
+            warnings.append({"level": "MEDIUM", "type": "TREND_REVERSAL",
+                "message": "TrendStructure: trend berubah BEARISH — waspadai reversal"})
+        if ma_cross in ("DEATH_CROSS", "bearish_cross"):
+            warnings.append({"level": "HIGH", "type": "DEATH_CROSS",
+                "message": "Death cross terdeteksi — sinyal bearish kuat"})
+    except Exception:
+        pass
+
+    # M-3: PriceAction warnings
+    try:
+        pa = engine_details.get("PriceActionEngine", {})
+        pa_data = pa.get("data", {})
+        pa_signal = pa_data.get("signal", "") or pa_data.get("pattern", "")
+        if pa_signal in ("BEARISH_ENGULFING", "SHOOTING_STAR", "EVENING_STAR"):
+            warnings.append({"level": "MEDIUM", "type": "PRICE_ACTION_BEARISH",
+                "message": f"Price Action: pola {pa_signal} — potensi reversal bearish"})
+    except Exception:
+        pass
+
+    # M-3: RiskManagement warnings
+    try:
+        rm = engine_details.get("RiskManagementEngine", {})
+        rm_score = rm.get("score", 50)
+        if rm_score < 35:
+            warnings.append({"level": "HIGH", "type": "RISK_DETERIORATED",
+                "message": f"Risk Management score {rm_score:.0f} — kondisi risk memburuk"})
+    except Exception:
+        pass
+
+    # M-4: Foreign flow warning dari broker data
+    try:
+        foreign = engine_details.get("ForeignFlowEngine", {}) or engine_details.get("foreign_data", {})
+        net_foreign = foreign.get("net_foreign_buy", 0) or foreign.get("data", {}).get("net_foreign_buy", 0)
+        if net_foreign < -5e9:
+            warnings.append({"level": "HIGH", "type": "FOREIGN_EXIT",
+                "message": f"Foreign flow NET SELL {net_foreign/1e9:.1f}B — asing keluar posisi"})
+        elif net_foreign > 5e9:
+            warnings.append({"level": "LOW", "type": "FOREIGN_HOLD",
+                "message": f"Foreign flow NET BUY {net_foreign/1e9:.1f}B — asing masih akumulasi"})
+    except Exception:
+        pass
 
     return warnings
