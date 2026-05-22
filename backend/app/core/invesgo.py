@@ -1,5 +1,21 @@
 import os
 import httpx
+import json as _json
+
+# RC-0: Redis cache layer
+async def _cache_get(key: str):
+    try:
+        from app.core.redis_client import cache_get
+        return await cache_get(key)
+    except Exception:
+        return None
+
+async def _cache_set(key: str, value: str, ttl: int = 300):
+    try:
+        from app.core.redis_client import cache_set
+        await cache_set(key, value, ttl)
+    except Exception:
+        pass
 import logging
 from typing import Optional
 
@@ -22,8 +38,21 @@ async def get_stock_list() -> list:
         return r.json()
 
 async def get_ohlcv_daily(ticker: str, period: str = "3mo", from_date: str = None, to_date: str = None) -> list:
-    """OHLCV harian - support period atau from/to date"""
+    """OHLCV harian - support period atau from/to date. RC-1: Redis cache 4 jam."""
     from datetime import datetime, timedelta
+
+    # RC-1: Cache — tidak cache kalau ada from/to custom
+    use_cache = not (from_date and to_date)
+    cache_key = f"ohlcv:{ticker}:{period}"
+    if use_cache:
+        cached = await _cache_get(cache_key)
+        if cached:
+            try:
+                import json as _j
+                return _j.loads(cached)
+            except Exception:
+                pass
+
     if from_date and to_date:
         params = {"from": from_date, "to": to_date}
     else:
@@ -45,7 +74,11 @@ async def get_ohlcv_daily(ticker: str, period: str = "3mo", from_date: str = Non
             params=params
         )
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+    if use_cache and data:
+        import json as _j
+        await _cache_set(cache_key, _j.dumps(data), ttl=14400)
+    return data
 
 async def get_ohlcv_intraday(ticker: str, market: str = "RG") -> dict:
     """OHLCV intraday + bid/ask real"""
@@ -66,6 +99,14 @@ async def get_orderbook(ticker: str) -> dict:
         return r.json()
 
 async def get_broker_summary(ticker: str, investor: str = "all", market: str = "RG") -> list:
+    # RC-2: Cache 30 menit (1800 detik)
+    cache_key = f"broker:{ticker}:{investor}:{market}"
+    cached = await _cache_get(cache_key)
+    if cached:
+        try:
+            return _json.loads(cached)
+        except Exception:
+            pass
     """Broker net buy/sell real dari BEI"""
     from datetime import datetime, timedelta
     today = datetime.now().strftime("%Y-%m-%d")
@@ -77,7 +118,10 @@ async def get_broker_summary(ticker: str, investor: str = "all", market: str = "
             params={"from": from_date, "to": today, "investor": investor, "market": market}
         )
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+        if data:
+            await _cache_set(cache_key, _json.dumps(data), ttl=1800)
+        return data
 
 async def get_foreign_flow(ticker: str) -> dict:
     """Net foreign buy/sell - dari price table"""
@@ -108,11 +152,22 @@ async def get_tick(ticker: str) -> dict:
         return {"last_price": 0, "source": "unknown"}
 
 async def get_company_info(ticker: str) -> dict:
+    # RC-4: Cache 24 jam (86400 detik) — company info jarang berubah
+    cache_key = f"company:{ticker}"
+    cached = await _cache_get(cache_key)
+    if cached:
+        try:
+            return _json.loads(cached)
+        except Exception:
+            pass
     """Info perusahaan"""
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(f"{INVESGO_BASE_URL}/analysis/information/{ticker}", headers=_headers())
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+        if data:
+            await _cache_set(f"company:{ticker}", _json.dumps(data), ttl=86400)
+        return data
 
 async def get_price_table(ticker: str) -> dict:
     """Price table"""
@@ -129,6 +184,14 @@ async def get_price_table(ticker: str) -> dict:
 
 
 async def get_ksei_ownership(ticker: str, range_months: int = 3) -> list:
+    # RC-5: Cache 1 jam (3600 detik)
+    cache_key = f"ksei:{ticker}:{range_months}"
+    cached = await _cache_get(cache_key)
+    if cached:
+        try:
+            return _json.loads(cached)
+        except Exception:
+            pass
     """KSEI ownership data - foreign vs retail"""
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(
@@ -137,7 +200,10 @@ async def get_ksei_ownership(ticker: str, range_months: int = 3) -> list:
             params={"range": range_months}
         )
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+        if data:
+            await _cache_set(f"ksei:{ticker}:{range_months}", _json.dumps(data), ttl=3600)
+        return data
 async def get_sector_rotation() -> dict:
     """Sector rotation"""
     async with httpx.AsyncClient(timeout=15) as client:
@@ -235,6 +301,14 @@ async def get_top_movers(sort: str = "gainer", limit: int = 20) -> list:
         return r.json()
 
 async def get_market_regime() -> dict:
+    # RC-3: Cache 10 menit (600 detik)
+    cache_key = "market_regime:global"
+    cached = await _cache_get(cache_key)
+    if cached:
+        try:
+            return _json.loads(cached)
+        except Exception:
+            pass
     """Market Regime lengkap dari semua index Invesgo"""
     import asyncio
     
@@ -340,3 +414,24 @@ async def get_market_regime() -> dict:
     results["_sektoral"] = sektoral
     
     return results
+
+
+async def invalidate_ticker_cache(ticker: str):
+    """RC-6: Invalidate semua cache untuk ticker tertentu"""
+    keys = [
+        f"ohlcv:{ticker}:3mo",
+        f"ohlcv:{ticker}:1mo",
+        f"ohlcv:{ticker}:6mo",
+        f"broker:{ticker}:all:RG",
+        f"company:{ticker}",
+        f"ksei:{ticker}:3",
+    ]
+    for key in keys:
+        await _cache_delete(key)
+
+async def _cache_delete(key: str):
+    try:
+        from app.core.redis_client import cache_delete
+        await cache_delete(key)
+    except Exception:
+        pass

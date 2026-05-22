@@ -709,6 +709,97 @@ async def market_context(ticker: str):
     return JSONResponse(content=_json.loads(_json.dumps(result, cls=NumpyEncoder)))
 
 
+
+
+# ─── SCHEDULED DATA ACCUMULATION ─────────────────────────────────────────────
+@router.post("/data/accumulate-scheduled")
+async def accumulate_scheduled():
+    """
+    RC-7: Jalankan setelah market tutup (16:00 WIB).
+    Simpan OHLCV hari ini ke PostgreSQL + invalidate Redis cache.
+    Panggil dari Railway cron atau manual setiap hari.
+    """
+    from datetime import datetime
+    import pytz
+
+    wib = pytz.timezone("Asia/Jakarta")
+    now_wib = datetime.now(wib)
+    hour = now_wib.hour
+
+    # Hanya boleh jalan setelah jam 15:30 WIB
+    if hour < 15:
+        return {
+            "status": "skipped",
+            "reason": f"Market belum tutup — jam {now_wib.strftime('%H:%M')} WIB",
+            "run_after": "15:30 WIB"
+        }
+
+    # Jalankan accumulation
+    result = await accumulate_ohlcv()
+
+    # Invalidate Redis cache untuk semua ticker yang berhasil
+    if result.get("success"):
+        try:
+            from app.core.invesgo import invalidate_ticker_cache
+            for ticker in result["details"]["success"]:
+                await invalidate_ticker_cache(ticker)
+        except Exception as e:
+            pass
+
+    return {
+        "status": "ok",
+        "message": f"Accumulation selesai jam {now_wib.strftime('%H:%M')} WIB",
+        "accumulated": result.get("success", 0),
+        "failed": result.get("failed", 0),
+        "cache_invalidated": True,
+    }
+
+
+@router.get("/cache/status")
+async def cache_status():
+    """Cek berapa banyak key Redis yang aktif untuk invesgo cache."""
+    try:
+        from app.core.redis_client import get_redis
+        r = get_redis()
+        if not r:
+            return {"status": "redis_not_connected"}
+        ohlcv_keys = await r.keys("ohlcv:*")
+        broker_keys = await r.keys("broker:*")
+        company_keys = await r.keys("company:*")
+        regime_keys = await r.keys("market_regime:*")
+        ksei_keys = await r.keys("ksei:*")
+        return {
+            "status": "ok",
+            "cache_keys": {
+                "ohlcv": len(ohlcv_keys),
+                "broker": len(broker_keys),
+                "company": len(company_keys),
+                "market_regime": len(regime_keys),
+                "ksei": len(ksei_keys),
+                "total": len(ohlcv_keys) + len(broker_keys) + len(company_keys) + len(regime_keys) + len(ksei_keys)
+            },
+            "sample_ohlcv": ohlcv_keys[:5],
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@router.delete("/cache/flush")
+async def flush_cache():
+    """Flush semua invesgo cache (emergency use only)."""
+    try:
+        from app.core.redis_client import get_redis
+        r = get_redis()
+        patterns = ["ohlcv:*", "broker:*", "company:*", "market_regime:*", "ksei:*"]
+        total = 0
+        for pattern in patterns:
+            keys = await r.keys(pattern)
+            if keys:
+                await r.delete(*keys)
+                total += len(keys)
+        return {"status": "ok", "flushed": total}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 def _calc_atr(ohlcv, period=14):
     import numpy as np
     trs = []
