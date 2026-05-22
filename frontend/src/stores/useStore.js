@@ -23,7 +23,7 @@ export const useStore = create((set) => ({
   setAnalyticResult: (r) => set({ analyticResult: r }),
   setAnalyticLoading: (v) => set({ analyticLoading: v }),
   setAnalyticError: (e) => set({ analyticError: e }),
-  sendToAnalytic: (ticker) => set({ analyticTicker: ticker, activeTab: 'analytic' }),
+  sendToAnalytic: (ticker, mode) => set({ analyticTicker: ticker, activeTab: 'analytic', ...(mode ? { analyticMode: mode.toLowerCase() } : {}) }),
   monitoringInput: null,
   monitoringPositions: [],
   setMonitoringPositions: (p) => set({ monitoringPositions: p }),

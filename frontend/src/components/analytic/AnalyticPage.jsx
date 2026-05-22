@@ -207,6 +207,7 @@ export default function AnalyticPage() {
               <div className="text-center">
                 <p className="font-display font-bold text-xl text-white">{r.ticker||analyticTicker}</p>
                 <p className="font-mono text-xs text-slate-500 mt-0.5">{r.mode||analyticMode} MODE</p>
+                <p className="font-mono text-[10px] text-slate-400 mt-0.5">Score analytic ≠ score screener — metrik berbeda</p>
               </div>
               {r.signal && <SignalBadge signal={r.signal}/>}
 
@@ -346,10 +347,10 @@ export default function AnalyticPage() {
               <p className="label-xs">Trade Setup</p>
               {[
                 ['Entry Price', r.entry, 'text-accent-green'],
-                ['Stop Loss', r.stop_loss||r.sl, 'text-accent-red'],
-                ['Take Profit 1', r.tp1, 'text-accent-gold'],
-                ['Take Profit 2', r.tp2, 'text-accent-gold'],
-                ['Take Profit 3', r.tp3, 'text-accent-gold'],
+                ['Stop Loss', r.dynamic_sltp?.sl || r.stop_loss||r.sl, 'text-accent-red'],
+                ['Take Profit 1', r.dynamic_sltp?.tp1 || r.tp1, 'text-accent-gold'],
+                ['Take Profit 2', r.dynamic_sltp?.tp2 || r.tp2, 'text-accent-gold'],
+                ['Take Profit 3', r.dynamic_sltp?.tp3 || r.tp3, 'text-accent-gold'],
                 ['Risk:Reward', r.risk_reward ? `1:${Number(r.risk_reward).toFixed(2)}` : null, 'text-accent-blue'],
               ].filter(([,v]) => v).map(([k,v,c]) => (
                 <div key={k} className="flex justify-between items-center py-1.5 border-b border-border-dim last:border-0">
@@ -359,8 +360,8 @@ export default function AnalyticPage() {
                   </span>
                 </div>
               ))}
-              {/* Dynamic SL/TP */}
-              {r.dynamic_sltp && r.dynamic_sltp.method !== 'error' && (
+              {/* Dynamic SL/TP — hidden, sudah digabung ke Trade Setup primary */}
+              {false && r.dynamic_sltp && r.dynamic_sltp.method !== 'error' && (
                 <div className="mt-2 rounded-lg border border-accent-blue/30 bg-accent-blue/5 p-3">
                   <p className="font-mono text-[10px] text-slate-500 mb-2">⚡ DYNAMIC SL/TP (ATR × Regime × Score)</p>
                   {[
