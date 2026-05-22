@@ -177,7 +177,7 @@ async def analyze(req: AnalyticRequest):
 
         if enrichment_verdict == "SKIP" or weinstein_stage == 4 or score < 55:
             go_no_go = "NO GO"
-            go_confidence = max(0, 100 - (no_score * 20))
+            go_confidence = max(0, 30 - (no_score * 10))  # FIX2
         elif go_score >= 3 and no_score == 0:
             go_no_go = "STRONG GO"
             go_confidence = min(95, 70 + go_score * 5)
@@ -316,7 +316,7 @@ async def analyze(req: AnalyticRequest):
                 if ctx:
                     kb_parts.append(f"=== {label} ===\n{ctx}")
             if kb_parts:
-                kb_context = "\n\n=== REFERENSI KNOWLEDGE BASE ===\n" + "\n---\n".join(kb_parts[:4])
+                kb_context = "\n\n=== REFERENSI KNOWLEDGE BASE ===\n" + "\n---\n".join(kb_parts[:5])  # FIX3
                 logger.info(f"[RAG] Analytic {req.ticker}: {len(kb_parts)} KB contexts injected")
         except Exception as kb_err:
             logger.debug(f"[RAG] analytic skip: {kb_err}")
@@ -467,7 +467,7 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
         try:
             dynamic = calculate_dynamic_sltp(
                 entry_price=float(entry) if entry else float(result.get("entry", 0)),
-                ohlcv=normalized_ohlcv,
+                ohlcv=ohlcv,  # FIX1: was normalized_ohlcv (undefined)
                 market_regime=str(result.get("market_regime", "SIDEWAYS")),
                 final_score=float(score),
                 mode=req.mode,
