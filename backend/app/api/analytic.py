@@ -273,6 +273,10 @@ async def analyze(req: AnalyticRequest):
         tp3   = round(entry + atr * sl_mult * 4.0, 0)
         rr    = round((tp1 - entry) / (entry - sl), 2) if entry != sl else 0
 
+        # SW-2: RR < 1.0 → force NO GO — setup tidak layak
+        if rr < 1.0 and rr > 0:
+            no_go_reasons.append(f"RR={rr} < 1.0 — risk lebih besar dari reward, setup tidak layak")
+
         # ── RAG KB CONTEXT ──────────────────────────────────────────
         kb_context = ""
         try:
@@ -556,7 +560,7 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
                 market_regime=str(result.get("market_regime", "SIDEWAYS")),
                 final_score=float(score),
                 mode=req.mode,
-                akumulasi_score=50.0
+                akumulasi_score=float(score)  # SW-1: pakai composite_score dari 34 engines
             )
             result["dynamic_sltp"] = dynamic
         except Exception as e:

@@ -54,7 +54,7 @@ def calculate_dynamic_sltp(
     atr = atr * atr_fraction  # Scale ATR untuk intraday
 
     mode_base = {
-        'swing':    {'sl': 2.0, 'tp1': 2.0, 'tp2': 3.5, 'tp3': 5.5},
+        'swing':    {'sl': 2.0, 'tp1': 2.5, 'tp2': 4.0, 'tp3': 6.0},  # SW-3: TP diperbesar IDX swing
         'intraday': {'sl': 1.0, 'tp1': 1.0, 'tp2': 1.8, 'tp3': 2.8},  # FIX-5: TP realistis IDX
         'scalping': {'sl': 0.7, 'tp1': 0.7, 'tp2': 1.2, 'tp3': 1.8},
     }
