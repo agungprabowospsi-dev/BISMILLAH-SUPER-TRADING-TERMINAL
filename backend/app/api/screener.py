@@ -326,7 +326,10 @@ async def get_stock_list_safe() -> List[Dict[str, Any]]:
 
 
 async def get_top_gainer_safe() -> List[Dict[str, Any]]:
-    raw = await invesgo_call("get_top_gainer")
+    try:
+        raw = await invesgo_call("get_top_gainer")
+    except Exception:
+        return []
     if raw is None:
         return []
     if isinstance(raw, dict):
