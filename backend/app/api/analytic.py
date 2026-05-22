@@ -171,6 +171,12 @@ async def analyze(req: AnalyticRequest):
         elif vsa_signal in ("UP_THRUST", "NO_DEMAND"):
             no_go_reasons.append(f"VSA {vsa_signal} — bearish microstructure")
 
+        # INT-3: phase2_verdict masuk GO/NO GO
+        if phase2_verdict in ("STRONG_BUY", "BUY"):
+            go_reasons.append(f"Phase2 verdict {phase2_verdict} — konfirmasi bullish")
+        elif phase2_verdict in ("SELL", "STRONG_SELL"):
+            no_go_reasons.append(f"Phase2 verdict {phase2_verdict} — konfirmasi bearish")
+
         # Final GO/NO GO
         go_score = len(go_reasons)
         no_score = len(no_go_reasons)
@@ -362,6 +368,46 @@ Top Losers: {", ".join([s.get("code","") for s in (top_loser[:3] if top_loser el
             logger.debug(f"[REGIME] skip: {regime_err}")
             market_regime_context = ""
 
+        # INT-4: Foreign flow ticker spesifik
+        foreign_flow_context = ""
+        foreign_signal = "NEUTRAL"
+        foreign_net_val = 0.0
+        try:
+            broker_data = await invesgo.get_broker_summary(req.ticker)
+            if broker_data:
+                FOREIGN_BROKERS_SET = {"YP","BK","RX","ZP","AK","CC","DB","MS","CS","ML","DP","KI","OD","LG"}
+                f_buy = 0.0; f_sell = 0.0; f_net = 0.0
+                top_brokers = []
+                for b in broker_data:
+                    code = b.get("code", "")
+                    if code in FOREIGN_BROKERS_SET:
+                        net  = float(b.get("net_value", 0) or 0)
+                        buy  = float(b.get("buy_value", 0) or 0)
+                        sell = float(b.get("sell_value", 0) or 0)
+                        f_buy += buy; f_sell += sell; f_net += net
+                        top_brokers.append(f"{code}:{net/1e9:+.1f}B")
+                foreign_net_val = f_net
+                if f_net > 1e9:
+                    foreign_signal = "NET BUY"
+                    go_reasons.append(f"Foreign flow NET BUY {f_net/1e9:.1f}B — asing akumulasi")
+                elif f_net < -1e9:
+                    foreign_signal = "NET SELL"
+                    no_go_reasons.append(f"Foreign flow NET SELL {f_net/1e9:.1f}B — asing distribusi")
+                foreign_flow_context = f"""
+=== FOREIGN FLOW {req.ticker} ===
+Signal: {foreign_signal}
+Net: {f_net/1e9:+.2f}B | Buy: {f_buy/1e9:.2f}B | Sell: {f_sell/1e9:.2f}B
+Top Brokers: {", ".join(top_brokers[:5])}
+"""
+                if foreign_signal == "NET BUY" and setup_type in ("neutral", "bullish_pullback"):
+                    setup_type = "bullish_accumulation"
+                    setup_reason = f"Foreign broker akumulasi net {f_net/1e9:.1f}B — smart money masuk."
+                elif foreign_signal == "NET SELL" and setup_type in ("neutral", "bullish_continuation"):
+                    setup_type = "distribution_warning"
+                    setup_reason = f"Foreign broker distribusi net {f_net/1e9:.1f}B — waspadai exit."
+        except Exception as ff_err:
+            logger.debug(f"[FOREIGN FLOW] skip: {ff_err}")
+
         rationale = await ask_claude(
             system="Kamu adalah analis saham IDX profesional. Berikan analisis trading yang jelas dan actionable dalam Bahasa Indonesia.",
             prompt=f"""
@@ -373,6 +419,9 @@ Setup Type: {setup_type}
 Setup Reason: {setup_reason}
 Engine: {all_engines.get('bullish_count', 0)} bullish, {all_engines.get('bearish_count', 0)} bearish dari 10 engines
 {market_regime_context}
+{foreign_flow_context}
+Phase2: {wyckoff_phase} | Weinstein: {weinstein_stage} | VSA: {vsa_signal} | Verdict: {phase2_verdict}
+LQ45 Change: {lq45_chg:+.2f}% | Market Breadth: {breadth:.0f}%
 {kb_context}
 
 Tulis analisis trading 3-4 kalimat dalam Bahasa Indonesia:
@@ -436,13 +485,34 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "wyckoff_phase":     wyckoff_phase,
             "weinstein_stage":   weinstein_stage,
             "vsa_signal":        vsa_signal,
+            "foreign_signal":    foreign_signal if 'foreign_signal' in locals() else "N/A",
+            "foreign_net_bil":   round(foreign_net_val / 1e9, 2) if 'foreign_net_val' in locals() else 0,
+            "lq45_change":       round(lq45_chg, 2) if 'lq45_chg' in locals() else 0,
+            "market_breadth":    round(breadth, 1) if 'breadth' in locals() else 50,
         }
 
         # ML — Win Probability
         try:
             regime_str = str(result.get("market_regime", "SIDEWAYS"))
-            lq45_chg = 0.0
-            breadth = 50.0
+            # INT-1: lq45_chg dari regime_data
+            try:
+                lq45_data = regime_data.get("LQ45", {}) or {}
+                lq45_close_val = float(lq45_data.get("close", 0) or 0)
+                lq45_prev_val  = float(lq45_data.get("prev", 0) or 0)
+                if lq45_close_val > 0 and lq45_prev_val > 0:
+                    lq45_chg = ((lq45_close_val - lq45_prev_val) / lq45_prev_val) * 100
+                else:
+                    lq45_chg = 0.0
+            except Exception:
+                lq45_chg = 0.0
+            # INT-2: breadth dari top_gainer/loser ratio
+            try:
+                _gainers = len(regime_data.get("top_gainer", []) or [])
+                _losers  = len(regime_data.get("top_loser", []) or [])
+                _total   = _gainers + _losers
+                breadth  = round((_gainers / _total) * 100, 1) if _total > 0 else 50.0
+            except Exception:
+                breadth = 50.0
             eng_list = all_engines.get('engines', [])
             eng_dict = {}
             if isinstance(eng_list, list):
