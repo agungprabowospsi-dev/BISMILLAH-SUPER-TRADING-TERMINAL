@@ -402,6 +402,7 @@ def calc_prefilter_metrics(ohlcv: List[Dict[str, Any]]) -> Optional[Dict[str, An
     candle_body_pct = abs(close - last_open) / last_open * 100 if last_open > 0 else 0
 
     return {
+        "date": last.get("date"),
         "price": close,
         "open": last_open,
         "high": to_float(last.get("high")),
@@ -436,8 +437,24 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
                 return None
 
             # Filter saham suspended — dari field Invesgo + OHLCV check
-            if int(stock.get("suspend", 0) or 0) > 0:
+            raw_stock = stock.get("raw", {}) if isinstance(stock.get("raw"), dict) else {}
+            suspend_value = (
+                stock.get("suspend", None)
+                if stock.get("suspend", None) is not None
+                else raw_stock.get("suspend", 0)
+            )
+            if int(suspend_value or 0) > 0:
                 return None
+
+            # Filter stale OHLCV untuk mode cepat:
+            # jika candle terakhir bukan hari ini, anggap saham tidak aktif/suspended/stale.
+            if mode in ("intraday", "scalping"):
+                from datetime import datetime
+                last_date_raw = str(metrics.get("date") or "")[:10]
+                today_str = datetime.now().strftime("%Y-%m-%d")
+                if last_date_raw and last_date_raw != today_str:
+                    return None
+
             if metrics["volume"] <= 0:
                 return None
             if metrics["avg_volume_20"] <= 0:
