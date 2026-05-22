@@ -462,10 +462,21 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
 
             # Anti Climax Distribution Filter (Bandar Flow Secrets hal.26)
             # "Climax distribution: change > 15% + volume meledak = bandar pamit"
-            # Hanya untuk SWING — intraday/scalping lebih toleran momentum
             if mode == "swing":
+                # Swing: ketat — change > 15% + rvol > 2 = SKIP
                 if change_pct_now > 15 and metrics["rvol"] > 2.0:
-                    return None  # Climax distribution — gorengan
+                    return None
+            elif mode == "intraday":
+                # Intraday: semi-ketat — change > 20% + rvol > 3 = SKIP
+                # change 15-20% masih bisa valid untuk intraday momentum
+                if change_pct_now > 20 and metrics["rvol"] > 3.0:
+                    return None
+            elif mode == "scalping":
+                # Scalping: longgar — hanya filter ARA murni (>= 24% sudah difilter)
+                # TAPI filter saham dengan rvol sangat ekstrem + change tinggi
+                # yang kemungkinan besar sudah di puncak distribusi
+                if change_pct_now > 22 and metrics["rvol"] > 5.0:
+                    return None
 
             if mode == "scalping" and metrics["downtrend_heavy"]:
                 return None
