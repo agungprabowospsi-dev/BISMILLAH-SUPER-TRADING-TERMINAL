@@ -325,6 +325,37 @@ async def get_stock_list_safe() -> List[Dict[str, Any]]:
     return stocks
 
 
+async def get_top_gainer_safe() -> List[Dict[str, Any]]:
+    raw = await invesgo_call("get_top_gainer")
+    if raw is None:
+        return []
+    if isinstance(raw, dict):
+        for key in ("data", "items", "stocks", "result", "gainers"):
+            if isinstance(raw.get(key), list):
+                raw = raw[key]
+                break
+    if not isinstance(raw, list):
+        return []
+
+    stocks: List[Dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        ticker = normalize_ticker(pick(item, "code", "ticker", "symbol", "stock_code"))
+        if not ticker:
+            continue
+        stocks.append({
+            "ticker": ticker,
+            "code": ticker,
+            "name": pick(item, "name", "company_name", default=ticker),
+            "sector": pick(item, "sector", "industry", default=""),
+            "logo": pick(item, "logo", default=None),
+            "raw": item,
+            "universe_source": "top_gainer",
+        })
+    return stocks
+
+
 def sector_allowed(mode: Mode, sector: str) -> bool:
     if mode == "swing":
         return True
@@ -338,7 +369,28 @@ async def build_universe(mode: Mode) -> List[Dict[str, Any]]:
     stocks = await get_stock_list_safe()
     if not stocks:
         stocks = fallback_stock_universe()
-    filtered = [s for s in stocks if sector_allowed(mode, s.get("sector", ""))]
+
+    # REV27 Candidate Selection:
+    # Prioritaskan market movers agar top gainer hari ini tidak terlewat
+    # oleh urutan stock_list alfabetis/default.
+    top_gainers = await get_top_gainer_safe()
+
+    merged: List[Dict[str, Any]] = []
+    seen = set()
+
+    for source in (top_gainers, stocks):
+        for s in source:
+            ticker = normalize_ticker(s.get("ticker") or s.get("code"))
+            if not ticker or ticker in seen:
+                continue
+            item = dict(s)
+            item["ticker"] = ticker
+            item["code"] = ticker
+            item.setdefault("universe_source", "stock_list")
+            merged.append(item)
+            seen.add(ticker)
+
+    filtered = [s for s in merged if sector_allowed(mode, s.get("sector", ""))]
 
     # Naikkan universe — BFD pre-sort akan filter yang terbaik
     # SWING butuh universe lebih besar karena cari quiet accumulation
