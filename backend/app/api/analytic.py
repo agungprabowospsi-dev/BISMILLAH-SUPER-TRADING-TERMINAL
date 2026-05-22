@@ -349,6 +349,8 @@ async def analyze(req: AnalyticRequest):
 
         # Market Regime Context
         market_regime_context = ""
+        lq45_chg = 0.0  # HOTFIX: default sebelum try block
+        breadth = 50.0  # HOTFIX: default sebelum try block
         try:
             regime_data = await invesgo.get_market_regime()
             ihsg = regime_data.get("IHSG", {}) or {}
