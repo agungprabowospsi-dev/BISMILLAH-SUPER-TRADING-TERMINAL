@@ -680,6 +680,94 @@ async def ohlcv_prefilter(universe: List[Dict[str, Any]], mode: Mode, filter_int
     return top
 
 
+async def debug_prefilter_rejections(universe: List[Dict[str, Any]], mode: Mode, filter_intensity: int = 75, sample_limit: int = 40) -> Dict[str, Any]:
+    """
+    Debug-only mirror of prefilter_one().
+    Does not affect production filtering; only explains why candidates are rejected.
+    """
+    from collections import Counter
+    from datetime import datetime
+
+    cfg = MODE_CONFIG[mode]
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    sem = asyncio.Semaphore(10)
+
+    async def inspect_one(stock: Dict[str, Any]) -> Dict[str, Any]:
+        async with sem:
+            ticker = stock.get("ticker")
+            try:
+                ohlcv = await asyncio.wait_for(fetch_ohlcv_safe(ticker), timeout=10)
+                metrics = calc_prefilter_metrics(ohlcv)
+
+                if not metrics:
+                    return {"ticker": ticker, "reason": "NO_METRICS", "ohlcv_len": len(ohlcv or [])}
+
+                raw_stock = stock.get("raw", {}) if isinstance(stock.get("raw"), dict) else {}
+                suspend_value = (
+                    stock.get("suspend", None)
+                    if stock.get("suspend", None) is not None
+                    else raw_stock.get("suspend", 0)
+                )
+
+                last_date_raw = str(metrics.get("date") or "")[:10]
+
+                reason = "PASS_PREFILTER"
+                if metrics["price"] < cfg["price_min"] or metrics["price"] > cfg["price_max"]:
+                    reason = "PRICE_RANGE"
+                elif int(suspend_value or 0) > 0:
+                    reason = "SUSPENDED_FIELD"
+                elif mode in ("intraday", "scalping") and last_date_raw and last_date_raw != today_str:
+                    reason = "STALE_OHLCV_DATE"
+                elif metrics["volume"] <= 0:
+                    reason = "ZERO_VOLUME"
+                elif metrics["avg_volume_20"] <= 0:
+                    reason = "ZERO_AVG_VOLUME"
+                elif metrics["rvol"] <= 0:
+                    reason = "ZERO_RVOL"
+                elif metrics.get("high", 0) == metrics.get("low", 0) == metrics["price"] and metrics["volume"] < 1000:
+                    reason = "FLAT_LOW_VOLUME"
+                elif metrics.get("change_pct", 0) >= 24.0:
+                    reason = "ARA_FILTER"
+                elif metrics.get("change_pct", 0) <= -24.0:
+                    reason = "ARB_FILTER"
+                elif metrics["rvol"] < cfg["rvol_min"]:
+                    reason = "RVOL_TOO_LOW"
+                elif metrics["change_pct"] < cfg["change_min"]:
+                    reason = "CHANGE_TOO_LOW"
+                elif mode == "swing" and metrics.get("change_pct", 0) > 15 and metrics["rvol"] > 2.0:
+                    reason = "ANTI_CLIMAX_SWING"
+                elif mode == "intraday" and metrics.get("change_pct", 0) > 20 and metrics["rvol"] > 3.0:
+                    reason = "ANTI_CLIMAX_INTRADAY"
+                elif mode == "scalping" and metrics.get("change_pct", 0) > 22 and metrics["rvol"] > 5.0:
+                    reason = "ANTI_CLIMAX_SCALPING"
+
+                return {
+                    "ticker": ticker,
+                    "reason": reason,
+                    "date": metrics.get("date"),
+                    "today": today_str,
+                    "price": metrics.get("price"),
+                    "change_pct": metrics.get("change_pct"),
+                    "rvol": metrics.get("rvol"),
+                    "volume": metrics.get("volume"),
+                    "avg_volume_20": metrics.get("avg_volume_20"),
+                    "suspend": suspend_value,
+                }
+            except Exception as exc:
+                return {"ticker": ticker, "reason": f"ERROR_{type(exc).__name__}", "error": str(exc)[:200]}
+
+    rows = await asyncio.gather(*(inspect_one(stock) for stock in universe[:sample_limit]))
+    counts = Counter(row.get("reason") for row in rows)
+
+    return {
+        "sample_size": len(rows),
+        "reason_counts": dict(counts.most_common()),
+        "sample": rows,
+    }
+
+
+
+
 # ===== Phase 3A: 34 Engines weighted score =====
 
 def _extract_score_from_any(value: Any) -> Optional[float]:
@@ -1717,6 +1805,7 @@ async def run_screener(request: ScreenerRequest) -> Dict[str, Any]:
     if request.include_debug:
         disqualified = [x for x in scored if x.get("disqualify")]
         response["debug"] = {
+            "prefilter": await debug_prefilter_rejections(universe, mode, request.filter_intensity),
             "disqualified_count": len(disqualified),
             "disqualified_sample": [
                 {
