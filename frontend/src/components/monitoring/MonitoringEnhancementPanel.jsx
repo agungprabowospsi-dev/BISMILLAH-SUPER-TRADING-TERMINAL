@@ -325,12 +325,12 @@ export default function MonitoringEnhancementPanel({ position }) {
   }
 
   // Auto-poll per trade mode
-  // SWING=5min, DAYTRADING=1min, SCALPING=30sec
+  // SWING=5min, INTRADAY=1min, SCALPING=30sec
   useEffect(() => {
     if (!position?.ticker) return
     const mode = position?.mode || 'SWING'
     const intervalMs = mode === 'SCALPING' ? 30 * 1000
-                     : mode === 'DAYTRADING' ? 60 * 1000
+                     : mode === 'INTRADAY' ? 60 * 1000
                      : 5 * 60 * 1000
     fetchData()
     const interval = setInterval(fetchData, intervalMs)

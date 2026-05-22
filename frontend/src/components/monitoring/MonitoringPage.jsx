@@ -62,11 +62,11 @@ export default function MonitoringPage() {
       take_profit_1: String(mi.take_profit_1 || ''),
       take_profit_2: String(mi.take_profit_2 || ''),
       take_profit_3: String(mi.take_profit_3 || ''),
-      mode: (mi.mode || 'DAYTRADING').toUpperCase(),
+      mode: (mi.mode || 'INTRADAY').toUpperCase(),
       lot: String(mi.lot || ''),
       broker: mi.broker || ''
     }
-    return { ticker: '', entry_price: '', stop_loss: '', take_profit_1: '', take_profit_2: '', take_profit_3: '', mode: 'DAYTRADING', lot: '', broker: '', entry_score: '' }
+    return { ticker: '', entry_price: '', stop_loss: '', take_profit_1: '', take_profit_2: '', take_profit_3: '', mode: 'INTRADAY', lot: '', broker: '', entry_score: '' }
   })
   const positionsRef = useRef([])
   const { monitoringInput, setMonitoringInput } = useStore()
@@ -81,7 +81,7 @@ export default function MonitoringPage() {
       take_profit_1: String(monitoringInput.take_profit_1 || ''),
       take_profit_2: String(monitoringInput.take_profit_2 || ''),
       take_profit_3: String(monitoringInput.take_profit_3 || ''),
-      mode: (monitoringInput.mode || 'DAYTRADING').toUpperCase()
+      mode: (monitoringInput.mode || 'INTRADAY').toUpperCase()
     })
     setShowForm(true)
   }, [monitoringInput])
@@ -168,7 +168,7 @@ export default function MonitoringPage() {
       kb_context: (useStore.getState().monitoringInput || {}).kb_context || '',
     }
     setShowForm(false)
-    setForm({ ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'DAYTRADING',lot:'',broker:'',entry_score:'' })
+    setForm({ ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'INTRADAY',lot:'',broker:'',entry_score:'' })
     const enriched = (await refreshOne(newPos)) || newPos
     setPositions(prev => {
       const next = [enriched, ...prev]
@@ -234,7 +234,7 @@ export default function MonitoringPage() {
               <label className="label-xs block mb-1.5">Mode</label>
               <select value={form.mode} onChange={(e) => setForm({...form,mode:e.target.value})}
                 className="w-full bg-bg-secondary border border-border-dim rounded px-3 py-2 font-mono text-sm text-white focus:border-accent-green focus:outline-none">
-                {['SWING','DAYTRADING','SCALPING'].map(m => <option key={m} value={m}>{m}</option>)}
+                {['SWING','INTRADAY','SCALPING'].map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
           </div>

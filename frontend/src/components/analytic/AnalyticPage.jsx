@@ -6,7 +6,7 @@ import { ScoreGauge, ScoreBar, SignalBadge, LoadingSpinner, ErrorBox, Confidence
 import clsx from 'clsx'
 const EnrichmentPanel = lazy(() => import("./EnrichmentPanel"))
 
-const MODES = ['SWING','DAYTRADING','SCALPING']
+const MODES = ['SWING','INTRADAY','SCALPING']
 const GROUPS = [
   {key:'group1',label:'Market Structure',color:'#0EA5FF'},
   {key:'group2',label:'Smart Money',color:'#00FF88'},
