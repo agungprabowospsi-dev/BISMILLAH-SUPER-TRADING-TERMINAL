@@ -530,79 +530,94 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             return None
 
 
-def calc_bfd_presort_score(candidate: Dict[str, Any]) -> float:
-    """
-    Bandar Flow Detector Pre-Sort Score
-    Berdasarkan formula dari 3 buku bandarmologi IDX:
-    - E-Book Bandar Flow Secrets (FSI framework)
-    - Bandarmology Basic by Koko Trader
-    - Bandarmology Advanced by Koko Trader
+def calc_bfd_presort_score(candidate, mode="swing"):
+    """BFD Pre-Sort Score — Mode Aware dari 3 buku IDX"""
+    score         = 50.0
+    rvol          = to_float(candidate.get("rvol", 1.0))
+    change_pct    = to_float(candidate.get("change_pct", 0))
+    value         = to_float(candidate.get("value", 0))
+    price         = to_float(candidate.get("price", 0))
+    ma20          = to_float(candidate.get("ma20", price))
+    ma5           = to_float(candidate.get("ma5", price))
+    candle_bullish = candidate.get("candle_bullish", False)
+    candle_body   = to_float(candidate.get("candle_body_pct", 0))
 
-    Komponen (FSI 0-4 karena foreign_net tidak tersedia di prefilter):
-    A. VSR  : Volume Spike Ratio >= 1.5x avg10
-    B. VII  : Value Inflow Index — value tinggi + harga stabil
-    C. SAP  : Silent Accumulation Pattern — vol naik, harga tidak spike
-    D. ANTI : Anti Climax Distribution — filter gorengan
-    """
-    score = 50.0
-
-    rvol       = to_float(candidate.get("rvol", 1.0))
-    change_pct = to_float(candidate.get("change_pct", 0))
-    value      = to_float(candidate.get("value", 0))
-    avg_vol    = to_float(candidate.get("avg_volume_20", 1))
-    volume     = to_float(candidate.get("volume", 0))
-    price      = to_float(candidate.get("price", 0))
-    ma20       = to_float(candidate.get("ma20", price))
-
-    # A. VSR — Volume Spike Ratio (Bandar Flow Secrets hal.60)
-    # VSR >= 1.5 = flow mulai bekerja
-    if rvol >= 2.0:
-        score += 20   # Strong flow
-    elif rvol >= 1.5:
-        score += 12   # Early flow
-    elif rvol >= 1.2:
-        score += 5    # Mulai meningkat
-
-    # B. VII — Value Inflow + Silent Accumulation (hal.26,36)
-    # Volume naik tapi harga tidak spike = akumulasi diam
-    # "Volume > 150% avg + harga tidak naik > 3%"
-    if rvol >= 1.5 and abs(change_pct) <= 3.0:
-        score += 20   # Silent accumulation pattern
-    elif rvol >= 1.5 and abs(change_pct) <= 5.0:
-        score += 10   # Moderate accumulation
-
-    # C. Price position vs MA20 (hal.19 — harga di area bawah = akumulasi)
-    if price > 0 and ma20 > 0:
-        price_vs_ma = (price - ma20) / ma20 * 100
-        if -5 <= price_vs_ma <= 5:
-            score += 8    # Harga di sekitar MA20 = zona akumulasi
-        elif price_vs_ma > 5:
-            score += 3    # Sedikit di atas MA20 = markup awal
-        elif price_vs_ma < -15:
-            score -= 10   # Terlalu jauh di bawah = downtrend
-
-    # D. ANTI Climax Distribution (hal.26 — BAPA case)
-    # "Climax distribution: volume ekstrem + candle hijau besar + harga melonjak"
+    # ANTI Climax Distribution — SEMUA MODE (Bandar Flow Secrets hal.26)
     if change_pct > 15 and rvol > 2.0:
-        score -= 45   # Climax distribution — sangat berbahaya
-    elif change_pct > 10 and rvol > 1.8:
-        score -= 25   # Potensi distribusi
+        return 5.0
+    if change_pct > 10 and rvol > 1.8:
+        score -= 30
     elif change_pct > 7 and rvol > 1.5:
-        score -= 10   # Waspada
+        score -= 15
 
-    # E. Harga positif tapi tidak berlebihan (hal.19 — candle hijau kecil konsisten)
-    if 0 < change_pct <= 3:
-        score += 8    # Ideal: naik pelan = bandar kontrol harga
-    elif change_pct > 0:
-        score += 3    # Positif tapi perlu hati-hati
-    elif change_pct < -5:
-        score -= 8    # Tekanan jual cukup besar
+    if mode == "swing":
+        # VSR (hal.60)
+        if rvol >= 2.0:    score += 18
+        elif rvol >= 1.5:  score += 12
+        elif rvol >= 1.2:  score += 5
+        # Silent Accumulation (hal.26) — core signal
+        if rvol >= 1.5 and abs(change_pct) <= 3.0:   score += 22
+        elif rvol >= 1.5 and abs(change_pct) <= 5.0: score += 10
+        # Price vs MA20
+        if price > 0 and ma20 > 0:
+            pct = (price - ma20) / ma20 * 100
+            if -3 <= pct <= 5:   score += 10
+            elif 5 < pct <= 15:  score += 5
+            elif pct < -15:      score -= 12
+        # Change ideal swing
+        if 0 < change_pct <= 3:   score += 10
+        elif change_pct > 0:      score += 3
+        elif change_pct < -5:     score -= 8
+        # Value (hal.36)
+        if value > 50_000_000_000:    score += 8
+        elif value > 10_000_000_000:  score += 4
 
-    # F. Value besar = uang besar (hal.36 — value meningkat = validasi flow)
-    if value > 50_000_000_000:   # > 50 miliar
-        score += 8
-    elif value > 10_000_000_000: # > 10 miliar
-        score += 4
+    elif mode == "intraday":
+        # VSR intraday butuh lebih kuat
+        if rvol >= 2.5:    score += 20
+        elif rvol >= 2.0:  score += 15
+        elif rvol >= 1.5:  score += 8
+        # Momentum awal hari (hal.57) — sweet spot 2-8%
+        if 2 <= change_pct <= 8 and rvol >= 1.5:    score += 20
+        elif 0 < change_pct <= 2 and rvol >= 1.5:   score += 10
+        elif 8 < change_pct <= 12:                   score += 5
+        elif change_pct < 0:                         score -= 10
+        # Price vs MA5
+        if price > 0 and ma5 > 0:
+            pct = (price - ma5) / ma5 * 100
+            if 0 <= pct <= 3:   score += 10
+            elif pct > 3:       score += 5
+            elif pct < -2:      score -= 8
+        # Candle quality
+        if candle_bullish and candle_body >= 0.5:  score += 10
+        elif candle_bullish:                        score += 5
+        # Value likuiditas intraday
+        if value > 20_000_000_000:    score += 8
+        elif value > 5_000_000_000:   score += 4
+
+    elif mode == "scalping":
+        # VSR scalping butuh ekstrem
+        if rvol >= 3.0:    score += 25
+        elif rvol >= 2.5:  score += 18
+        elif rvol >= 2.0:  score += 12
+        elif rvol >= 1.5:  score += 5
+        # Momentum burst (Trader Dale)
+        if change_pct >= 5 and rvol >= 2.0:    score += 20
+        elif change_pct >= 3 and rvol >= 1.5:  score += 12
+        elif change_pct >= 1:                   score += 5
+        elif change_pct < 0:                    score -= 15
+        # Price vs MA5 — harus di atas
+        if price > 0 and ma5 > 0:
+            if price > ma5:  score += 10
+            else:            score -= 10
+        # Candle kuat
+        if candle_bullish and candle_body >= 1.0:   score += 12
+        elif candle_bullish and candle_body >= 0.5: score += 6
+        elif not candle_bullish:                     score -= 5
+        # Value likuiditas scalping
+        if value > 10_000_000_000:    score += 8
+        elif value > 2_000_000_000:   score += 4
+        elif value < 500_000_000:     score -= 10
 
     return max(0.0, min(100.0, round(score, 2)))
 
@@ -618,7 +633,7 @@ async def ohlcv_prefilter(universe: List[Dict[str, Any]], mode: Mode, filter_int
     # Sort berdasarkan BFD score sebelum ambil top N
     # Ini memastikan 200 kandidat terbaik secara bandarmologi
     for c in candidates:
-        c["bfd_presort_score"] = calc_bfd_presort_score(c)
+        c["bfd_presort_score"] = calc_bfd_presort_score(c, mode)
 
     candidates.sort(key=lambda x: x.get("bfd_presort_score", 0), reverse=True)
 
