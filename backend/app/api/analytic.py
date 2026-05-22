@@ -800,6 +800,121 @@ async def flush_cache():
         return {"status": "ok", "flushed": total}
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+# ─── HISTORICAL BACKFILL ──────────────────────────────────────────────────────
+@router.post("/data/backfill")
+async def backfill_historical(years: int = 5):
+    """
+    Backfill historical OHLCV dari Invesgo ke PostgreSQL.
+    Invesgo punya data 15 tahun — jalankan sekali untuk mengisi DB.
+    Batching: 5 ticker per batch, delay 2 detik antar batch (anti rate-limit).
+    
+    Params:
+      years: jumlah tahun ke belakang (default 5, max 15)
+    """
+    import asyncio as _asyncio
+    from datetime import datetime as _dt, timedelta as _td
+    import httpx as _httpx
+
+    years = min(max(years, 1), 15)
+    today = _dt.now().strftime("%Y-%m-%d")
+    from_date = (_dt.now() - _td(days=years * 365)).strftime("%Y-%m-%d")
+
+    INVESGO_TOKEN = invesgo.INVESGO_API_KEY if hasattr(invesgo, 'INVESGO_API_KEY') else ""
+    try:
+        import os
+        INVESGO_TOKEN = os.environ.get("INVESGO_API_KEY", "")
+    except Exception:
+        pass
+
+    results = {"success": [], "failed": [], "skipped": []}
+    total_inserted = 0
+
+    async def backfill_one(ticker: str):
+        nonlocal total_inserted
+        try:
+            # Cek sudah ada berapa hari di DB
+            async with _AsyncSessionLocal() as db:
+                existing = await db.execute(sql_text(
+                    "SELECT COUNT(*) FROM ohlcv_daily WHERE ticker = :t"
+                ), {"t": ticker})
+                count = existing.scalar()
+
+            # Kalau sudah > years*200 hari, skip (sudah cukup)
+            if count >= years * 200:
+                results["skipped"].append({"ticker": ticker, "existing": count})
+                return
+
+            # Fetch dari Invesgo
+            ohlcv = await _asyncio.wait_for(
+                invesgo.get_ohlcv_daily(ticker, from_date=from_date, to_date=today),
+                timeout=30
+            )
+
+            if not ohlcv:
+                results["failed"].append({"ticker": ticker, "reason": "no data"})
+                return
+
+            # Batch insert ke PostgreSQL
+            inserted = 0
+            async with _AsyncSessionLocal() as db:
+                for candle in ohlcv:
+                    if not candle.get("close") or float(candle.get("close", 0)) <= 0:
+                        continue
+                    try:
+                        date_str = str(candle.get("date", ""))[:10]
+                        if not date_str or len(date_str) < 10:
+                            continue
+                        from datetime import datetime as _dtt
+                        candle_date = _dtt.strptime(date_str, "%Y-%m-%d").date()
+                        await db.execute(sql_text("""
+                            INSERT INTO ohlcv_daily (ticker, date, open, high, low, close, volume, created_at)
+                            VALUES (:ticker, :date, :open, :high, :low, :close, :volume, NOW())
+                            ON CONFLICT (ticker, date) DO UPDATE SET
+                            open=EXCLUDED.open, high=EXCLUDED.high,
+                            low=EXCLUDED.low, close=EXCLUDED.close,
+                            volume=EXCLUDED.volume
+                        """), {
+                            "ticker": ticker,
+                            "date": candle_date,
+                            "open": float(candle.get("open", 0) or 0),
+                            "high": float(candle.get("high", 0) or 0),
+                            "low": float(candle.get("low", 0) or 0),
+                            "close": float(candle.get("close", 0) or 0),
+                            "volume": int(float(candle.get("volume", 0) or 0)),
+                        })
+                        inserted += 1
+                    except Exception:
+                        continue
+                await db.commit()
+
+            total_inserted += inserted
+            results["success"].append({"ticker": ticker, "inserted": inserted, "total_candles": len(ohlcv)})
+
+        except Exception as e:
+            results["failed"].append({"ticker": ticker, "reason": str(e)[:100]})
+
+    # Batch 5 ticker per batch, delay 2 detik
+    tickers = DATA_WATCHLIST
+    for i in range(0, len(tickers), 5):
+        batch = tickers[i:i+5]
+        await _asyncio.gather(*[backfill_one(t) for t in batch])
+        if i + 5 < len(tickers):
+            await _asyncio.sleep(2)  # Anti rate-limit
+
+    return {
+        "status": "ok",
+        "years": years,
+        "from_date": from_date,
+        "to_date": today,
+        "total_inserted": total_inserted,
+        "success": len(results["success"]),
+        "failed": len(results["failed"]),
+        "skipped": len(results["skipped"]),
+        "details": results
+    }
+
 def _calc_atr(ohlcv, period=14):
     import numpy as np
     trs = []
