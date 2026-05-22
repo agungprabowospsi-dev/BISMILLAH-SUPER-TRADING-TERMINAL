@@ -48,9 +48,14 @@ def calculate_dynamic_sltp(
     tp_score_adj = 1.0 + (score_factor - 0.5) * 0.5
 
     # 4. Mode base multiplier
+    # FIX-5: intraday TP diperkecil — realistis untuk IDX range harian 1-2%
+    # intraday pakai ATR fraction (1/3 daily) via atr_fraction
+    atr_fraction = 1.0 / 3.0 if mode == 'intraday' else 1.0
+    atr = atr * atr_fraction  # Scale ATR untuk intraday
+
     mode_base = {
         'swing':    {'sl': 2.0, 'tp1': 2.0, 'tp2': 3.5, 'tp3': 5.5},
-        'intraday': {'sl': 1.2, 'tp1': 1.2, 'tp2': 2.0, 'tp3': 3.0},
+        'intraday': {'sl': 1.0, 'tp1': 1.0, 'tp2': 1.8, 'tp3': 2.8},  # FIX-5: TP realistis IDX
         'scalping': {'sl': 0.7, 'tp1': 0.7, 'tp2': 1.2, 'tp3': 1.8},
     }
     mb = mode_base.get(mode, mode_base['swing'])

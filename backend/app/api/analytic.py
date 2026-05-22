@@ -203,10 +203,25 @@ async def analyze(req: AnalyticRequest):
         lows = [c["low"] for c in ohlcv]
         volumes = [c["volume"] for c in ohlcv]
 
-        ma20 = sum(closes[-20:]) / 20 if len(closes) >= 20 else current
-        ma50 = sum(closes[-50:]) / 50 if len(closes) >= 50 else ma20
-        range_high_20 = max(highs[-20:]) if len(highs) >= 20 else current
-        range_low_20 = min(lows[-20:]) if len(lows) >= 20 else current
+        # FIX-2/3/4: Mode-aware setup metrics
+        if req.mode == "intraday":
+            # Intraday: lookback 3 hari, EMA9/EMA21, ATR dari range hari ini
+            lookback = min(3, len(closes))
+            ma20 = sum(closes[-9:]) / min(9, len(closes))   # EMA9 approx
+            ma50 = sum(closes[-21:]) / min(21, len(closes)) # EMA21 approx
+            range_high_20 = max(highs[-lookback:])
+            range_low_20  = min(lows[-lookback:])
+            # ATR intraday = rata2 (high-low) 3 hari terakhir
+            intraday_ranges = [highs[i] - lows[i] for i in range(-lookback, 0)]
+            atr_intraday = sum(intraday_ranges) / len(intraday_ranges) if intraday_ranges else atr
+            atr = atr_intraday  # Override ATR dengan intraday ATR
+        else:
+            # Swing/scalping: lookback 20 hari seperti biasa
+            ma20 = sum(closes[-20:]) / 20 if len(closes) >= 20 else current
+            ma50 = sum(closes[-50:]) / 50 if len(closes) >= 50 else ma20
+            range_high_20 = max(highs[-20:]) if len(highs) >= 20 else current
+            range_low_20  = min(lows[-20:]) if len(lows) >= 20 else current
+
         avg_vol_20 = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else max(volumes[-1], 1)
         rvol = volumes[-1] / avg_vol_20 if avg_vol_20 else 1
 
@@ -248,8 +263,8 @@ async def analyze(req: AnalyticRequest):
         # ───────────────────────────────────────────────────────────
 
         # Hitung SL/TP sederhana
-        atr = _calc_atr(ohlcv)
-        sl_mult = {"swing": 2.0, "daytrading": 1.5, "scalping": 1.0}.get(req.mode, 1.5)
+        atr = _calc_atr(ohlcv)  # Base ATR daily, bisa di-override untuk intraday
+        sl_mult = {"swing": 2.0, "intraday": 1.5, "scalping": 1.0}.get(req.mode, 1.5)  # FIX-1: daytrading→intraday
 
         entry = current
         sl    = round(entry - atr * sl_mult, 0)
