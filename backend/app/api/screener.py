@@ -342,7 +342,9 @@ async def build_universe(mode: Mode) -> List[Dict[str, Any]]:
 
     # Naikkan universe — BFD pre-sort akan filter yang terbaik
     # SWING butuh universe lebih besar karena cari quiet accumulation
-    limit = {"swing": 600, "intraday": 400, "scalping": 200}.get(mode, 400)
+    # Universe size dibatasi untuk menghindari rate limit Invesgo
+    # Semaphore(10) × ~3 detik per request = ~30 detik per batch
+    limit = {"swing": 300, "intraday": 200, "scalping": 150}.get(mode, 200)
     return filtered[:limit]
 
 
@@ -623,7 +625,7 @@ def calc_bfd_presort_score(candidate, mode="swing"):
 
 
 async def ohlcv_prefilter(universe: List[Dict[str, Any]], mode: Mode, filter_intensity: int = 75) -> List[Dict[str, Any]]:
-    sem = asyncio.Semaphore(30)
+    sem = asyncio.Semaphore(10)  # Rate limit Invesgo — max 10 paralel
     tasks = [prefilter_one(stock, mode, sem, filter_intensity) for stock in universe]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
