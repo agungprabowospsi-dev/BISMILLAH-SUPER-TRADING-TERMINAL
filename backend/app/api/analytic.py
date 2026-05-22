@@ -419,6 +419,27 @@ Top Losers: {", ".join([s.get("code","") for s in (top_loser[:3] if top_loser el
             logger.debug(f"[REGIME] skip: {regime_err}")
             market_regime_context = ""
 
+        # PT-3: Price Distribution Analysis
+        price_dist = {}
+        price_dist_context = ""
+        try:
+            from app.engines.price_distribution_engine import analyze_price_distribution
+            from datetime import datetime as _dt_pd
+            _today_pd = _dt_pd.now().strftime("%Y-%m-%d")
+            pt_data = await invesgo.get_price_table(req.ticker, date=_today_pd)
+            if pt_data and len(pt_data) >= 2:
+                price_dist = analyze_price_distribution(pt_data)
+                pd_signal = price_dist.get("signal", "NEUTRAL")
+                pd_score  = price_dist.get("score", 50)
+                poc       = price_dist.get("poc_price", 0)
+                if pd_signal == "ACCUMULATION":
+                    go_reasons.append(f"Price Distribution ACCUMULATION (score {pd_score:.0f}) — bandar absorb di {price_dist.get('accumulation_count',0)} level, POC {poc}")
+                elif pd_signal == "DISTRIBUTION":
+                    no_go_reasons.append(f"Price Distribution DISTRIBUTION (score {pd_score:.0f}) — distribusi di {price_dist.get('distribution_count',0)} level")
+                price_dist_context = f"=== PRICE DISTRIBUTION {req.ticker} ===\nSignal: {pd_signal} | Score: {pd_score:.0f} | POC: {poc}\nNet Bias: {price_dist.get('net_bias')} | Ratio: {price_dist.get('net_ratio',0)*100:.1f}%\nAbsorption: {price_dist.get('accumulation_count',0)} level | Distribution: {price_dist.get('distribution_count',0)} level\n"
+        except Exception as pd_err:
+            logger.debug(f"[PRICE_DIST] skip: {pd_err}")
+
         # INT-4: Foreign flow ticker spesifik
         foreign_flow_context = ""
         foreign_signal = "NEUTRAL"
@@ -471,6 +492,7 @@ Setup Reason: {setup_reason}
 Engine: {all_engines.get('bullish_count', 0)} bullish, {all_engines.get('bearish_count', 0)} bearish dari 10 engines
 {market_regime_context}
 {foreign_flow_context}
+{price_dist_context}
 Phase2: {wyckoff_phase} | Weinstein: {weinstein_stage} | VSA: {vsa_signal} | Verdict: {phase2_verdict}
 Screener: {f"Grade {req.screener_context.grade} Score {req.screener_context.score:.1f} Phase {req.screener_context.phase}" if req.screener_context and req.screener_context.grade else "Direct analysis (no screener context)"}
 LQ45 Change: {lq45_chg:+.2f}% | Market Breadth: {breadth:.0f}%
@@ -538,6 +560,8 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "weinstein_stage":   weinstein_stage,
             "vsa_signal":        vsa_signal,
             "foreign_signal":    foreign_signal if 'foreign_signal' in locals() else "N/A",
+            "price_distribution": price_dist if 'price_dist' in locals() else {},
+            "poc_price":         price_dist.get("poc_price", 0) if 'price_dist' in locals() and price_dist else 0,
             "foreign_net_bil":   round(foreign_net_val / 1e9, 2) if 'foreign_net_val' in locals() else 0,
             "lq45_change":       round(lq45_chg, 2) if 'lq45_chg' in locals() else 0,
             "market_breadth":    round(breadth, 1) if 'breadth' in locals() else 50,

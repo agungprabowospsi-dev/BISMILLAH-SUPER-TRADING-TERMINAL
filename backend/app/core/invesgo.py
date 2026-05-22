@@ -219,7 +219,18 @@ async def get_company_info(ticker: str) -> dict:
             await _cache_set(f"company:{ticker}", _json.dumps(data), ttl=86400)
         return data
 
-async def get_price_table(ticker: str) -> dict:
+async def get_price_table(ticker: str, date: str = None) -> list:
+    """Price distribution table per level harga. RC: cache 30 menit."""
+    from datetime import datetime as _dt
+    _date = date or _dt.now().strftime("%Y-%m-%d")
+    cache_key = f"price_table:{ticker}:{_date}"
+    cached = await _cache_get(cache_key)
+    if cached:
+        try:
+            import json as _j
+            return _j.loads(cached)
+        except Exception:
+            pass
     """Price table"""
     from datetime import datetime
     today = datetime.now().strftime("%Y-%m-%d")
@@ -230,7 +241,11 @@ async def get_price_table(ticker: str) -> dict:
             params={"date": today}
         )
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+        if data:
+            import json as _j
+            await _cache_set(cache_key, _j.dumps(data), ttl=1800)
+        return data if isinstance(data, list) else []
 
 
 async def get_ksei_ownership(ticker: str, range_months: int = 3) -> list:
