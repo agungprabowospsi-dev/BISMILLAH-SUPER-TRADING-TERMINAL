@@ -40,6 +40,23 @@ except Exception:
     get_bandar_early_score = None
     apply_akumulasi_multiplier = None
 
+# SC-1: Fallback apply_akumulasi_multiplier — cegah crash jika import gagal
+def _safe_akumulasi_multiplier(score: float, akumulasi_score: float, mode: str) -> float:
+    """Fallback jika apply_akumulasi_multiplier tidak tersedia"""
+    if apply_akumulasi_multiplier is not None:
+        try:
+            return apply_akumulasi_multiplier(score, akumulasi_score, mode)
+        except Exception:
+            pass
+    # Fallback manual: akumulasi_score > 65 → bonus kecil
+    if akumulasi_score >= 70:
+        return min(100.0, score * 1.05)
+    elif akumulasi_score >= 60:
+        return min(100.0, score * 1.02)
+    elif akumulasi_score < 35:
+        return score * 0.95
+    return score
+
 try:
     from app.core.redis_client import cache_get, cache_set
 except Exception:
@@ -814,15 +831,23 @@ def bucket_engine_scores(scores: Dict[str, float]) -> Dict[str, float]:
 
     for name, score in scores.items():
         n = name.lower()
-        if any(x in n for x in ("execution", "entry", "risk", "order", "liquidity", "setup")):
+        # SC-3: keyword diperluas untuk engine IDX (BandarTypeClassifier, RetestClassifier, dll)
+        if any(x in n for x in ("execution", "entry", "risk", "order", "liquidity", "setup",
+                                  "retest", "retestclassifier", "support_resistance", "priceaction")):
             buckets["execution"].append(score)
-        elif any(x in n for x in ("volume", "rvol", "vpa", "frequency")):
+        elif any(x in n for x in ("volume", "rvol", "vpa", "frequency", "volumeintelligence",
+                                   "volume_intelligence")):
             buckets["volume"].append(score)
-        elif any(x in n for x in ("structure", "trend", "support", "resistance", "breakout", "wyckoff")):
+        elif any(x in n for x in ("structure", "trend", "support", "resistance", "breakout",
+                                   "wyckoff", "weinstein", "marketstructure", "market_structure",
+                                   "trendstructure", "trend_structure")):
             buckets["market_structure"].append(score)
-        elif any(x in n for x in ("smart", "money", "bandar", "accum", "foreign", "institution")):
+        elif any(x in n for x in ("smart", "money", "bandar", "accum", "foreign", "institution",
+                                   "bandartypeclassifier", "bandartype", "smartmoney", "smart_money",
+                                   "momentumstrength", "momentum_strength")):
             buckets["smart_money"].append(score)
-        elif any(x in n for x in ("decision", "control", "confidence", "signal")):
+        elif any(x in n for x in ("decision", "control", "confidence", "signal",
+                                   "tpprobability", "tp_probability", "enrichment")):
             buckets["decision"].append(score)
 
     # Fallback: spread global average if buckets are empty.
@@ -1550,7 +1575,7 @@ def final_score(mode: Mode, engine_score: float, bandarm_score: float, foreign_s
         + (rag_boost * 12.5) * w["rag"]  # rag_boost 0-8 normalized to 0-100
     )
     # Fase 2B akumulasi multiplier — adaptive per mode
-    score = apply_akumulasi_multiplier(score, akumulasi_score, mode)
+    score = _safe_akumulasi_multiplier(score, akumulasi_score, mode)  # SC-1: safe wrapper
     return round(clamp(score), 2)
 
 
@@ -1579,6 +1604,43 @@ def build_reason(item: Dict[str, Any]) -> str:
     return "; ".join(bits)
 
 
+async def _get_real_foreign_flow(ticker: str, ohlcv: list, bandarm: dict) -> dict:
+    """SC-2: Foreign flow real dari broker_summary — fallback ke proxy"""
+    FOREIGN_BROKERS_SET = {"YP","BK","RX","ZP","AK","CC","DB","MS","CS","ML","DP","KI","OD","LG"}
+    try:
+        broker_data = await asyncio.wait_for(
+            invesgo_call("get_broker_summary", ticker), timeout=8
+        )
+        if broker_data and isinstance(broker_data, list):
+            f_buy = 0.0; f_sell = 0.0; f_net = 0.0
+            for b in broker_data:
+                code = b.get("code", "")
+                if code in FOREIGN_BROKERS_SET:
+                    f_buy  += float(b.get("buy_value",  0) or 0)
+                    f_sell += float(b.get("sell_value", 0) or 0)
+                    f_net  += float(b.get("net_value",  0) or 0)
+            if f_buy + f_sell > 0:
+                if f_net > 2e9:   signal, score = "BUY", 80
+                elif f_net > 0:   signal, score = "NEUTRAL_BUY", 65
+                elif f_net < -2e9: signal, score = "SELL", 25
+                elif f_net < 0:   signal, score = "NEUTRAL_SELL", 42
+                else:             signal, score = "NEUTRAL", 50
+                heavy_sell = signal == "SELL" and bandarm.get("phase") in {"distribution","decline"}
+                return {
+                    "score": round(min(100,max(0,score)),2),
+                    "signal": signal, "streak": 0,
+                    "heavy_sell": heavy_sell,
+                    "source": "broker_summary",
+                    "foreign_net_bil": round(f_net/1e9,2),
+                    "foreign_buy_bil": round(f_buy/1e9,2),
+                    "foreign_sell_bil": round(f_sell/1e9,2),
+                }
+    except Exception:
+        pass
+    proxy = calculate_foreign_flow_proxy(ohlcv, bandarm)
+    proxy["source"] = "proxy_fallback"
+    return proxy
+
 async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Semaphore) -> Optional[Dict[str, Any]]:
     async with semaphore:
         ticker = candidate["ticker"]
@@ -1599,7 +1661,7 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             change_pct=to_float(candidate.get("change_pct")),
         )
 
-        foreign = calculate_foreign_flow_proxy(ohlcv, bandarm)
+        foreign = await _get_real_foreign_flow(ticker, ohlcv, bandarm)  # SC-2
         pattern = calculate_pattern_bonus(mode, ohlcv)
 
         # Fase 2B — Bandar Early Detection (harus sebelum rag)
