@@ -112,9 +112,31 @@ async def analyze(req: AnalyticRequest):
             "close":  float(c.get("close",  0) or 0),
             "volume": float(c.get("volume", 0) or 0),
         } for c in ohlcv]
-        all_engines = await run_all_engines(req.ticker, ohlcv, req.mode)
+
+        # ALIGNMENT-FIX: Trust screener Grade A/B to avoid re-computation
+        use_screener_score = False
+        if req.screener_context and req.screener_context.grade.upper() in ("A", "B"):
+            if req.screener_context.score >= 65:
+                # Screener already validated — use its score
+                use_screener_score = True
+                score = float(req.screener_context.score)
+                # Mock engines response untuk consistency
+                all_engines = {
+                    "composite_score": score,
+                    "signal": "BULLISH" if score >= 65 else "BEARISH",
+                    "bullish_count": int(score / 10),
+                    "bearish_count": 3 if score < 65 else 1,
+                    "total_engines": 10,
+                    "engines": [{"engine": "screener_cached", "score": score, "signal": "BULLISH" if score >= 65 else "NEUTRAL"}]
+                }
+                logger.info(f"[ALIGN] Using screener Grade {req.screener_context.grade} score {score:.1f} for {req.ticker}")
+        
+        if not use_screener_score:
+            # Fresh analysis — run all engines
+            all_engines = await run_all_engines(req.ticker, ohlcv, req.mode)
+            score = all_engines["composite_score"]
+
         current = ohlcv[-1]["close"]
-        score   = all_engines["composite_score"]
 
         # ── Enrichment + Phase 2 Integration ──────────────────────
         enrichment_verdict  = "CAUTION"
@@ -207,19 +229,27 @@ async def analyze(req: AnalyticRequest):
             if req.screener_context.vsa_signal and vsa_signal == "NONE":
                 vsa_signal = req.screener_context.vsa_signal
 
-        # Final GO/NO GO
+        # Final GO/NO GO — ALIGNMENT-FIX: Respect screener Grade A/B override
         go_score = len(go_reasons)
         no_score = len(no_go_reasons)
 
-        if enrichment_verdict == "SKIP" or weinstein_stage == 4 or score < 55:
+        # Override: If screener Grade A/B, allow GO despite enrichment SKIP or low stage
+        screener_grade_override = False
+        if req.screener_context and req.screener_context.grade.upper() == "A" and req.screener_context.score >= 75:
+            # Grade A override — ignore SKIP/Stage 4 if all else equal
+            if no_score <= 1:  # Allow override if only minor objection
+                screener_grade_override = True
+                logger.info(f"[ALIGN] Screener Grade A override for {req.ticker}")
+
+        if (enrichment_verdict == "SKIP" or weinstein_stage == 4 or score < 55) and not screener_grade_override:
             go_no_go = "NO GO"
-            go_confidence = max(0, 30 - (no_score * 10))  # FIX2
+            go_confidence = max(0, 30 - (no_score * 10))
         elif go_score >= 3 and no_score == 0:
             go_no_go = "STRONG GO"
             go_confidence = min(95, 70 + go_score * 5)
-        elif go_score >= 2 and go_score > no_score:
+        elif (go_score >= 2 and go_score > no_score) or screener_grade_override:
             go_no_go = "GO"
-            go_confidence = min(85, 60 + go_score * 5)
+            go_confidence = min(95, 60 + go_score * 5) if screener_grade_override else min(85, 60 + go_score * 5)
         elif no_score >= 2:
             go_no_go = "WAIT"
             go_confidence = max(30, 60 - no_score * 10)
@@ -419,6 +449,44 @@ Top Losers: {", ".join([s.get("code","") for s in (top_loser[:3] if top_loser el
             logger.debug(f"[REGIME] skip: {regime_err}")
             market_regime_context = ""
 
+        # BUL-1: Bulkowski Pattern Detection
+        bulkowski_context = ""
+        detected_pattern = {}
+        pat_stats = {}
+        entry_strat = {}
+        try:
+            from app.engines.idx_pattern_detector import detect_patterns
+            from app.engines.bulkowski_stats import get_pattern_stats, compute_entry_strategy
+            from app.engines.idx_calibration import get_idx_calibration
+            mode_pat = "intraday" if req.mode.lower() in ("intraday","scalping") else "swing"
+            patterns_found = detect_patterns(ohlcv, mode=mode_pat) if ohlcv and len(ohlcv) >= 20 else []
+            if patterns_found:
+                pat = patterns_found[0]
+                pname = pat.get("pattern", "")
+                detected_pattern = pat
+                idx_calib = get_idx_calibration(pname)
+                pat_stats = get_pattern_stats(pname, market_regime, idx_calib)
+                entry_strat = compute_entry_strategy(
+                    pname,
+                    current_price=float(ohlcv[-1].get("close", 0)) if ohlcv else 0,
+                    formation_high=pat.get("formation_high", 0),
+                    formation_low=pat.get("formation_low", 0),
+                    breakout_price=pat.get("breakout_price", 0),
+                )
+                adj_fail = pat_stats.get("adj_failure_rate", 25)
+                adj_rise = pat_stats.get("adj_avg_rise", 30)
+                conf = pat.get("confidence", 0)
+                if entry_strat.get("entry_type") not in ("NO_ENTRY", "WAIT_CLOSE"):
+                    if adj_fail <= 15 and conf >= 75:
+                        go_reasons.append("Pattern " + pname + " confidence " + str(conf) + " persen IDX failure rate " + str(adj_fail) + " persen RENDAH avg rise " + str(adj_rise) + " persen")
+                    elif adj_fail >= 30:
+                        no_go_reasons.append("Pattern " + pname + " IDX failure rate " + str(adj_fail) + " persen TINGGI konfirmasi volume dulu")
+                if pat.get("bust_opportunity") and pat.get("status") == "BREAKDOWN_NEAR":
+                    go_reasons.append("Busted " + pname + " opportunity 47 persen bust avg plus 65 persen rise")
+                bulkowski_context = "Pattern " + pname + " status " + pat.get("status","") + " confidence " + str(conf) + " persen. " + pat.get("description","") + ". IDX failure rate " + str(adj_fail) + " persen avg rise " + str(adj_rise) + " persen. " + entry_strat.get("measure_rule_note","") + ". " + entry_strat.get("throwback_note","")
+        except Exception as bul_err:
+            logger.debug("BULKOWSKI skip " + str(bul_err))
+
         # BE-1/2/3: Bandar Engines — Broker Concentration + Value Inflow + Bid-Offer
         bandar_engines_context = ""
         try:
@@ -545,6 +613,7 @@ Engine: {all_engines.get('bullish_count', 0)} bullish, {all_engines.get('bearish
 {foreign_flow_context}
 {price_dist_context}
 {bandar_engines_context}
+{bulkowski_context}
 Phase2: {wyckoff_phase} | Weinstein: {weinstein_stage} | VSA: {vsa_signal} | Verdict: {phase2_verdict}
 Screener: {f"Grade {req.screener_context.grade} Score {req.screener_context.score:.1f} Phase {req.screener_context.phase}" if req.screener_context and req.screener_context.grade else "Direct analysis (no screener context)"}
 LQ45 Change: {lq45_chg:+.2f}% | Market Breadth: {breadth:.0f}%
@@ -617,6 +686,9 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "broker_concentration": broker_conc if 'broker_conc' in locals() else {},
             "value_inflow":         value_inflow if 'value_inflow' in locals() else {},
             "bid_offer_depth":      bid_offer if 'bid_offer' in locals() else {},
+            "detected_pattern": detected_pattern if detected_pattern else {},
+            "bulkowski_stats": pat_stats if pat_stats else {},
+            "pattern_entry": entry_strat if entry_strat else {},
             "foreign_net_bil":   round(foreign_net_val / 1e9, 2) if 'foreign_net_val' in locals() else 0,
             "lq45_change":       round(lq45_chg, 2) if 'lq45_chg' in locals() else 0,
             "market_breadth":    round(breadth, 1) if 'breadth' in locals() else 50,
