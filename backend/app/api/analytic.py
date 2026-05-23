@@ -324,15 +324,67 @@ async def analyze(req: AnalyticRequest):
         # ───────────────────────────────────────────────────────────
 
         # Hitung SL/TP sederhana
-        atr = _calc_atr(ohlcv)  # Base ATR daily, bisa di-override untuk intraday
-        sl_mult = {"swing": 2.0, "intraday": 1.5, "scalping": 1.0}.get(req.mode, 1.5)  # FIX-1: daytrading→intraday
+        atr = _calc_atr(ohlcv)
+        sl_mult = {"swing": 2.0, "intraday": 1.5, "scalping": 1.0}.get(req.mode, 1.5)
 
-        entry = current
-        sl    = round(entry - atr * sl_mult, 0)
-        tp1   = round(entry + atr * sl_mult * 1.5, 0)
-        tp2   = round(entry + atr * sl_mult * 2.5, 0)
-        tp3   = round(entry + atr * sl_mult * 4.0, 0)
-        rr    = round((tp1 - entry) / (entry - sl), 2) if entry != sl else 0
+        # Jika Bulkowski pattern entry tersedia dan lebih akurat, pakai itu
+        # Jika tidak, hitung entry berdasarkan setup_type
+        if entry_strat and entry_strat.get("entry_type") not in ("NO_ENTRY", "WAIT_CLOSE", ""):
+            # Bulkowski Measure Rule entry
+            entry = entry_strat.get("entry_price", current)
+            sl    = entry_strat.get("stop_loss", round(entry - atr * sl_mult, 0))
+            tp1   = entry_strat.get("take_profit_1", round(entry + atr * sl_mult * 1.5, 0))
+            tp2   = entry_strat.get("take_profit_2", round(entry + atr * sl_mult * 2.5, 0))
+            tp3   = entry_strat.get("take_profit_3", round(entry + atr * sl_mult * 4.0, 0))
+            entry_method = "BULKOWSKI_MEASURE_RULE"
+        elif setup_type == "bullish_accumulation":
+            # Limit order di POC level — bukan market order
+            poc = price_dist.get("poc_price", 0) if price_dist else 0
+            entry = round(poc if poc > 0 else current * 0.99, 0)
+            sl    = round(entry - atr * sl_mult, 0)
+            tp1   = round(entry + atr * sl_mult * 1.5, 0)
+            tp2   = round(entry + atr * sl_mult * 2.5, 0)
+            tp3   = round(entry + atr * sl_mult * 4.0, 0)
+            entry_method = "LIMIT_AT_POC"
+        elif setup_type == "bullish_pullback":
+            # Limit order di MA20 atau EMA9
+            ma20 = sum(c["close"] for c in ohlcv[-20:]) / 20 if len(ohlcv) >= 20 else current
+            ema9 = sum(c["close"] for c in ohlcv[-9:]) / 9 if len(ohlcv) >= 9 else current
+            ma_level = ema9 if req.mode.lower() == "intraday" else ma20
+            entry = round(ma_level, 0)
+            sl    = round(entry - atr * sl_mult, 0)
+            tp1   = round(entry + atr * sl_mult * 1.5, 0)
+            tp2   = round(entry + atr * sl_mult * 2.5, 0)
+            tp3   = round(entry + atr * sl_mult * 4.0, 0)
+            entry_method = "LIMIT_AT_MA"
+        elif setup_type == "bullish_breakout":
+            # BUY STOP di atas resistance
+            recent_high = max(c["high"] for c in ohlcv[-20:]) if len(ohlcv) >= 20 else current
+            entry = round(recent_high * 1.005, 0)
+            sl    = round(recent_high - atr * sl_mult, 0)
+            tp1   = round(entry + atr * sl_mult * 1.5, 0)
+            tp2   = round(entry + atr * sl_mult * 2.5, 0)
+            tp3   = round(entry + atr * sl_mult * 4.0, 0)
+            entry_method = "BUY_STOP_BREAKOUT"
+        elif setup_type in ("bearish_distribution", "bearish_continuation", "bearish_reversal", "bearish_breakdown"):
+            # Bearish: NO ENTRY untuk long — set entry current tapi tandai
+            entry = current
+            sl    = round(entry - atr * sl_mult, 0)
+            tp1   = round(entry + atr * sl_mult * 1.5, 0)
+            tp2   = round(entry + atr * sl_mult * 2.5, 0)
+            tp3   = round(entry + atr * sl_mult * 4.0, 0)
+            entry_method = "NO_LONG_ENTRY"
+            no_go_reasons.append("Setup " + setup_type + " — tidak ada entry long yang valid")
+        else:
+            # Default: market order di current price
+            entry = current
+            sl    = round(entry - atr * sl_mult, 0)
+            tp1   = round(entry + atr * sl_mult * 1.5, 0)
+            tp2   = round(entry + atr * sl_mult * 2.5, 0)
+            tp3   = round(entry + atr * sl_mult * 4.0, 0)
+            entry_method = "MARKET_ORDER"
+
+        rr = round((tp1 - entry) / (entry - sl), 2) if entry != sl else 0
 
         # SW-2: RR < 1.0 → force NO GO — setup tidak layak
         if rr < 1.0 and rr > 0:
@@ -690,6 +742,7 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "detected_pattern": detected_pattern if detected_pattern else {},
             "bulkowski_stats": pat_stats if pat_stats else {},
             "pattern_entry": entry_strat if entry_strat else {},
+            "entry_method": entry_method if 'entry_method' in locals() else "MARKET_ORDER",
             "foreign_net_bil":   round(foreign_net_val / 1e9, 2) if 'foreign_net_val' in locals() else 0,
             "lq45_change":       round(lq45_chg, 2) if 'lq45_chg' in locals() else 0,
             "market_breadth":    round(breadth, 1) if 'breadth' in locals() else 50,
