@@ -353,83 +353,142 @@ def sector_allowed(mode: Mode, sector: str) -> bool:
 
 async def build_universe(mode: str) -> list:
     """
-    Phase 1 Universe Filter — berbasis kriteria likuiditas, bukan jumlah arbitrer.
-    Gate 1: active status (bukan suspended/delisted)
-    Gate 2: bukan warrant/right (-W/-R suffix)
+    Phase 1 Universe Filter — berbasis kriteria likuiditas + index membership.
+    Gate 1: active status
+    Gate 2: bukan warrant/right
     Gate 3: sector filter per mode
-    Gate 4: liquidity pre-score dari intraday value + freq (async, best-effort)
-    Output: semua saham yang lolos gate, diurutkan by liquidity tier
+    Gate 4: LQ45/MSCI priority + liquidity filter (value IDR + freq)
     """
     import asyncio
+    import json as _j
+
+    # LQ45 + MSCI Indonesia intersection — hardcoded sebagai ground truth
+    # Update setiap rebalancing (Feb, Apr, Jun, Aug, Oct, Dec)
+    TIER0_TICKERS = {
+        "BBCA","BBRI","BMRI","TLKM","ASII","ADRO","ANTM","BYAN",
+        "ICBP","INDF","KLBF","MAPI","MDKA","PTBA","SMGR","UNVR",
+        "AMMN","PGAS","GOTO","EXCL","BMRI","INCO","MEDC","NIKEL",
+        "TOWR","BUKA","EMTK","MNCN","SCMA","SIDO","LSIP","AALI",
+        "HRUM","ESSA","ACES","BBNI","BJBR","BSDE","CPIN","GGRM",
+        "HMSP","ICBP","INKP","INTP","ITMG","JPFA","JSMR","KLBF",
+    }
+
+    # LQ45 only (tidak masuk MSCI) — tier 1
+    TIER1_TICKERS = {
+        "AKRA","AMRT","BRPT","CTRA","ERAA","FILM","HEAL",
+        "HRTA","ISAT","ITMG","JPFA","JSMR","MYOR","PGEO",
+        "SMRA","TBIG","TKIM","TLKM","ULTJ","WIFI",
+    }
 
     stocks = await get_stock_list_safe()
     if not stocks:
         stocks = fallback_stock_universe()
 
-    # Gate 1: filter suspended dan non-active
+    # Gate 1: drop suspended/delisted
     stocks = [s for s in stocks if s.get("active", True) is not False]
 
-    # Gate 2: filter warrant dan right
+    # Gate 2: drop warrant/right/serial
     stocks = [s for s in stocks
-              if "-" not in str(s.get("ticker", ""))
-              and not str(s.get("ticker", "")).endswith(("W", "R", "S"))]
+              if "-" not in str(s.get("ticker",""))
+              and not str(s.get("ticker","")).endswith(("W","R","S"))]
 
-    # Gate 3: sector filter (keep existing arg order: mode, sector)
-    stocks = [s for s in stocks if sector_allowed(mode, s.get("sector", ""))]
+    # Gate 3: sector filter
+    stocks = [s for s in stocks if sector_allowed(mode, s.get("sector",""))]
 
-    # Gate 4: liquidity pre-scoring dari intraday data (top 200 saja untuk hemat API)
-    MAX_INTRADAY_CHECK = 200
-    candidates = stocks[:MAX_INTRADAY_CHECK]
-    rest = stocks[MAX_INTRADAY_CHECK:]
+    # Pre-assign tier dari hardcoded list (tidak tergantung cache)
+    for s in stocks:
+        t = s.get("ticker","").upper()
+        if t in TIER0_TICKERS:
+            s["_idx_tier"] = 0
+        elif t in TIER1_TICKERS:
+            s["_idx_tier"] = 1
+        else:
+            s["_idx_tier"] = 2
+
+    # Gate 4: liquidity scoring — semua ticker, bukan hanya 200 pertama
+    # Tapi batasi API call: tier0+tier1 semua, tier2 maksimal 150
+    tier0 = [s for s in stocks if s["_idx_tier"] == 0]
+    tier1 = [s for s in stocks if s["_idx_tier"] == 1]
+    tier2 = [s for s in stocks if s["_idx_tier"] == 2][:150]
+    to_score = tier0 + tier1 + tier2
 
     async def score_liquidity(stock):
-        ticker = stock.get("ticker", "")
+        ticker = stock.get("ticker","")
         try:
             intraday = await invesgo.get_ohlcv_intraday(ticker, market="RG")
             if not intraday:
-                return {**stock, "_liq_value": 0, "_liq_freq": 0, "_liq_tier": 2}
+                return {**stock, "_liq_value": 0, "_liq_freq": 0}
             value = float(intraday.get("value", 0) or 0)
             freq  = float(intraday.get("freq",  0) or 0)
-            # Index membership bonus — reuse cached info if warm
+            # Enrich tier dari category jika ada di cache
             info_cached = await invesgo._cache_get(f"info:{ticker}")
-            tier = 2
-            if info_cached:
-                import json as _j
+            if info_cached and stock["_idx_tier"] == 2:
                 try:
                     info = _j.loads(info_cached)
                     cats = info.get("category", []) or []
-                    if any(c in cats for c in ["LQ45", "IDX30", "IDXBUMN30"]):
-                        tier = 0
-                    elif any(c in cats for c in ["IDX80", "IDXFINANCE", "IDXENERGY", "IDXINFRA"]):
-                        tier = 1
+                    if any(c in cats for c in ["LQ45","IDX30","IDXBUMN30","MSCI"]):
+                        stock["_idx_tier"] = 0
+                    elif any(c in cats for c in ["IDX80","IDXFINANCE","IDXENERGY"]):
+                        stock["_idx_tier"] = 1
                 except Exception:
                     pass
-            return {**stock, "_liq_value": value, "_liq_freq": freq, "_liq_tier": tier}
+            return {**stock, "_liq_value": value, "_liq_freq": freq}
         except Exception:
-            return {**stock, "_liq_value": 0, "_liq_freq": 0, "_liq_tier": 2}
+            return {**stock, "_liq_value": 0, "_liq_freq": 0}
 
     sem = asyncio.Semaphore(10)
-
     async def score_with_sem(stock):
         async with sem:
             return await score_liquidity(stock)
 
-    scored = await asyncio.gather(*[score_with_sem(s) for s in candidates])
+    scored = await asyncio.gather(*[score_with_sem(s) for s in to_score])
 
-    VALUE_THRESHOLD = {"swing": 1e9, "intraday": 5e9, "scalping": 10e9}
-    FREQ_THRESHOLD  = {"swing": 500, "intraday": 2000, "scalping": 5000}
-    val_min  = VALUE_THRESHOLD.get(mode, 1e9)
-    freq_min = FREQ_THRESHOLD.get(mode, 500)
+    # Thresholds per mode
+    VALUE_MIN = {"swing": 5e9, "intraday": 10e9, "scalping": 20e9}
+    FREQ_MIN  = {"swing": 1000, "intraday": 3000, "scalping": 5000}
+    val_min  = VALUE_MIN.get(mode, 5e9)
+    freq_min = FREQ_MIN.get(mode, 1000)
 
-    passed = [s for s in scored if s["_liq_value"] >= val_min and s["_liq_freq"] >= freq_min]
-    soft   = [s for s in scored if s["_liq_value"] > 0 and s not in passed]
+    # Tier 0+1 → lolos walau di bawah threshold (institutional grade)
+    # Tier 2 → harus lolos threshold
+    passed = []
+    soft   = []
+    dropped_tickers = set()
 
-    passed.sort(key=lambda x: (x["_liq_tier"], -x["_liq_value"]))
-    soft.sort(key=lambda x: (x["_liq_tier"], -x["_liq_value"]))
+    for s in scored:
+        tier   = s.get("_idx_tier", 2)
+        value  = s.get("_liq_value", 0)
+        freq   = s.get("_liq_freq", 0)
+        ticker = s.get("ticker","")
 
-    final = passed + soft + rest
+        if value == 0 and freq == 0 and tier == 2:
+            # Zero activity + bukan index member → DROP
+            dropped_tickers.add(ticker)
+        elif tier <= 1:
+            # LQ45/MSCI/IDX80 → selalu lolos (meski pasar sepi)
+            passed.append(s)
+        elif value >= val_min and freq >= freq_min:
+            # Non-index tapi liquid → lolos
+            passed.append(s)
+        elif value > 0 and freq > 100:
+            # Ada activity tapi di bawah threshold → soft
+            soft.append(s)
+        else:
+            dropped_tickers.add(ticker)
 
-    logger.info(f"[UNIVERSE] mode={mode} total={len(stocks)} passed_gate4={len(passed)} soft={len(soft)} rest={len(rest)}")
+    # Sort: tier dulu, lalu value DESC
+    passed.sort(key=lambda x: (x.get("_idx_tier",2), -x.get("_liq_value",0)))
+    soft.sort(key=lambda x: (x.get("_idx_tier",2), -x.get("_liq_value",0)))
+
+    final = passed + soft
+
+    logger.info(
+        f"[UNIVERSE] mode={mode} total_input={len(stocks)} "
+        f"scored={len(scored)} passed={len(passed)} soft={len(soft)} "
+        f"dropped={len(dropped_tickers)} "
+        f"tier0={len([s for s in passed if s.get('_idx_tier')==0])} "
+        f"tier1={len([s for s in passed if s.get('_idx_tier')==1])}"
+    )
 
     return final
 
