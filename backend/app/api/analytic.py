@@ -236,11 +236,15 @@ async def analyze(req: AnalyticRequest):
 
         # Override: If screener Grade A/B, allow GO despite enrichment SKIP or low stage
         screener_grade_override = False
-        if req.screener_context and req.screener_context.grade.upper() == "A" and req.screener_context.score >= 75:
-            # Grade A override — ignore SKIP/Stage 4 if all else equal
-            if no_score <= 1:  # Allow override if only minor objection
+        if req.screener_context and req.screener_context.grade:
+            sc_grade = req.screener_context.grade.upper()
+            sc_score = req.screener_context.score
+            # Grade A + score >= 75 → override score<55 dan no_score<=2
+            if sc_grade == "A" and sc_score >= 75 and no_score <= 2:
                 screener_grade_override = True
-                logger.info(f"[ALIGN] Screener Grade A override for {req.ticker}")
+            # Grade B + score >= 65 → override score<55 saja, no_score<=1
+            elif sc_grade == "B" and sc_score >= 65 and no_score <= 1:
+                screener_grade_override = True
 
         if (enrichment_verdict == "SKIP" or weinstein_stage == 4 or score < 55) and not screener_grade_override:
             go_no_go = "NO GO"
