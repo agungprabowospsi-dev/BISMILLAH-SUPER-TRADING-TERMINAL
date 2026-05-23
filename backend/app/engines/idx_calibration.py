@@ -1,6 +1,20 @@
 """idx_calibration.py — IDX calibration factors untuk Bulkowski baseline."""
 
-LQ45_TICKERS = ["BBCA","BBRI","BMRI","TLKM","ASII","MAPI","KLBF","INDF","ICBP","ANTM","ADRO","PTBA","PGAS","SMGR","LSIP","AALI","UNVR","SCMA","MNCN","BYAN"]
+# Tier 1: Intersection LQ45 + MSCI Indonesia — paling reliable untuk calibration
+MSCI_LQ45_INTERSECTION = [
+    "BBCA", "BBRI", "BMRI", "TLKM", "ASII",
+    "ADRO", "ANTM", "BYAN", "ICBP", "INDF",
+    "KLBF", "MAPI", "MDKA", "PTBA", "SMGR",
+    "UNVR", "AMMN", "PGAS", "GOTO", "EXCL",
+]
+
+# Tier 2: LQ45 only — dipakai jika sampel Tier 1 kurang
+LQ45_ONLY = [
+    "AALI", "LSIP", "SCMA", "MNCN", "EMTK",
+]
+
+# Primary calibration universe
+LQ45_TICKERS = MSCI_LQ45_INTERSECTION  # Use intersection for best accuracy
 
 IDX_CALIBRATION = {
     "DOUBLE_BOTTOM":         {"failure_rate_mult": 1.3, "avg_rise_mult": 0.85, "samples": 0},
