@@ -35,10 +35,14 @@ export async function checkHealth() {
   return apiFetch("/health");
 }
 
-export async function analyzeStock(ticker, mode = "swing") {
+export async function analyzeStock(ticker, mode = "swing", screener_context = null) {
   return apiFetch(`/api/analytic/analyze`, {
     method: "POST",
-    body: JSON.stringify({ ticker, mode: mode.toLowerCase() }),
+    body: JSON.stringify({
+      ticker,
+      mode: mode.toLowerCase(),
+      ...(screener_context ? { screener_context } : {}),
+    }),
   });
 }
 
