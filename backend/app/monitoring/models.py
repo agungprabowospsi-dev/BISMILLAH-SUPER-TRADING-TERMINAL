@@ -8,6 +8,15 @@ PositionStatus = Literal["open", "closed"]
 MonitoringDecision = Literal["HOLD", "EXIT", "WATCH"]
 
 
+class AnalyticContext(BaseModel):
+    """Decision context from analytic module"""
+    go_no_go: str = "WAIT"
+    go_confidence: float = 50.0
+    go_reasons: list = []
+    no_go_reasons: list = []
+    win_probability: float = 50.0
+
+
 class PositionCreate(BaseModel):
     ticker: str = Field(..., min_length=3, max_length=10)
     side: PositionSide = "long"
@@ -18,6 +27,8 @@ class PositionCreate(BaseModel):
     setup_type: Optional[str] = None
     source: Optional[str] = "analytic_tool"
     notes: Optional[str] = None
+    # ALIGN: Analytic context for entry decision
+    analytic_context: Optional[AnalyticContext] = None
 
 
 class PositionState(PositionCreate):

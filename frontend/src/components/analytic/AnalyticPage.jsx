@@ -412,7 +412,15 @@ export default function AnalyticPage() {
                 engine_scores:r.engines?.engines||{},
                 lq45_change:r.lq45_change||0,
                 breadth_ratio:r.market_breadth||50,
-                kb_context:r.rag_used?'rag_active':''
+                kb_context:r.rag_used?'rag_active':'',
+                // ALIGN: Pass GO/NO GO decision to monitoring
+                analytic_context: {
+                  go_no_go: r.go_no_go || 'WAIT',
+                  go_confidence: r.go_confidence || 50,
+                  go_reasons: r.go_reasons || [],
+                  no_go_reasons: r.no_go_reasons || [],
+                  win_probability: r.win_probability || 50
+                }
               })} className="btn-primary w-full flex items-center justify-center gap-2 mt-2">
                 Monitor Posisi<ArrowRight className="w-4 h-4"/>
               </button>

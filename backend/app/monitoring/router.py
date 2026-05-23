@@ -2,10 +2,11 @@ from fastapi import APIRouter, HTTPException
 from datetime import datetime
 from uuid import uuid4
 from typing import Dict, List
+import logging
 
-from app.monitoring.models import PositionCreate, PositionState, MonitoringSnapshot
+from app.monitoring.models import PositionCreate, PositionState, MonitoringSnapshot, AnalyticContext
 
-
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/monitoring", tags=["Sector Monitoring Tool"])
 
 POSITIONS: Dict[str, PositionState] = {}
@@ -45,6 +46,21 @@ def detect_decision(side: str, last_price: float, stop_loss: float, take_profit:
 
 @router.post("/positions", response_model=PositionState)
 def create_position(payload: PositionCreate):
+    # ALIGN: Validate entry decision based on analytic_context
+    if payload.analytic_context:
+        ctx = payload.analytic_context
+        logger.info(
+            f"[ALIGN] Position {payload.ticker} "
+            f"GO/NO GO: {ctx.go_no_go} ({ctx.go_confidence:.0f}% conf) "
+            f"Win Prob: {ctx.win_probability:.1f}% "
+            f"Reasons: GO={len(ctx.go_reasons)}, NO_GO={len(ctx.no_go_reasons)}"
+        )
+        # Warn if taking entry with low confidence
+        if ctx.go_no_go == "WAIT" and ctx.go_confidence < 40:
+            logger.warning(f"[ALIGN] Low confidence entry for {payload.ticker}: {ctx.go_confidence:.0f}%")
+        if ctx.go_no_go == "NO GO":
+            logger.warning(f"[ALIGN] Entering position against NO GO signal for {payload.ticker}")
+    
     rr_target = calculate_rr_target(
         payload.side,
         payload.entry_price,
@@ -57,6 +73,8 @@ def create_position(payload: PositionCreate):
         **payload.model_dump(),
         created_at=datetime.utcnow(),
         rr_target=rr_target,
+        # ALIGN: Store analytic context for exit decision logic
+        analytic_context=payload.analytic_context,
     )
 
     POSITIONS[position.id] = position
