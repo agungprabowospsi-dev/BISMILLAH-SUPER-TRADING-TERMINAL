@@ -368,7 +368,13 @@ export default function AnalyticPage() {
                 ['Take Profit 1', r.dynamic_sltp?.tp1 || r.tp1, 'text-accent-gold'],
                 ['Take Profit 2', r.dynamic_sltp?.tp2 || r.tp2, 'text-accent-gold'],
                 ['Take Profit 3', r.dynamic_sltp?.tp3 || r.tp3, 'text-accent-gold'],
-                ['Risk:Reward', r.risk_reward ? `1:${Number(r.risk_reward).toFixed(2)}` : null, 'text-accent-blue'],
+                [
+                  'Risk:Reward',
+                  (r.rr_ratio || r.risk_reward)
+                    ? `1:${Number(r.rr_ratio || r.risk_reward).toFixed(2)}`
+                    : null,
+                  'text-accent-blue'
+                ],
               ].filter(([,v]) => v).map(([k,v,c]) => (
                 <div key={k} className="flex justify-between items-center py-1.5 border-b border-border-dim last:border-0">
                   <span className="font-mono text-xs text-slate-500">{k}</span>
