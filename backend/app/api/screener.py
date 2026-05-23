@@ -351,18 +351,87 @@ def sector_allowed(mode: Mode, sector: str) -> bool:
     return any(allowed in s for allowed in SCALPING_SECTORS)
 
 
-async def build_universe(mode: Mode) -> List[Dict[str, Any]]:
+async def build_universe(mode: str) -> list:
+    """
+    Phase 1 Universe Filter — berbasis kriteria likuiditas, bukan jumlah arbitrer.
+    Gate 1: active status (bukan suspended/delisted)
+    Gate 2: bukan warrant/right (-W/-R suffix)
+    Gate 3: sector filter per mode
+    Gate 4: liquidity pre-score dari intraday value + freq (async, best-effort)
+    Output: semua saham yang lolos gate, diurutkan by liquidity tier
+    """
+    import asyncio
+
     stocks = await get_stock_list_safe()
     if not stocks:
         stocks = fallback_stock_universe()
-    filtered = [s for s in stocks if sector_allowed(mode, s.get("sector", ""))]
 
-    # Naikkan universe — BFD pre-sort akan filter yang terbaik
-    # SWING butuh universe lebih besar karena cari quiet accumulation
-    # Universe size dibatasi untuk menghindari rate limit Invesgo
-    # Semaphore(10) × ~3 detik per request = ~30 detik per batch
-    limit = {"swing": 300, "intraday": 200, "scalping": 150}.get(mode, 200)
-    return filtered[:limit]
+    # Gate 1: filter suspended dan non-active
+    stocks = [s for s in stocks if s.get("active", True) is not False]
+
+    # Gate 2: filter warrant dan right
+    stocks = [s for s in stocks
+              if "-" not in str(s.get("ticker", ""))
+              and not str(s.get("ticker", "")).endswith(("W", "R", "S"))]
+
+    # Gate 3: sector filter (keep existing arg order: mode, sector)
+    stocks = [s for s in stocks if sector_allowed(mode, s.get("sector", ""))]
+
+    # Gate 4: liquidity pre-scoring dari intraday data (top 200 saja untuk hemat API)
+    MAX_INTRADAY_CHECK = 200
+    candidates = stocks[:MAX_INTRADAY_CHECK]
+    rest = stocks[MAX_INTRADAY_CHECK:]
+
+    async def score_liquidity(stock):
+        ticker = stock.get("ticker", "")
+        try:
+            intraday = await invesgo.get_ohlcv_intraday(ticker, market="RG")
+            if not intraday:
+                return {**stock, "_liq_value": 0, "_liq_freq": 0, "_liq_tier": 2}
+            value = float(intraday.get("value", 0) or 0)
+            freq  = float(intraday.get("freq",  0) or 0)
+            # Index membership bonus — reuse cached info if warm
+            info_cached = await invesgo._cache_get(f"info:{ticker}")
+            tier = 2
+            if info_cached:
+                import json as _j
+                try:
+                    info = _j.loads(info_cached)
+                    cats = info.get("category", []) or []
+                    if any(c in cats for c in ["LQ45", "IDX30", "IDXBUMN30"]):
+                        tier = 0
+                    elif any(c in cats for c in ["IDX80", "IDXFINANCE", "IDXENERGY", "IDXINFRA"]):
+                        tier = 1
+                except Exception:
+                    pass
+            return {**stock, "_liq_value": value, "_liq_freq": freq, "_liq_tier": tier}
+        except Exception:
+            return {**stock, "_liq_value": 0, "_liq_freq": 0, "_liq_tier": 2}
+
+    sem = asyncio.Semaphore(10)
+
+    async def score_with_sem(stock):
+        async with sem:
+            return await score_liquidity(stock)
+
+    scored = await asyncio.gather(*[score_with_sem(s) for s in candidates])
+
+    VALUE_THRESHOLD = {"swing": 1e9, "intraday": 5e9, "scalping": 10e9}
+    FREQ_THRESHOLD  = {"swing": 500, "intraday": 2000, "scalping": 5000}
+    val_min  = VALUE_THRESHOLD.get(mode, 1e9)
+    freq_min = FREQ_THRESHOLD.get(mode, 500)
+
+    passed = [s for s in scored if s["_liq_value"] >= val_min and s["_liq_freq"] >= freq_min]
+    soft   = [s for s in scored if s["_liq_value"] > 0 and s not in passed]
+
+    passed.sort(key=lambda x: (x["_liq_tier"], -x["_liq_value"]))
+    soft.sort(key=lambda x: (x["_liq_tier"], -x["_liq_value"]))
+
+    final = passed + soft + rest
+
+    logger.info(f"[UNIVERSE] mode={mode} total={len(stocks)} passed_gate4={len(passed)} soft={len(soft)} rest={len(rest)}")
+
+    return final
 
 
 # ===== Phase 2: OHLCV Pre-filter =====
