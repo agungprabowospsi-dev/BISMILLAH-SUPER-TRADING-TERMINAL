@@ -362,22 +362,22 @@ async def build_universe(mode: str) -> list:
     import asyncio
     import json as _j
 
-    # LQ45 + MSCI Indonesia intersection — hardcoded sebagai ground truth
-    # Update setiap rebalancing (Feb, Apr, Jun, Aug, Oct, Dec)
+    # Tier 0: LQ45 + MSCI Indonesia intersection (~48 ticker)
     TIER0_TICKERS = {
         "BBCA","BBRI","BMRI","TLKM","ASII","ADRO","ANTM","BYAN",
         "ICBP","INDF","KLBF","MAPI","MDKA","PTBA","SMGR","UNVR",
-        "AMMN","PGAS","GOTO","EXCL","BMRI","INCO","MEDC","NIKEL",
-        "TOWR","BUKA","EMTK","MNCN","SCMA","SIDO","LSIP","AALI",
-        "HRUM","ESSA","ACES","BBNI","BJBR","BSDE","CPIN","GGRM",
-        "HMSP","ICBP","INKP","INTP","ITMG","JPFA","JSMR","KLBF",
+        "AMMN","PGAS","GOTO","EXCL","INCO","MEDC","TOWR","BUKA",
+        "BBNI","BSDE","CPIN","GGRM","HMSP","INTP","ITMG","JPFA",
+        "JSMR","MYOR","INKP","TKIM","TBIG","ISAT","AKRA","AMRT",
+        "BRPT","CTRA","HEAL","PGEO","SMRA","ULTJ","WIFI","HRTA",
     }
 
-    # LQ45 only (tidak masuk MSCI) — tier 1
+    # Tier 1: IDX80 diluar LQ45/MSCI (~32 ticker)
     TIER1_TICKERS = {
-        "AKRA","AMRT","BRPT","CTRA","ERAA","FILM","HEAL",
-        "HRTA","ISAT","ITMG","JPFA","JSMR","MYOR","PGEO",
-        "SMRA","TBIG","TKIM","TLKM","ULTJ","WIFI",
+        "ACES","AALI","LSIP","SCMA","MNCN","EMTK","SIDO","HRUM",
+        "ESSA","ERAA","FILM","BJBR","NIKEL","TBIG","WSKT","WIKA",
+        "ADHI","PTPP","NCKL","DOID","ADMR","MBMA","MAPA","MIDI",
+        "MIKA","SILO","TSPC","DVLA","KAEF","PEHA","PYFA","SOHO",
     }
 
     stocks = await get_stock_list_safe()
@@ -443,14 +443,11 @@ async def build_universe(mode: str) -> list:
 
     scored = await asyncio.gather(*[score_with_sem(s) for s in to_score])
 
-    # Thresholds per mode
-    VALUE_MIN = {"swing": 5e9, "intraday": 10e9, "scalping": 20e9}
-    FREQ_MIN  = {"swing": 1000, "intraday": 3000, "scalping": 5000}
-    val_min  = VALUE_MIN.get(mode, 5e9)
-    freq_min = FREQ_MIN.get(mode, 1000)
+    VALUE_TIER = {0: 1e9, 1: 2e9}
+    FREQ_TIER  = {0: 200, 1: 500}
+    VALUE_MIN  = {"swing": 5e9,  "intraday": 10e9, "scalping": 20e9}
+    FREQ_MIN   = {"swing": 1000, "intraday": 3000,  "scalping": 5000}
 
-    # Tier 0+1 → lolos walau di bawah threshold (institutional grade)
-    # Tier 2 → harus lolos threshold
     passed = []
     soft   = []
     dropped_tickers = set()
@@ -459,19 +456,22 @@ async def build_universe(mode: str) -> list:
         tier   = s.get("_idx_tier", 2)
         value  = s.get("_liq_value", 0)
         freq   = s.get("_liq_freq", 0)
-        ticker = s.get("ticker","")
+        ticker = s.get("ticker", "")
 
-        if value == 0 and freq == 0 and tier == 2:
-            # Zero activity + bukan index member → DROP
+        if value == 0 and freq == 0:
             dropped_tickers.add(ticker)
-        elif tier <= 1:
-            # LQ45/MSCI/IDX80 → selalu lolos (meski pasar sepi)
-            passed.append(s)
-        elif value >= val_min and freq >= freq_min:
-            # Non-index tapi liquid → lolos
+            continue
+
+        if tier <= 1:
+            v_min = VALUE_TIER.get(tier, 1e9)
+            f_min = FREQ_TIER.get(tier, 200)
+        else:
+            v_min = VALUE_MIN.get(mode, 5e9)
+            f_min = FREQ_MIN.get(mode, 1000)
+
+        if value >= v_min and freq >= f_min:
             passed.append(s)
         elif value > 0 and freq > 100:
-            # Ada activity tapi di bawah threshold → soft
             soft.append(s)
         else:
             dropped_tickers.add(ticker)
@@ -645,50 +645,72 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
 
             # ===== FASE 1: Smart Pre-Filter per Mode =====
             price = metrics["price"]
-            value = metrics.get("value", 0)
             ma5 = metrics.get("ma5", price)
             ma20 = metrics.get("ma20", price)
             candle_bullish = metrics.get("candle_bullish", False)
             candle_body_pct = metrics.get("candle_body_pct", 0)
             change_pct = metrics["change_pct"]
 
-            # Intensity multiplier: 100%=ketat, 75%=sedang, 50%=longgar
+            # Intensity multiplier: 100=ketat, 75=sedang, 50=longgar
             intensity = filter_intensity
             if intensity >= 100:
-                val_swing, val_intraday, val_scalping = 10_000_000_000, 5_000_000_000, 2_000_000_000
                 ma20_thr, ma5_thr = 0.98, 0.97
                 chg_swing, chg_intraday, chg_scalping = -2.0, -0.5, 1.0
                 body_min, price_min_scalping = 0.3, 200
+                intensity_key = 1.0
             elif intensity >= 75:
-                val_swing, val_intraday, val_scalping = 5_000_000_000, 2_000_000_000, 1_000_000_000
                 ma20_thr, ma5_thr = 0.95, 0.95
                 chg_swing, chg_intraday, chg_scalping = -3.0, -1.5, 0.5
                 body_min, price_min_scalping = 0.1, 100
-            else:  # 50%
-                val_swing, val_intraday, val_scalping = 1_000_000_000, 500_000_000, 200_000_000
+                intensity_key = 0.75
+            else:  # 50
                 ma20_thr, ma5_thr = 0.90, 0.90
                 chg_swing, chg_intraday, chg_scalping = -5.0, -3.0, 0.0
                 body_min, price_min_scalping = 0.0, 50
+                intensity_key = 0.5
+
+            # Value IDR filter — pakai _liq_value dari Phase 1 jika tersedia
+            liq_value = float(stock.get("_liq_value", 0) or 0)
+            liq_freq  = float(stock.get("_liq_freq",  0) or 0)
+            idx_tier  = int(stock.get("_idx_tier", 2))
+
+            VALUE_INTENSITY = {
+                "swing":    {1.0: 20e9, 0.75: 10e9, 0.5: 5e9},
+                "intraday": {1.0: 40e9, 0.75: 20e9, 0.5: 10e9},
+                "scalping": {1.0: 80e9, 0.75: 40e9, 0.5: 20e9},
+            }
+            FREQ_INTENSITY = {
+                "swing":    {1.0: 3000,  0.75: 1500, 0.5: 500},
+                "intraday": {1.0: 9000,  0.75: 4500, 0.5: 1500},
+                "scalping": {1.0: 15000, 0.75: 7500, 0.5: 3000},
+            }
+
+            v_threshold = VALUE_INTENSITY.get(mode, {}).get(intensity_key, 5e9)
+            f_threshold = FREQ_INTENSITY.get(mode, {}).get(intensity_key, 1000)
+
+            # Tier 0+1 dapat diskon 50% dari threshold
+            if idx_tier <= 1:
+                v_threshold *= 0.5
+                f_threshold  = int(f_threshold * 0.5)
+
+            if liq_value > 0 and liq_value < v_threshold:
+                return None
+            if liq_freq > 0 and liq_freq < f_threshold:
+                return None
 
             if mode == "swing":
-                if value < val_swing:
-                    return None
                 if price < ma20 * ma20_thr:
                     return None
                 if change_pct < chg_swing:
                     return None
 
             elif mode == "intraday":
-                if value < val_intraday:
-                    return None
                 if price < ma5 * ma5_thr:
                     return None
                 if change_pct < chg_intraday:
                     return None
 
             elif mode == "scalping":
-                if value < val_scalping:
-                    return None
                 if change_pct < chg_scalping:
                     return None
                 if candle_body_pct < body_min:
