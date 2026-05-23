@@ -738,6 +738,9 @@ def calc_bfd_presort_score(candidate, mode="swing"):
     ma5           = to_float(candidate.get("ma5", price))
     candle_bullish = candidate.get("candle_bullish", False)
     candle_body   = to_float(candidate.get("candle_body_pct", 0))
+    liq_value = to_float(candidate.get("_liq_value", 0))
+    liq_freq  = to_float(candidate.get("_liq_freq", 0))
+    idx_tier  = int(candidate.get("_idx_tier", 2))
 
     # ANTI Climax Distribution — SEMUA MODE (Bandar Flow Secrets hal.26)
     if change_pct > 15 and rvol > 2.0:
@@ -815,6 +818,19 @@ def calc_bfd_presort_score(candidate, mode="swing"):
         if value > 10_000_000_000:    score += 8
         elif value > 2_000_000_000:   score += 4
         elif value < 500_000_000:     score -= 10
+
+    # Liquidity bonus dari Phase 1 Gate 4 — ALL modes
+    effective_value = liq_value if liq_value > 0 else value
+    if effective_value >= 50e9:   score += 15
+    elif effective_value >= 20e9: score += 10
+    elif effective_value >= 10e9: score += 5
+    elif effective_value >= 5e9:  score += 2
+    if liq_freq >= 10000: score += 10
+    elif liq_freq >= 5000: score += 7
+    elif liq_freq >= 2000: score += 4
+    elif liq_freq >= 1000: score += 2
+    if idx_tier == 0:   score += 10
+    elif idx_tier == 1: score += 5
 
     return max(0.0, min(100.0, round(score, 2)))
 
