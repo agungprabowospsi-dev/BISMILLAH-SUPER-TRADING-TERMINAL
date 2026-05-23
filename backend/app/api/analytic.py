@@ -1,6 +1,7 @@
 # ─── ANALYTIC ─────────────────────────────────────────────────────────────────
 from fastapi import APIRouter as _R, HTTPException
 from fastapi.responses import JSONResponse
+import json
 import numpy as np
 from sqlalchemy import text as sql_text
 from app.core.database import AsyncSessionLocal as _AsyncSessionLocal
@@ -766,7 +767,7 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
 async def market_context(ticker: str):
     """4 box: price, volume, company, technical"""
 
-    class NumpyEncoder(_json.JSONEncoder):
+    class NumpyEncoder(json.JSONEncoder):
         def default(self, obj):
             if isinstance(obj, np.integer): return int(obj)
             if isinstance(obj, np.floating): return float(obj)
@@ -857,7 +858,7 @@ async def market_context(ticker: str):
     except:
         result["technical"] = {"error": "No data"}
 
-    return JSONResponse(content=_json.loads(_json.dumps(result, cls=NumpyEncoder)))
+    return JSONResponse(content=json.loads(json.dumps(result, cls=NumpyEncoder)))
 
 
 
