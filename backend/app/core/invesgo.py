@@ -131,7 +131,14 @@ async def get_ohlcv_daily(ticker: str, period: str = "3mo", from_date: str = Non
     return data
 
 async def get_ohlcv_intraday(ticker: str, market: str = "RG") -> dict:
-    """OHLCV intraday + bid/ask real"""
+    """OHLCV intraday + bid/ask real. Cache 2 menit."""
+    cache_key = f"intraday:{ticker}"
+    cached = await _cache_get(cache_key)
+    if cached:
+        try:
+            return _json.loads(cached)
+        except Exception:
+            pass
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.get(
             f"{INVESGO_BASE_URL}/analysis/intraday-data/{ticker}",
@@ -139,14 +146,67 @@ async def get_ohlcv_intraday(ticker: str, market: str = "RG") -> dict:
             params={"market": market}
         )
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+    if isinstance(data, dict):
+        result = {
+            "code":        data.get("code", ticker),
+            "open":        data.get("open", 0),
+            "high":        data.get("high", 0),
+            "low":         data.get("low", 0),
+            "close":       data.get("close", 0),
+            "avg":         data.get("avg", 0),
+            "volume":      data.get("volume", 0),
+            "freq":        data.get("freq", 0),
+            "value":       data.get("value", 0),
+            "prev":        data.get("prev", 0),
+            "bid_price":   data.get("bid_price", 0),
+            "bid_lot":     data.get("bid_lot", 0),
+            "bid_freq":    data.get("bid_freq", 0),
+            "offer_price": data.get("offer_price", 0),
+            "offer_lot":   data.get("offer_lot", 0),
+            "offer_freq":  data.get("offer_freq", 0),
+            "iep":         data.get("iep", 0),
+            "iev":         data.get("iev", 0),
+        }
+        await _cache_set(cache_key, _json.dumps(result), ttl=120)
+        return result
+    return data
 
 async def get_orderbook(ticker: str) -> dict:
-    """Orderbook bid/ask"""
+    """Bid/offer dari intraday-data — /analysis/order-book/ sudah tidak tersedia."""
+    cache_key = f"intraday:{ticker}"
+    cached = await _cache_get(cache_key)
+    if cached:
+        try:
+            d = _json.loads(cached)
+            return {
+                "bid_price":   d.get("bid_price", 0),
+                "bid_lot":     d.get("bid_lot", 0),
+                "bid_freq":    d.get("bid_freq", 0),
+                "offer_price": d.get("offer_price", 0),
+                "offer_lot":   d.get("offer_lot", 0),
+                "offer_freq":  d.get("offer_freq", 0),
+            }
+        except Exception:
+            pass
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/analysis/order-book/{ticker}", headers=_headers())
+        r = await client.get(
+            f"{INVESGO_BASE_URL}/analysis/intraday-data/{ticker}",
+            headers=_headers(),
+            params={"market": "RG"}
+        )
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+    if isinstance(data, dict):
+        return {
+            "bid_price":   data.get("bid_price", 0),
+            "bid_lot":     data.get("bid_lot", 0),
+            "bid_freq":    data.get("bid_freq", 0),
+            "offer_price": data.get("offer_price", 0),
+            "offer_lot":   data.get("offer_lot", 0),
+            "offer_freq":  data.get("offer_freq", 0),
+        }
+    return {}
 
 async def get_broker_summary(ticker: str, investor: str = "all", market: str = "RG") -> list:
     # RC-2: Cache 30 menit (1800 detik)
@@ -202,22 +262,21 @@ async def get_tick(ticker: str) -> dict:
         return {"last_price": 0, "source": "unknown"}
 
 async def get_company_info(ticker: str) -> dict:
-    # RC-4: Cache 24 jam (86400 detik) — company info jarang berubah
-    cache_key = f"company:{ticker}"
+    """Info perusahaan lengkap dari /analysis/information/. Cache 24 jam."""
+    cache_key = f"info:{ticker}"
     cached = await _cache_get(cache_key)
     if cached:
         try:
             return _json.loads(cached)
         except Exception:
             pass
-    """Info perusahaan"""
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(f"{INVESGO_BASE_URL}/analysis/information/{ticker}", headers=_headers())
         r.raise_for_status()
         data = r.json()
-        if data:
-            await _cache_set(f"company:{ticker}", _json.dumps(data), ttl=86400)
-        return data
+    if data:
+        await _cache_set(cache_key, _json.dumps(data), ttl=86400)
+    return data if isinstance(data, dict) else {}
 
 async def get_price_table(ticker: str, date: str = None) -> list:
     """Price distribution table per level harga. RC: cache 30 menit."""
@@ -488,7 +547,8 @@ async def invalidate_ticker_cache(ticker: str):
         f"ohlcv:{ticker}:1mo",
         f"ohlcv:{ticker}:6mo",
         f"broker:{ticker}:all:RG",
-        f"company:{ticker}",
+        f"info:{ticker}",
+        f"intraday:{ticker}",
         f"ksei:{ticker}:3",
     ]
     for key in keys:
