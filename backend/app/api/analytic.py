@@ -1166,6 +1166,24 @@ async def get_financial_endpoint(ticker: str):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
+# ─── IDX PATTERN CALIBRATION ─────────────────────────────────────────────────
+@router.post("/data/calibrate-patterns")
+async def calibrate_patterns():
+    """
+    Sliding-window backtest over MSCI_LQ45_INTERSECTION OHLCV data.
+    Recalculates IDX_CALIBRATION multipliers vs Bulkowski US baseline.
+    Run after accumulating sufficient historical OHLCV in PostgreSQL.
+    """
+    try:
+        from app.engines.idx_calibration import run_backtest_calibration
+        result = await run_backtest_calibration()
+        return result
+    except Exception as e:
+        import traceback
+        logger.error(f"calibrate-patterns error: {e}\n{traceback.format_exc()}")
+        raise HTTPException(500, detail=f"{type(e).__name__}: {str(e)}")
+
 # ============ FOREIGN FLOW DASHBOARD ============
 LQ45_STOCKS = [
     "BBCA","BBRI","BMRI","TLKM","ASII","BYAN","GOTO","UNVR",
