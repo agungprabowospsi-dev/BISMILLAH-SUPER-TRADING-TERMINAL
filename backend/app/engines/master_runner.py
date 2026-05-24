@@ -45,7 +45,7 @@ G3_WEIGHTS = {
 }
 
 async def run_all_engines(ticker: str, ohlcv: list, mode: str, **kwargs) -> dict:
-    """Jalankan semua 34 engines dan return hasil lengkap"""
+    """Jalankan semua engines dan return hasil lengkap"""
 
     # Group 1 (sudah ada)
     g1_task = run_group1(ticker, ohlcv, mode, **kwargs)

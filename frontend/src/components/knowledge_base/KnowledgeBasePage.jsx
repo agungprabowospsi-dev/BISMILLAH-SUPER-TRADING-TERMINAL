@@ -4,6 +4,7 @@ import { Upload, BookOpen, CheckSquare, Square, ChevronDown, ChevronUp, Trash2, 
 import clsx from 'clsx'
 
 const API = 'https://backend-production-daed.up.railway.app'
+const ENGINE_TOTAL = 35
 
 const CATEGORY_COLORS = {
   Technical:    { bg: 'bg-blue-50',   text: 'text-blue-700',   border: 'border-blue-200' },
@@ -104,7 +105,7 @@ function DocumentCard({ doc, onSelect, onDelete, isSelected }) {
             </span>
             <span className="text-[10px] text-slate-400 font-mono">{doc.page_count} hal</span>
             <span className="text-[10px] text-slate-400 font-mono">{doc.total_chunks} chunks</span>
-            <span className="text-[10px] text-accent-green font-mono font-semibold">{doc.approved_engines}/34 engines</span>
+            <span className="text-[10px] text-accent-green font-mono font-semibold">{doc.approved_engines}/{ENGINE_TOTAL} engines</span>
           </div>
           {doc.description && (
             <div className="text-[10px] text-slate-400 mt-1 truncate">{doc.description}</div>
@@ -198,7 +199,7 @@ export default function KnowledgeBasePage() {
         'Chunking konten PDF...',
         'Claude analisis engines 1-10...',
         'Claude analisis engines 11-20...',
-        'Claude analisis engines 21-34...',
+        'Claude analisis engines 21-35...',
         'Menyimpan ke database...',
         'Hampir selesai...',
       ]
@@ -285,8 +286,8 @@ export default function KnowledgeBasePage() {
   const filteredScores = filterGroup === 'all' ? engineScores
     : filterGroup === 'approved' ? engineScores.filter(e => e.is_approved)
     : engineScores.filter(e => {
-        const groups = { '1': [1,10], '2': [11,15], '3': [16,28], '4': [29,34] }
-        const [min, max] = groups[filterGroup] || [1,34]
+        const groups = { '1': [1,10], '2': [11,16], '3': [17,29], '4': [30,35] }
+        const [min, max] = groups[filterGroup] || [1,ENGINE_TOTAL]
         return e.engine_index >= min && e.engine_index <= max
       })
 
@@ -302,7 +303,7 @@ export default function KnowledgeBasePage() {
             <BookOpen className="w-5 h-5 text-accent-green" />
             Knowledge Base
           </h1>
-          <p className="text-xs text-slate-500 mt-0.5">Upload buku trading → Claude auto-analisis relevansi ke 34 engines</p>
+          <p className="text-xs text-slate-500 mt-0.5">Upload buku trading → Claude auto-analisis relevansi ke {ENGINE_TOTAL} engines</p>
         </div>
         {stats && (
           <div className="flex gap-3">
@@ -367,7 +368,7 @@ export default function KnowledgeBasePage() {
                 {[
                   { label: 'Halaman', val: uploadResult.total_pages },
                   { label: 'Chunks', val: uploadResult.total_chunks },
-                  { label: 'Auto-✓', val: `${uploadResult.approved_count}/34` },
+                  { label: 'Auto-✓', val: `${uploadResult.approved_count}/${ENGINE_TOTAL}` },
                 ].map(s => (
                   <div key={s.label} className="text-center bg-white rounded-lg p-1.5 border border-green-200">
                     <div className="font-mono font-bold text-green-700 text-sm">{s.val}</div>
@@ -438,7 +439,7 @@ export default function KnowledgeBasePage() {
                   <div className="flex items-center gap-2">
                     <div className="text-center px-3 py-1 bg-accent-green/10 border border-accent-green/30 rounded-lg">
                       <span className="font-mono font-bold text-accent-green text-base">{approvedCount}</span>
-                      <span className="font-mono text-xs text-slate-400">/34</span>
+                      <span className="font-mono text-xs text-slate-400">/{engineScores.length || ENGINE_TOTAL}</span>
                       <div className="text-[9px] text-slate-400">approved</div>
                     </div>
                   </div>

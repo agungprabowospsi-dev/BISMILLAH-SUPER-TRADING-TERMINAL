@@ -26,21 +26,20 @@ logger = logging.getLogger(__name__)
 _memory_cache: dict = {}
 RAG_COOLDOWN_SEC = 900  # 15 menit
 
-# 13 buku knowledge base
+# 12 active knowledge-base literatures in production.
 ALL_KB_SOURCES = [
     "file_1766768812634",
     "file_1766768868107",
     "E-Book Bandar Flow Secrets.pdf",
     "Encyclopedia of Chart Patterns",
+    "Fibonacci Trading",
+    "A Complete Guide To Volume Price Analysis",
+    "Stock Trading & Investing Using Volume Price Analysis",
+    "Technical Analysis of the Financial Markets",
+    "Trade Setup Handbook",
+    "ORDER FLOW Trading Setups",
+    "Advances in Financial Machine Learning",
     "Trading and Exchanges - Larry Harris",
-    "Market Microstructure Theory",
-    "Reminiscences of a Stock Operator",
-    "The Art and Science of Technical Analysis",
-    "Evidence-Based Technical Analysis",
-    "How to Make Money in Stocks - O'Neil",
-    "Secrets of the Trading Pros",
-    "The Master Swing Trader",
-    "Come Into My Trading Room - Elder",
 ]
 
 # Query template per trigger
@@ -169,7 +168,7 @@ def _build_query(
 def _select_sources(trigger: RAGTrigger) -> list:
     """
     Pilih source KB yang paling relevan per trigger.
-    Tidak selalu query semua 13 buku — lebih efisien.
+    Tidak selalu query semua 12 buku — lebih efisien.
     """
     bandarmologi_books = ALL_KB_SOURCES[:3]
     technical_books    = ALL_KB_SOURCES[3:8]

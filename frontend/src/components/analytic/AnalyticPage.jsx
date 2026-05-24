@@ -127,7 +127,7 @@ export default function AnalyticPage() {
     <div className="p-4 lg:p-6 max-w-7xl mx-auto animate-fade-in">
       <div className="mb-6">
         <h1 className="font-display font-bold text-2xl text-white tracking-wide">ANALYTIC TOOL</h1>
-        <p className="text-slate-500 text-sm font-mono mt-0.5">Deep analysis 34 engines · Multi-timeframe · AI trading decision</p>
+        <p className="text-slate-500 text-sm font-mono mt-0.5">Deep analysis 35 engines · Multi-timeframe · AI trading decision</p>
       </div>
 
       <div className="card p-4 mb-5">
@@ -457,7 +457,7 @@ export default function AnalyticPage() {
           )}
 
           <div className="card p-5">
-            <p className="label-xs mb-3">Engine Scores — 34 Engines</p>
+            <p className="label-xs mb-3">Engine Scores — 35 Engines</p>
             <div className="flex gap-2 mb-4 flex-wrap">
               {GROUPS.map(g => (
                 <button key={g.key} onClick={() => setActiveGroup(g.key)}

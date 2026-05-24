@@ -180,7 +180,7 @@ export default function Header() {
           ))}
         </nav>
         <div className="ml-auto mb-2 flex items-center gap-1.5 px-3 py-1 rounded border border-purple-500/30 bg-purple-500/5">
-          <span className="font-mono text-xs text-purple-400 font-semibold">34 ENGINES</span>
+          <span className="font-mono text-xs text-purple-400 font-semibold">35 ENGINES</span>
           <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"/>
         </div>
       </div>

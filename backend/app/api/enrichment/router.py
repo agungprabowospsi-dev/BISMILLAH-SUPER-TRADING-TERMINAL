@@ -235,8 +235,8 @@ async def _rag_query(ticker, mfi_signal, kama_signal, div_state, lele_sev, score
         from app.core.knowledge_base import query_knowledge_base
         q = (f"Saham {ticker} score {score:.0f}. MFI:{mfi_signal} KAMA:{kama_signal} "
              f"Div:{div_state} Lele:{lele_sev}. Apakah valid entry menurut Larry Harris dan Tom Williams?")
-        result = await query_knowledge_base(q, top_k=2)
-        ans = (result or {}).get("answer","")
+        result = await query_knowledge_base("technical", q, n_results=2)
+        ans = result if isinstance(result, str) else (result or {}).get("answer","")
         return ans[:280] if ans else None
     except Exception as e:
         logger.debug(f"RAG skip: {e}")

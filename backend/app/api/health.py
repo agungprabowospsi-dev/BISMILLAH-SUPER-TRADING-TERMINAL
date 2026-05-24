@@ -25,7 +25,7 @@ async def health():
 
     return {
         "status": "ok",
-        "engines": 34,
+        "engines": 35,
         "kb_loaded": kb_loaded,
         "redis": redis_ok,
         "message": "BISMILLAH — Systems Online 🚀"

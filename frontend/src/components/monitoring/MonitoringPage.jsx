@@ -443,7 +443,7 @@ export default function MonitoringPage() {
                 {pos.engine_context && (
                   <div className="bg-bg-secondary border border-border-dim rounded p-3 space-y-2">
                     <div className="flex items-center justify-between">
-                      <p className="label-xs">34 ENGINE CONTEXT</p>
+                      <p className="label-xs">35 ENGINE CONTEXT</p>
                       <span className="text-[10px] font-mono text-accent-green border border-accent-green/30 bg-accent-green/5 px-2 py-0.5 rounded">
                         Score: {Number(pos.engine_context.composite_score||0).toFixed(1)}
                       </span>
@@ -460,7 +460,7 @@ export default function MonitoringPage() {
                           {pos.engine_context.bandarmology_included?'ACTIVE':'OFF'}
                         </p>
                       </div>
-                      <div><p className="text-slate-600">Engines</p><p className="text-white font-bold">{pos.engine_context.total_engines||34}</p></div>
+                      <div><p className="text-slate-600">Engines</p><p className="text-white font-bold">{pos.engine_context.total_engines||35}</p></div>
                     </div>
                   </div>
                 )}

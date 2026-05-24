@@ -69,7 +69,7 @@ export function LoadingSpinner({ message='Analyzing...' }) {
       </div>
       <div className="text-center">
         <p className="font-mono text-sm text-accent-green">{message}</p>
-        <p className="font-mono text-xs text-slate-600 mt-1">34 engines processing...</p>
+        <p className="font-mono text-xs text-slate-600 mt-1">35 engines processing...</p>
       </div>
     </div>
   )
