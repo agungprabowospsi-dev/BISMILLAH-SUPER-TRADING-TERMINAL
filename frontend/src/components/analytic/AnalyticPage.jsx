@@ -26,6 +26,16 @@ const fmtPercent = (value, digits = 1) => {
 
 const formatLabel = (value) => String(value || '-').replace(/_/g, ' ').toUpperCase()
 
+const normalizeEngineScoresForMonitoring = (engines) => {
+  if (Array.isArray(engines)) {
+    return Object.fromEntries(
+      engines.map((e) => [e.engine || e.name || 'unknown', Number(e.score || 0)])
+    )
+  }
+  if (engines && typeof engines === 'object') return engines
+  return {}
+}
+
 export default function AnalyticPage() {
   const { analyticTicker, setAnalyticTicker, analyticMode, setAnalyticMode, screenerSelectedStock,
     analyticResult, setAnalyticResult, analyticLoading, setAnalyticLoading,
@@ -571,7 +581,7 @@ export default function AnalyticPage() {
                 mode:analyticMode,
                 final_score:r.score||r.composite_score||50,
                 market_regime:r.market_regime||'SIDEWAYS',
-                engine_scores:r.engines?.engines||{},
+                engine_scores:normalizeEngineScoresForMonitoring(r.engines?.engines || r.engine_scores || {}),
                 lq45_change:r.lq45_change||0,
                 breadth_ratio:r.market_breadth||50,
                 kb_context:r.rag_used?'rag_active':'',
@@ -582,7 +592,10 @@ export default function AnalyticPage() {
                   go_reasons: r.go_reasons || [],
                   no_go_reasons: r.no_go_reasons || [],
                   win_probability: r.win_probability || 50,
-                  action_plan: r.action_plan || null
+                  action_plan: r.action_plan || null,
+                  empirical_memory: r.empirical_memory || null,
+                  setup_type: r.setup_type || '',
+                  setup_reason: r.setup_reason || ''
                 }
               })} disabled={!canSendToMonitoring} className="btn-primary w-full flex items-center justify-center gap-2 mt-2 disabled:opacity-50 disabled:cursor-not-allowed">
                 {canSendToMonitoring ? 'Monitor Posisi' : 'Belum Bisa Monitor'}<ArrowRight className="w-4 h-4"/>

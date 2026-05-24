@@ -157,12 +157,16 @@ async def run_monitoring_engines(ticker: str, ohlcv: list, mode: str, **kwargs) 
             scores.append(r.score)
 
     composite = float(np.mean(scores)) if scores else 50.0
+    bullish_count = sum(1 for score in scores if score >= 60)
+    bearish_count = sum(1 for score in scores if score <= 40)
 
     return {
         "ticker": ticker,
         "mode": mode,
         "composite_score": round(composite, 2),
         "signal": "bullish" if composite >= 60 else "bearish" if composite <= 40 else "neutral",
+        "bullish_count": bullish_count,
+        "bearish_count": bearish_count,
         "total_engines": len(all_results),
         "engines": all_results,
     }
