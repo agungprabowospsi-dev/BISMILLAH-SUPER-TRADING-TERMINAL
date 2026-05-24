@@ -84,6 +84,9 @@ export default function ScreenerPage() {
       setResult({
         session_id: data?.session_id || "N/A",
         mode: data?.mode || mode,
+        status: data?.status || "ok",
+        message: data?.message || "",
+        backend_error: data?.error || "",
         stocks: Array.isArray(stocks)
           ? stocks.map((x) => ({
               ...x,
@@ -157,12 +160,19 @@ export default function ScreenerPage() {
         <div style={S.resultsSection}>
           <div style={S.metaRow}>
             <span style={S.metaBadge}>Mode: {result.mode.toUpperCase()}</span>
+            <span style={S.metaBadge}>Status: {result.status.toUpperCase()}</span>
             <span style={S.metaBadge}>Scanned: {result.total_scanned}</span>
             <span style={S.metaBadge}>Session: {result.session_id}</span>
           </div>
+          {result.status !== "ok" && (
+            <div style={S.warningBox}>
+              <strong>DATA WARNING:</strong> {result.message || "Screener berjalan dalam mode aman."}
+              {result.backend_error && <div style={{ marginTop: 6, fontSize: 11 }}>{result.backend_error}</div>}
+            </div>
+          )}
           {result.stocks.length === 0 ? (
             <div style={S.emptyBox}>
-              <p>Tidak ada saham dengan score lebih dari 70 hari ini.</p>
+              <p>{result.status === "ok" ? "Tidak ada saham dengan score lebih dari 70 hari ini." : "Belum ada kandidat karena data upstream belum lengkap."}</p>
               <p style={{ fontSize: 12, marginTop: 8 }}>Backend returned {result.total_scanned} stocks tapi tidak ada yang masuk filter.</p>
               {rawResponse && <pre style={S.debugPre}>{JSON.stringify(rawResponse, null, 2)}</pre>}
             </div>
@@ -241,6 +251,7 @@ const S = {
   progressFill: { height: "100%", backgroundColor: "#0ea5e9", borderRadius: 5, transition: "width 0.5s ease", backgroundImage: "linear-gradient(90deg, #0ea5e9, #16a34a)" },
   progressSub: { fontSize: 11, color: "#94a3b8", margin: 0 },
   errorBox: { backgroundColor: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: 16, color: "#dc2626", marginBottom: 16, fontSize: 13 },
+  warningBox: { backgroundColor: "#fef3c7", border: "1px solid #f59e0b", borderRadius: 6, padding: 14, color: "#92400e", marginBottom: 16, fontSize: 13 },
   resultsSection: { marginTop: 8 },
   metaRow: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 },
   metaBadge: { backgroundColor: "#e0f2fe", padding: "4px 10px", borderRadius: 4, fontSize: 11, color: "#0369a1", fontWeight: "600", border: "1px solid #bae6fd" },

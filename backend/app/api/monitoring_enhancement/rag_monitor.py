@@ -26,21 +26,21 @@ logger = logging.getLogger(__name__)
 _memory_cache: dict = {}
 RAG_COOLDOWN_SEC = 900  # 15 menit
 
-# 13 buku knowledge base
+# 13 target knowledge-base literatures.
 ALL_KB_SOURCES = [
     "file_1766768812634",
     "file_1766768868107",
     "E-Book Bandar Flow Secrets.pdf",
     "Encyclopedia of Chart Patterns",
+    "Fibonacci Trading",
+    "A Complete Guide To Volume Price Analysis",
+    "Stock Trading & Investing Using Volume Price Analysis",
+    "Technical Analysis of the Financial Markets",
+    "Trade Setup Handbook",
+    "ORDER FLOW Trading Setups",
+    "Order Flow Trading - Daemon Goldsmith",
+    "Advances in Financial Machine Learning",
     "Trading and Exchanges - Larry Harris",
-    "Market Microstructure Theory",
-    "Reminiscences of a Stock Operator",
-    "The Art and Science of Technical Analysis",
-    "Evidence-Based Technical Analysis",
-    "How to Make Money in Stocks - O'Neil",
-    "Secrets of the Trading Pros",
-    "The Master Swing Trader",
-    "Come Into My Trading Room - Elder",
 ]
 
 # Query template per trigger

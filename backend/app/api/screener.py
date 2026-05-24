@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import math
 import time
 from datetime import date, timedelta
@@ -28,6 +29,8 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 # ===== Defensive imports for existing project structure =====
@@ -274,7 +277,11 @@ async def invesgo_call(method_name: str, *args: Any, **kwargs: Any) -> Any:
     method = getattr(invesgo, method_name, None)
     if method is None:
         return None
-    return await call_maybe_async(method, *args, **kwargs)
+    try:
+        return await call_maybe_async(method, *args, **kwargs)
+    except Exception as exc:
+        logger.warning("[SCREENER] Invesgo call %s failed: %s", method_name, exc)
+        return None
 
 
 # ===== Phase 1: Universe Filter =====
@@ -415,13 +422,13 @@ async def build_universe(mode: str) -> list:
     async def score_liquidity(stock):
         ticker = stock.get("ticker","")
         try:
-            intraday = await invesgo.get_ohlcv_intraday(ticker, market="RG")
+            intraday = await invesgo_call("get_ohlcv_intraday", ticker, market="RG")
             if not intraday:
                 return {**stock, "_liq_value": 0, "_liq_freq": 0}
             value = float(intraday.get("value", 0) or 0)
             freq  = float(intraday.get("freq",  0) or 0)
             # Enrich tier dari category jika ada di cache
-            info_cached = await invesgo._cache_get(f"info:{ticker}")
+            info_cached = await invesgo_call("_cache_get", f"info:{ticker}")
             if info_cached and stock["_idx_tier"] == 2:
                 try:
                     info = _j.loads(info_cached)
@@ -481,6 +488,15 @@ async def build_universe(mode: str) -> list:
     soft.sort(key=lambda x: (x.get("_idx_tier",2), -x.get("_liq_value",0)))
 
     final = passed + soft
+    if not final and to_score:
+        logger.warning(
+            "[UNIVERSE] liquidity gate returned no stocks; using tiered fallback universe"
+        )
+        final = sorted(to_score, key=lambda x: x.get("_idx_tier", 2))[:80]
+        for s in final:
+            s.setdefault("_liq_value", 0)
+            s.setdefault("_liq_freq", 0)
+            s["_liquidity_fallback"] = True
 
     logger.info(
         f"[UNIVERSE] mode={mode} total_input={len(stocks)} "
@@ -1577,7 +1593,7 @@ def calculate_pattern_bonus(mode: Mode, ohlcv: List[Dict[str, Any]]) -> Dict[str
 async def calculate_rag_boost(ticker: str, mode: Mode, context: Dict[str, Any]) -> Dict[str, Any]:
     """
     Enhanced RAG boost — query spesifik per phase + pattern + mode
-    Menggunakan insight dari 12 buku trading di Knowledge Base
+    Menggunakan insight dari 13 buku trading di Knowledge Base
     """
     if kb_service is None:
         return {"boost": 0, "reason": "kb_service unavailable"}
@@ -1629,6 +1645,22 @@ async def calculate_rag_boost(ticker: str, mode: Mode, context: Dict[str, Any]) 
 
     # Akumulasi signal context
     akum_ctx = " ".join(akumulasi_signals[:3]) if akumulasi_signals else ""
+
+    empirical = {"available": False}
+    empirical_boost = 0
+    try:
+        from app.ml.historical_learning import get_empirical_context
+        empirical = await get_empirical_context(ticker, mode=str(mode))
+        if empirical.get("available") and empirical.get("sample_count", 0) >= 30:
+            wr = float(empirical.get("winrate", 0) or 0)
+            if wr >= 65:
+                empirical_boost = 4
+            elif wr >= 58:
+                empirical_boost = 2
+            elif wr <= 42:
+                empirical_boost = -2
+    except Exception:
+        empirical = {"available": False}
 
     # Build final query — gabungkan dengan insight bandarmologi IDX
     query = (
@@ -1709,7 +1741,7 @@ async def calculate_rag_boost(ticker: str, mode: Mode, context: Dict[str, Any]) 
 
             # Net boost: bullish - bearish, max 8
             net_boost = bull_count - bear_count
-            boost = max(0, min(8, net_boost))
+            boost = max(0, min(8, net_boost + empirical_boost))
 
             # Bonus kalau phase match dengan KB content
             if phase in ["early_accumulation", "accumulation"] and bull_count >= 3:
@@ -1717,16 +1749,17 @@ async def calculate_rag_boost(ticker: str, mode: Mode, context: Dict[str, Any]) 
 
             return {
                 "boost": boost,
-                "reason": f"KB: {bull_count} bullish / {bear_count} bearish signals",
+                "reason": f"KB: {bull_count} bullish / {bear_count} bearish signals; empirical {empirical_boost:+d}",
                 "source": method_name,
                 "query_phase": phase,
                 "bull_signals": bull_count,
-                "bear_signals": bear_count
+                "bear_signals": bear_count,
+                "empirical_memory": empirical,
             }
     except Exception as exc:
-        return {"boost": 0, "reason": f"KB error: {exc}"}
+        return {"boost": max(0, empirical_boost), "reason": f"KB error: {exc}; empirical {empirical_boost:+d}", "empirical_memory": empirical}
 
-    return {"boost": 0, "reason": "compatible KB method not found"}
+    return {"boost": max(0, empirical_boost), "reason": f"compatible KB method not found; empirical {empirical_boost:+d}", "empirical_memory": empirical}
 
 
 # ===== Phase 3 Combined Scoring =====
@@ -2006,44 +2039,66 @@ async def run_screener(request: ScreenerRequest) -> Dict[str, Any]:
     mode: Mode = request.mode
     cfg = MODE_CONFIG[mode]
 
-    universe = await build_universe(mode)
-    candidates = await ohlcv_prefilter(universe, mode, request.filter_intensity)
-    scored = await score_candidates(candidates, mode)
-    qualified = apply_disqualifiers(scored, mode)
-    top = rank_top(qualified, request.limit)
+    try:
+        universe = await build_universe(mode)
+        candidates = await ohlcv_prefilter(universe, mode, request.filter_intensity)
+        scored = await score_candidates(candidates, mode)
+        qualified = apply_disqualifiers(scored, mode)
+        top = rank_top(qualified, request.limit)
 
-    response: Dict[str, Any] = {
-        "status": "ok",
-        "mode": mode,
-        "duration_sec": round(time.time() - started, 2),
-        "universe_count": len(universe),
-        "candidate_count": len(candidates),
-        "scored_count": len(scored),
-        "qualified_count": len(qualified),
-        "top_5": top,
-        "results": top,
-        "config": {
-            "rvol_min": cfg["rvol_min"],
-            "change_min": cfg["change_min"],
-            "candidate_max": cfg["candidate_max"],
-            "min_score": cfg["min_score"],
-        },
-    }
-
-    if request.include_debug:
-        disqualified = [x for x in scored if x.get("disqualify")]
-        response["debug"] = {
-            "prefilter": await debug_prefilter_rejections(universe, mode, request.filter_intensity),
-            "disqualified_count": len(disqualified),
-            "disqualified_sample": [
-                {
-                    "ticker": x.get("ticker"),
-                    "score": x.get("final_score"),
-                    "phase": x.get("phase"),
-                    "reason": x.get("disqualify_reason"),
-                }
-                for x in disqualified[:20]
-            ],
+        response: Dict[str, Any] = {
+            "status": "ok",
+            "mode": mode,
+            "duration_sec": round(time.time() - started, 2),
+            "universe_count": len(universe),
+            "candidate_count": len(candidates),
+            "scored_count": len(scored),
+            "qualified_count": len(qualified),
+            "top_5": top,
+            "results": top,
+            "config": {
+                "rvol_min": cfg["rvol_min"],
+                "change_min": cfg["change_min"],
+                "candidate_max": cfg["candidate_max"],
+                "min_score": cfg["min_score"],
+            },
         }
 
-    return response
+        if request.include_debug:
+            disqualified = [x for x in scored if x.get("disqualify")]
+            response["debug"] = {
+                "prefilter": await debug_prefilter_rejections(universe, mode, request.filter_intensity),
+                "disqualified_count": len(disqualified),
+                "disqualified_sample": [
+                    {
+                        "ticker": x.get("ticker"),
+                        "score": x.get("final_score"),
+                        "phase": x.get("phase"),
+                        "reason": x.get("disqualify_reason"),
+                    }
+                    for x in disqualified[:20]
+                ],
+            }
+
+        return response
+    except Exception as exc:
+        logger.exception("[SCREENER] run failed")
+        return {
+            "status": "degraded",
+            "mode": mode,
+            "duration_sec": round(time.time() - started, 2),
+            "universe_count": 0,
+            "candidate_count": 0,
+            "scored_count": 0,
+            "qualified_count": 0,
+            "top_5": [],
+            "results": [],
+            "error": f"{type(exc).__name__}: {str(exc)[:240]}",
+            "message": "Screener sementara berjalan dalam mode aman karena data upstream belum tersedia.",
+            "config": {
+                "rvol_min": cfg["rvol_min"],
+                "change_min": cfg["change_min"],
+                "candidate_max": cfg["candidate_max"],
+                "min_score": cfg["min_score"],
+            },
+        }

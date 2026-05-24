@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional
 import asyncpg
 from anthropic import AsyncAnthropic
 
-from .kb_models import ALL_34_ENGINES, ENGINE_NAMES, CREATE_TABLES_SQL
+from .kb_models import ALL_34_ENGINES, ENGINE_NAMES, ENGINE_COUNT, CREATE_TABLES_SQL
 
 anthropic_client = AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
@@ -161,7 +161,7 @@ async def analyze_all_engines(book_title: str, sample_text: str) -> List[Dict]:
     batch_size = 10
     for i in range(0, len(ALL_34_ENGINES), batch_size):
         batch = ALL_34_ENGINES[i:i + batch_size]
-        print(f"  [KB] Analyzing engines {i+1}-{min(i+batch_size, 34)}...")
+        print(f"  [KB] Analyzing engines {i+1}-{min(i+batch_size, ENGINE_COUNT)}...")
         results = await analyze_relevance_with_claude(book_title, sample_text, batch)
         all_results.extend(results)
         await asyncio.sleep(0.5)
@@ -239,7 +239,7 @@ async def process_pdf_upload(pdf_bytes: bytes, original_filename: str, descripti
         """, len(chunks), doc_id)
 
         approved_count = len(approved_engines)
-        print(f"[KB] Done! {approved_count}/34 engines auto-approved")
+        print(f"[KB] Done! {approved_count}/{ENGINE_COUNT} engines auto-approved")
 
         return {
             "success": True,
@@ -326,18 +326,44 @@ async def get_document_scores(document_id: int) -> Dict:
 async def search_chunks_for_engine(engine_name: str, query: str, limit: int = 5) -> List[Dict]:
     conn = await get_db_conn()
     try:
-        # Ambil 1 chunk per dokumen agar merata dari semua 7 buku
+        query_terms = [
+            t.lower() for t in re.findall(r"[A-Za-z0-9_]{3,}", query or "")
+            if t.lower() not in {"saham", "stock", "engine", "idx", "yang", "dan", "atau", "the"}
+        ][:12]
+        fetch_limit = max(limit * 12, 40)
         rows = await conn.fetch("""
             SELECT c.id, c.content, c.page_number, c.chunk_index,
                    d.original_name as source_document
             FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id
             WHERE c.engine_tags::text LIKE $1
               AND d.status = 'analyzed'
-            ORDER BY RANDOM()
             LIMIT $2
-        """, f'%{engine_name}%', limit)
+        """, f'%{engine_name}%', fetch_limit)
 
-        return [dict(r) for r in rows]
+        candidates = [dict(r) for r in rows]
+        if not candidates:
+            return []
+
+        def rank(row: Dict) -> tuple:
+            text = (row.get("content") or "").lower()
+            src = (row.get("source_document") or "").lower()
+            score = sum(3 if term in src else 1 for term in query_terms if term in text or term in src)
+            early_page_bonus = max(0, 3 - int(row.get("page_number") or 0) // 100)
+            return (score, early_page_bonus, -int(row.get("chunk_index") or 0))
+
+        candidates.sort(key=rank, reverse=True)
+
+        selected = []
+        seen_docs = set()
+        for row in candidates:
+            src = row.get("source_document") or ""
+            if src in seen_docs and len(selected) < min(limit, 3):
+                continue
+            selected.append(row)
+            seen_docs.add(src)
+            if len(selected) >= limit:
+                break
+        return selected
     finally:
         await conn.close()
 

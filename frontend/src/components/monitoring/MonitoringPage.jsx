@@ -34,12 +34,28 @@ async function fetchEngineData(pos) {
         entry_price: pos.entry_price,
         stop_loss: pos.stop_loss,
         take_profit: pos.take_profit_1 || pos.entry_price,
-        mode: pos.mode
+        take_profit_1: pos.take_profit_1 || 0,
+        take_profit_2: pos.take_profit_2 || 0,
+        take_profit_3: pos.take_profit_3 || 0,
+        mode: String(pos.mode || 'intraday').toLowerCase(),
+        engine_scores: pos.engine_scores || {},
+        market_regime: pos.market_regime || 'SIDEWAYS',
+        lq45_change: pos.lq45_change || 0,
+        breadth_ratio: pos.breadth_ratio || 50,
+        final_score: pos.final_score || 50,
+        kb_context: pos.kb_context || '',
+        analytic_context: pos.analytic_context || {}
       })
     })
     if (!res.ok) return null
     return res.json()
   } catch { return null }
+}
+
+function formatBil(value) {
+  const num = Number(value || 0)
+  const sign = num > 0 ? '+' : ''
+  return `${sign}${num.toLocaleString('id-ID', { maximumFractionDigits: 2 })}B`
 }
 
 export default function MonitoringPage() {
@@ -77,12 +93,15 @@ export default function MonitoringPage() {
     setForm({
       ticker: monitoringInput.ticker || '',
       entry_price: String(monitoringInput.entry_price || ''),
-      stop_loss: String(monitoringInput.stop_loss || ''),
-      take_profit_1: String(monitoringInput.take_profit_1 || ''),
-      take_profit_2: String(monitoringInput.take_profit_2 || ''),
-      take_profit_3: String(monitoringInput.take_profit_3 || ''),
-      mode: (monitoringInput.mode || 'INTRADAY').toUpperCase()
-    })
+        stop_loss: String(monitoringInput.stop_loss || ''),
+        take_profit_1: String(monitoringInput.take_profit_1 || ''),
+        take_profit_2: String(monitoringInput.take_profit_2 || ''),
+        take_profit_3: String(monitoringInput.take_profit_3 || ''),
+        mode: (monitoringInput.mode || 'INTRADAY').toUpperCase(),
+        lot: String(monitoringInput.lot || ''),
+        broker: monitoringInput.broker || '',
+        entry_score: String(monitoringInput.final_score || monitoringInput.entry_score || '')
+      })
     setShowForm(true)
   }, [monitoringInput])
 
@@ -123,6 +142,7 @@ export default function MonitoringPage() {
       smart_trailing_stop: engine?.smart_trailing_stop ?? pos.smart_trailing_stop,
       warnings: engine?.warnings ?? pos.warnings,
       rr: engine?.rr ?? pos.rr,
+      analytic_context: engine?.analytic_context ?? pos.analytic_context,
     }
   }
 
@@ -152,7 +172,7 @@ export default function MonitoringPage() {
       take_profit_1: parseFloat(form.take_profit_1) || null,
       take_profit_2: parseFloat(form.take_profit_2) || null,
       take_profit_3: parseFloat(form.take_profit_3) || null,
-      mode: form.mode,
+      mode: form.mode.toLowerCase(),
       current_price: entry,
       lot: parseFloat(form.lot) || 1,
       broker: form.broker || '',
@@ -166,6 +186,7 @@ export default function MonitoringPage() {
       market_regime: (useStore.getState().monitoringInput || {}).market_regime || 'SIDEWAYS',
       final_score: (useStore.getState().monitoringInput || {}).final_score || 50.0,
       kb_context: (useStore.getState().monitoringInput || {}).kb_context || '',
+      analytic_context: (useStore.getState().monitoringInput || {}).analytic_context || {},
     }
     setShowForm(false)
     setForm({ ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'INTRADAY',lot:'',broker:'',entry_score:'' })
@@ -388,11 +409,41 @@ export default function MonitoringPage() {
                   </div>
                 </div>
 
+                {pos.analytic_context && Object.keys(pos.analytic_context).length > 0 && (
+                  <div className="bg-bg-secondary border border-border-dim rounded p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="label-xs">ANALYTIC DECISION</p>
+                      <span className={clsx('text-[10px] font-mono font-bold px-2 py-0.5 rounded border',
+                        pos.analytic_context.go_no_go === 'STRONG GO' || pos.analytic_context.go_no_go === 'GO'
+                          ? 'text-accent-green border-accent-green/30 bg-accent-green/5'
+                          : pos.analytic_context.go_no_go === 'NO GO'
+                          ? 'text-accent-red border-accent-red/30 bg-accent-red/5'
+                          : 'text-accent-gold border-accent-gold/30 bg-accent-gold/5')}>
+                        {pos.analytic_context.go_no_go || 'WAIT'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                      <div>
+                        <p className="text-slate-600">Confidence</p>
+                        <p className="text-white font-bold">{Number(pos.analytic_context.go_confidence || 0).toFixed(0)}%</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-600">Win Prob</p>
+                        <p className="text-white font-bold">
+                          {typeof pos.analytic_context.win_probability === 'object'
+                            ? `${Number(pos.analytic_context.win_probability.probability || 0).toFixed(0)}%`
+                            : `${Number(pos.analytic_context.win_probability || 0).toFixed(0)}%`}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Engine Context */}
                 {pos.engine_context && (
                   <div className="bg-bg-secondary border border-border-dim rounded p-3 space-y-2">
                     <div className="flex items-center justify-between">
-                      <p className="label-xs">34 ENGINE CONTEXT</p>
+                      <p className="label-xs">35 ENGINE CONTEXT</p>
                       <span className="text-[10px] font-mono text-accent-green border border-accent-green/30 bg-accent-green/5 px-2 py-0.5 rounded">
                         Score: {Number(pos.engine_context.composite_score||0).toFixed(1)}
                       </span>
@@ -409,7 +460,7 @@ export default function MonitoringPage() {
                           {pos.engine_context.bandarmology_included?'ACTIVE':'OFF'}
                         </p>
                       </div>
-                      <div><p className="text-slate-600">Engines</p><p className="text-white font-bold">{pos.engine_context.total_engines||34}</p></div>
+                      <div><p className="text-slate-600">Engines</p><p className="text-white font-bold">{pos.engine_context.total_engines||35}</p></div>
                     </div>
                   </div>
                 )}
@@ -459,13 +510,31 @@ export default function MonitoringPage() {
                 {pos.engine_context?.engine_details && (
                   (() => {
                     const bandar = pos.engine_context.engine_details.BandarmologyEngine
+                    const brokerBehavior = pos.engine_context.engine_details.BrokerBehaviorEngine
                     const foreign = pos.engine_context.engine_details.ForeignFlowEngine
                     const ob = pos.engine_context.engine_details.OrderbookEngine
-                    if (!bandar && !foreign && !ob) return null
+                    const behavior = brokerBehavior?.data
+                    if (!bandar && !brokerBehavior && !foreign && !ob) return null
                     return (
                       <div className="bg-bg-secondary border border-border-dim rounded p-3 space-y-2">
                         <p className="label-xs">SMART MONEY DATA</p>
                         <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                          {behavior && (
+                            <>
+                              <div>
+                                <p className="text-slate-600">Broker Behavior</p>
+                                <p className={brokerBehavior.signal==='bullish'?'text-accent-green font-bold':brokerBehavior.signal==='bearish'?'text-accent-red font-bold':'text-slate-400 font-bold'}>
+                                  {(behavior.pressure||'neutral').replace(/_/g,' ').toUpperCase()}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-slate-600">Smart Net</p>
+                                <p className={Number(behavior.smart_money_net_bil)>0?'text-accent-green font-bold':Number(behavior.smart_money_net_bil)<0?'text-accent-red font-bold':'text-slate-400 font-bold'}>
+                                  {formatBil(behavior.smart_money_net_bil)}
+                                </p>
+                              </div>
+                            </>
+                          )}
                           {foreign?.data && (
                             <>
                               <div>
@@ -499,6 +568,33 @@ export default function MonitoringPage() {
                             </>
                           )}
                         </div>
+
+                        {behavior && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-border-dim">
+                            <div>
+                              <p className="text-[10px] font-mono font-bold text-accent-green mb-1">TOP 5 BUYERS</p>
+                              <div className="space-y-1">
+                                {(behavior.top_buyers || []).slice(0, 5).map((b) => (
+                                  <div key={`buy-${b.code}`} className="flex items-center justify-between text-[10px] font-mono">
+                                    <span className="text-slate-300 font-bold">{b.code || b.name}</span>
+                                    <span className="text-accent-green">{formatBil(b.buy_bil)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-mono font-bold text-accent-red mb-1">TOP 5 SELLERS</p>
+                              <div className="space-y-1">
+                                {(behavior.top_sellers || []).slice(0, 5).map((b) => (
+                                  <div key={`sell-${b.code}`} className="flex items-center justify-between text-[10px] font-mono">
+                                    <span className="text-slate-300 font-bold">{b.code || b.name}</span>
+                                    <span className="text-accent-red">{formatBil(b.sell_bil)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )
                   })()

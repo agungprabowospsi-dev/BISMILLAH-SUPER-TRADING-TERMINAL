@@ -1,6 +1,7 @@
 import os
 import httpx
 import json as _json
+import asyncio
 
 # RC-0: Redis cache layer
 async def _cache_get(key: str):
@@ -16,6 +17,38 @@ async def _cache_set(key: str, value: str, ttl: int = 300):
         await cache_set(key, value, ttl)
     except Exception:
         pass
+
+_INFLIGHT = {}
+
+async def _cache_get_json(key: str):
+    cached = await _cache_get(key)
+    if cached:
+        try:
+            return _json.loads(cached)
+        except Exception:
+            return None
+    return None
+
+async def _cache_set_json(key: str, value, ttl: int):
+    if value not in (None, "", []):
+        await _cache_set(key, _json.dumps(value), ttl=ttl)
+
+async def _cached_request(key: str, ttl: int, fetcher):
+    cached = await _cache_get_json(key)
+    if cached is not None:
+        return cached
+
+    if key in _INFLIGHT:
+        return await _INFLIGHT[key]
+
+    task = asyncio.create_task(fetcher())
+    _INFLIGHT[key] = task
+    try:
+        data = await task
+        await _cache_set_json(key, data, ttl)
+        return data
+    finally:
+        _INFLIGHT.pop(key, None)
 import logging
 from typing import Optional
 
@@ -30,12 +63,82 @@ def _headers():
         "Content-Type": "application/json"
     }
 
+def _to_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value or default)
+    except (TypeError, ValueError):
+        return default
+
+def _unwrap_list(data) -> list:
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ("data", "results", "items", "stocks", "rows"):
+            value = data.get(key)
+            if isinstance(value, list):
+                return value
+    return []
+
+def _normalize_mover(row: dict, source: str = "") -> dict:
+    code = row.get("code") or row.get("ticker") or row.get("symbol") or row.get("stock_code")
+    close = _to_float(row.get("close") or row.get("last") or row.get("last_price") or row.get("price"))
+    prev = _to_float(row.get("prev") or row.get("previous") or row.get("previous_close") or row.get("prev_close"))
+    change = row.get("change")
+    if change is None and close and prev:
+        change = close - prev
+    change = _to_float(change)
+    change_pct = (
+        row.get("change_pct")
+        or row.get("change_percent")
+        or row.get("pct_change")
+        or row.get("percent")
+    )
+    if change_pct is None and close and prev:
+        change_pct = (close - prev) / prev * 100
+
+    return {
+        **row,
+        "code": code,
+        "ticker": code,
+        "name": row.get("name") or row.get("company_name") or code,
+        "close": close,
+        "prev": prev,
+        "change": round(change, 4),
+        "change_pct": round(_to_float(change_pct), 4),
+        "volume": _to_float(row.get("volume")),
+        "value": _to_float(row.get("value") or row.get("value_idr")),
+        "freq": _to_float(row.get("freq") or row.get("frequency")),
+        "source": source or row.get("source", ""),
+    }
+
+async def _get_json_first_success(client: httpx.AsyncClient, candidates: list, fallback=None):
+    last_error = None
+    for path, params in candidates:
+        try:
+            r = await client.get(f"{INVESGO_BASE_URL}{path}", headers=_headers(), params=params or {})
+            r.raise_for_status()
+            data = r.json()
+            if data not in (None, "", []):
+                return data
+        except Exception as exc:
+            last_error = exc
+            logger.debug(f"[INVESGO] endpoint fallback {path} failed: {exc}")
+    if fallback is not None:
+        return fallback
+    if last_error:
+        raise last_error
+    return None
+
 async def get_stock_list() -> list:
-    """Ambil semua saham IDX"""
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/analysis/list/stock", headers=_headers())
-        r.raise_for_status()
-        return r.json()
+    """Ambil semua saham IDX. Cache 24 jam."""
+    async def fetch():
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(f"{INVESGO_BASE_URL}/analysis/list/stock", headers=_headers())
+            r.raise_for_status()
+            return r.json()
+
+    data = await _cached_request("stock_list:all", 86400, fetch)
+    return data if isinstance(data, list) else []
 
 async def get_ohlcv_from_db(ticker: str, days: int = 90) -> list:
     """Ambil OHLCV dari PostgreSQL — zero Invesgo request."""
@@ -132,23 +235,20 @@ async def get_ohlcv_daily(ticker: str, period: str = "3mo", from_date: str = Non
 
 async def get_ohlcv_intraday(ticker: str, market: str = "RG") -> dict:
     """OHLCV intraday + bid/ask real. Cache 2 menit."""
-    cache_key = f"intraday:{ticker}"
-    cached = await _cache_get(cache_key)
-    if cached:
-        try:
-            return _json.loads(cached)
-        except Exception:
-            pass
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(
-            f"{INVESGO_BASE_URL}/analysis/intraday-data/{ticker}",
-            headers=_headers(),
-            params={"market": market}
-        )
-        r.raise_for_status()
-        data = r.json()
-    if isinstance(data, dict):
-        result = {
+    cache_key = f"intraday:{ticker}:{market}"
+
+    async def fetch():
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(
+                f"{INVESGO_BASE_URL}/analysis/intraday-data/{ticker}",
+                headers=_headers(),
+                params={"market": market}
+            )
+            r.raise_for_status()
+            data = r.json()
+        if not isinstance(data, dict):
+            return {}
+        return {
             "code":        data.get("code", ticker),
             "open":        data.get("open", 0),
             "high":        data.get("high", 0),
@@ -168,35 +268,15 @@ async def get_ohlcv_intraday(ticker: str, market: str = "RG") -> dict:
             "iep":         data.get("iep", 0),
             "iev":         data.get("iev", 0),
         }
-        await _cache_set(cache_key, _json.dumps(result), ttl=120)
-        return result
-    return data
+
+    result = await _cached_request(cache_key, 120, fetch)
+    if market == "RG":
+        await _cache_set_json(f"intraday:{ticker}", result, 120)
+    return result if isinstance(result, dict) else {}
 
 async def get_orderbook(ticker: str) -> dict:
     """Bid/offer dari intraday-data — /analysis/order-book/ sudah tidak tersedia."""
-    cache_key = f"intraday:{ticker}"
-    cached = await _cache_get(cache_key)
-    if cached:
-        try:
-            d = _json.loads(cached)
-            return {
-                "bid_price":   d.get("bid_price", 0),
-                "bid_lot":     d.get("bid_lot", 0),
-                "bid_freq":    d.get("bid_freq", 0),
-                "offer_price": d.get("offer_price", 0),
-                "offer_lot":   d.get("offer_lot", 0),
-                "offer_freq":  d.get("offer_freq", 0),
-            }
-        except Exception:
-            pass
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(
-            f"{INVESGO_BASE_URL}/analysis/intraday-data/{ticker}",
-            headers=_headers(),
-            params={"market": "RG"}
-        )
-        r.raise_for_status()
-        data = r.json()
+    data = await get_ohlcv_intraday(ticker, market="RG")
     if isinstance(data, dict):
         return {
             "bid_price":   data.get("bid_price", 0),
@@ -211,34 +291,33 @@ async def get_orderbook(ticker: str) -> dict:
 async def get_broker_summary(ticker: str, investor: str = "all", market: str = "RG") -> list:
     # RC-2: Cache 30 menit (1800 detik)
     cache_key = f"broker:{ticker}:{investor}:{market}"
-    cached = await _cache_get(cache_key)
-    if cached:
-        try:
-            return _json.loads(cached)
-        except Exception:
-            pass
-    """Broker net buy/sell real dari BEI"""
-    from datetime import datetime, timedelta
-    today = datetime.now().strftime("%Y-%m-%d")
-    from_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(
-            f"{INVESGO_BASE_URL}/analysis/summary/stock/{ticker}",
-            headers=_headers(),
-            params={"from": from_date, "to": today, "investor": investor, "market": market}
-        )
-        r.raise_for_status()
-        data = r.json()
-        if data:
-            await _cache_set(cache_key, _json.dumps(data), ttl=1800)
-        return data
+
+    async def fetch():
+        from datetime import datetime, timedelta
+        today = datetime.now().strftime("%Y-%m-%d")
+        from_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(
+                f"{INVESGO_BASE_URL}/analysis/summary/stock/{ticker}",
+                headers=_headers(),
+                params={"from": from_date, "to": today, "investor": investor, "market": market}
+            )
+            r.raise_for_status()
+            return r.json()
+
+    data = await _cached_request(cache_key, 1800, fetch)
+    return data if isinstance(data, list) else []
 
 async def get_foreign_flow(ticker: str) -> dict:
     """Net foreign buy/sell - dari price table"""
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/analysis/price-table/{ticker}", headers=_headers())
-        r.raise_for_status()
-        return r.json()
+    async def fetch():
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(f"{INVESGO_BASE_URL}/analysis/price-table/{ticker}", headers=_headers())
+            r.raise_for_status()
+            return r.json()
+
+    data = await _cached_request(f"foreign_flow:{ticker}", 1800, fetch)
+    return data
 
 async def get_tick(ticker: str) -> dict:
     """Tick data — ambil dari OHLCV daily close terakhir (lebih stabil)"""
@@ -330,48 +409,91 @@ async def get_ksei_ownership(ticker: str, range_months: int = 3) -> list:
         return data
 async def get_sector_rotation() -> dict:
     """Sector rotation"""
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/analysis/sector/rotation", headers=_headers())
-        r.raise_for_status()
-        return r.json()
+    async def fetch():
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(f"{INVESGO_BASE_URL}/analysis/sector/rotation", headers=_headers())
+            r.raise_for_status()
+            return r.json()
+
+    data = await _cached_request("sector_rotation:global", 300, fetch)
+    return data if isinstance(data, dict) else {}
 
 async def get_market_summary() -> dict:
-    """Market summary / IHSG"""
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/analysis/market/summary", headers=_headers())
-        r.raise_for_status()
-        return r.json()
+    """Market summary / IHSG.
+
+    REV28: /analysis/market/summary is currently dead on Invesgo. Try known
+    market-summary variants first, then fall back to intraday-index IHSG/LQ45.
+    """
+    async def fetch():
+        async with httpx.AsyncClient(timeout=15) as client:
+            return await _get_json_first_success(client, [
+                ("/analysis/market/summary", None),
+                ("/analysis/market-summary", None),
+                ("/analysis/summary/market", None),
+                ("/analysis/intraday-index/IHSG", None),
+            ], fallback={})
+
+    data = await _cached_request("market_summary:global", 120, fetch)
+
+    if not isinstance(data, dict):
+        return {"source": "unavailable", "data": data}
+
+    if data.get("code") or data.get("index") or data.get("close"):
+        close = _to_float(data.get("close"))
+        prev = _to_float(data.get("prev") or data.get("previous_close"))
+        change = close - prev if close and prev else _to_float(data.get("change"))
+        change_pct = (change / prev * 100) if prev else _to_float(data.get("change_pct"))
+        return {
+            **data,
+            "source": data.get("source") or "intraday-index",
+            "index": data.get("index") or data.get("code") or "IHSG",
+            "close": close,
+            "prev": prev,
+            "change": round(change, 4),
+            "change_pct": round(change_pct, 4),
+            "positive": int(_to_float(data.get("positive"))),
+            "negative": int(_to_float(data.get("negative"))),
+            "neutral": int(_to_float(data.get("neutral"))),
+        }
+
+    data.setdefault("source", "market-summary")
+    return data
 
 async def get_top_gainer() -> list:
     """Top gainer saham IDX"""
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/analysis/market/top-gainer", headers=_headers())
-        r.raise_for_status()
-        return r.json()
+    return await get_top_movers(sort="gainer", limit=20)
 
 async def get_top_loser() -> list:
     """Top loser saham IDX"""
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/analysis/market/top-loser", headers=_headers())
-        r.raise_for_status()
-        return r.json()
+    return await get_top_movers(sort="loser", limit=20)
 
 async def get_chart_composite() -> list:
     """IHSG composite chart"""
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/analysis/chart/composite", headers=_headers())
-        r.raise_for_status()
-        return r.json()
+    async def fetch():
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(f"{INVESGO_BASE_URL}/analysis/chart/composite", headers=_headers())
+            r.raise_for_status()
+            return r.json()
+
+    data = await _cached_request("chart_composite:global", 300, fetch)
+    return data if isinstance(data, list) else []
 
 async def get_foreign_net() -> list:
     """Net foreign buy/sell list"""
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/analysis/market/foreign-net", headers=_headers())
-        r.raise_for_status()
-        return r.json()
+    async def fetch():
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(f"{INVESGO_BASE_URL}/analysis/market/foreign-net", headers=_headers())
+            r.raise_for_status()
+            return r.json()
+
+    data = await _cached_request("foreign_net:global", 300, fetch)
+    return data if isinstance(data, list) else []
 
 async def get_market_context(ticker: str) -> dict:
     """Harga realtime + company info dari market-context endpoint"""
+    cached = await _cache_get_json(f"market_context:{ticker}")
+    if cached is not None:
+        return cached
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.get(
@@ -379,7 +501,9 @@ async def get_market_context(ticker: str) -> dict:
                 headers=_headers()
             )
             if r.status_code == 200:
-                return r.json()
+                data = r.json()
+                await _cache_set_json(f"market_context:{ticker}", data, 120)
+                return data
     except:
         pass
     # Fallback: pakai price-table
@@ -394,35 +518,120 @@ async def get_market_context(ticker: str) -> dict:
                 data = r.json()
                 if isinstance(data, list) and data:
                     last = data[-1]
-                    return {"price": {"last": last.get("close"), "high": last.get("high"), "low": last.get("low")}}
+                    result = {"price": {"last": last.get("close"), "high": last.get("high"), "low": last.get("low")}}
+                    await _cache_set_json(f"market_context:{ticker}", result, 120)
+                    return result
     except:
         pass
     return {}
 
 async def get_financial_statement(ticker: str) -> dict:
     """Laporan keuangan quarterly - Balance Sheet, Cash Flow, Income Statement"""
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/analysis/financial-statement/{ticker}", headers=_headers())
-        r.raise_for_status()
-        return r.json()
+    async def fetch():
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(f"{INVESGO_BASE_URL}/analysis/financial-statement/{ticker}", headers=_headers())
+            r.raise_for_status()
+            return r.json()
+
+    data = await _cached_request(f"financial:{ticker}", 21600, fetch)
+    return data if isinstance(data, dict) else {}
 
 async def get_intraday_index(index: str = "IHSG") -> dict:
     """IHSG & index live - IHSG, LQ45, IDX30, sektoral (15+ indices)"""
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/analysis/intraday-index/{index}", headers=_headers())
-        r.raise_for_status()
-        return r.json()
+    async def fetch():
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(f"{INVESGO_BASE_URL}/analysis/intraday-index/{index}", headers=_headers())
+            r.raise_for_status()
+            return r.json()
+
+    data = await _cached_request(f"intraday_index:{index}", 120, fetch)
+    return data if isinstance(data, dict) else {}
 
 async def get_top_movers(sort: str = "gainer", limit: int = 20) -> list:
-    """Top Gainers, Losers, Most Active - sort: gainer/loser/active/value/freq/foreign"""
+    """Top Gainers, Losers, Most Active - sort: gainer/loser/active/value/freq/foreign.
+
+    REV28: /analysis/top-change and /analysis/market/top-* may return 404.
+    Keep the public function stable by trying endpoint variants and falling
+    back to stock-list sorting when the list payload already contains change,
+    value, volume, or frequency fields.
+    """
+    sort_key = (sort or "gainer").lower()
+    cache_key = f"top_movers:{sort_key}:{limit}"
+    cached = await _cache_get_json(cache_key)
+    if cached is not None:
+        return cached if isinstance(cached, list) else []
+    endpoint_by_sort = {
+        "gainer": [
+            ("/analysis/top-change", {"sort": "gainer", "limit": limit}),
+            ("/analysis/top-change", {"type": "gainer", "limit": limit}),
+            ("/analysis/top-change", {"filter": "gainer", "limit": limit}),
+            ("/analysis/top-change/gainer", {"limit": limit}),
+            ("/analysis/market/top-gainer", None),
+            ("/analysis/top-gainer", None),
+        ],
+        "loser": [
+            ("/analysis/top-change", {"sort": "loser", "limit": limit}),
+            ("/analysis/top-change", {"type": "loser", "limit": limit}),
+            ("/analysis/top-change", {"filter": "loser", "limit": limit}),
+            ("/analysis/top-change/loser", {"limit": limit}),
+            ("/analysis/market/top-loser", None),
+            ("/analysis/top-loser", None),
+        ],
+        "active": [
+            ("/analysis/top-change", {"sort": "active", "limit": limit}),
+            ("/analysis/top-active", None),
+            ("/analysis/market/top-active", None),
+        ],
+        "value": [
+            ("/analysis/top-change", {"sort": "value", "limit": limit}),
+            ("/analysis/top-value", None),
+            ("/analysis/market/top-value", None),
+        ],
+        "freq": [
+            ("/analysis/top-change", {"sort": "freq", "limit": limit}),
+            ("/analysis/top-frequency", None),
+            ("/analysis/market/top-frequency", None),
+        ],
+        "foreign": [
+            ("/analysis/top-change", {"sort": "foreign", "limit": limit}),
+            ("/analysis/market/foreign-net", None),
+        ],
+    }
+    candidates = endpoint_by_sort.get(sort_key, endpoint_by_sort["gainer"])
+
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(
-            f"{INVESGO_BASE_URL}/analysis/top-change",
-            headers=_headers(),
-            params={"sort": sort, "limit": limit}
-        )
-        r.raise_for_status()
-        return r.json()
+        data = await _get_json_first_success(client, candidates, fallback=[])
+
+    rows = [_normalize_mover(row, source="top-movers") for row in _unwrap_list(data) if isinstance(row, dict)]
+    if rows:
+        result = rows[:limit]
+        await _cache_set_json(cache_key, result, 120)
+        return result
+
+    try:
+        stock_rows = [_normalize_mover(row, source="stock-list-fallback") for row in await get_stock_list() if isinstance(row, dict)]
+    except Exception as exc:
+        logger.warning(f"[INVESGO] top movers fallback stock list failed: {exc}")
+        return []
+
+    if sort_key == "loser":
+        stock_rows = [row for row in stock_rows if row.get("change_pct", 0) < 0]
+        stock_rows.sort(key=lambda row: row.get("change_pct", 0))
+    elif sort_key in ("active", "volume"):
+        stock_rows.sort(key=lambda row: row.get("volume", 0), reverse=True)
+    elif sort_key == "value":
+        stock_rows.sort(key=lambda row: row.get("value", 0), reverse=True)
+    elif sort_key in ("freq", "frequency"):
+        stock_rows.sort(key=lambda row: row.get("freq", 0), reverse=True)
+    elif sort_key == "foreign":
+        stock_rows.sort(key=lambda row: abs(row.get("foreign_net", 0) or 0), reverse=True)
+    else:
+        stock_rows = [row for row in stock_rows if row.get("change_pct", 0) > 0]
+        stock_rows.sort(key=lambda row: row.get("change_pct", 0), reverse=True)
+
+    result = stock_rows[:limit]
+    await _cache_set_json(cache_key, result, 120)
+    return result
 
 async def get_market_regime() -> dict:
     # RC-3: Cache 10 menit (600 detik)
@@ -536,7 +745,8 @@ async def get_market_regime() -> dict:
                 "status": "UP" if chg > 0 else "DOWN" if chg < 0 else "FLAT"
             }
     results["_sektoral"] = sektoral
-    
+
+    await _cache_set_json(cache_key, results, 600)
     return results
 
 
@@ -549,7 +759,11 @@ async def invalidate_ticker_cache(ticker: str):
         f"broker:{ticker}:all:RG",
         f"info:{ticker}",
         f"intraday:{ticker}",
+        f"intraday:{ticker}:RG",
         f"ksei:{ticker}:3",
+        f"market_context:{ticker}",
+        f"financial:{ticker}",
+        f"foreign_flow:{ticker}",
     ]
     for key in keys:
         await _cache_delete(key)

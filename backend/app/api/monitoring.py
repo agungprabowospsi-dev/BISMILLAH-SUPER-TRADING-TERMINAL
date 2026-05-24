@@ -8,6 +8,7 @@ import asyncio
 import json
 from app.core import invesgo
 from app.engines.master_runner import run_all_engines, run_monitoring_engines
+from app.engines.broker_behavior_engine import summarize_broker_behavior
 from app.knowledge_base import kb_service
 import logging
 
@@ -58,6 +59,7 @@ class MonitoringRequest(BaseModel):
     breadth_ratio: float = 50.0
     final_score: float = 50.0
     kb_context: str = ""
+    analytic_context: dict = {}
 
 _active_monitors = {}
 
@@ -131,6 +133,7 @@ async def get_status(monitoring_id: str):
         "smart_trailing_stop": calculate_smart_trailing_stop(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
         "institutional_alerts": generate_institutional_alerts(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
         "engine_context": engine_context,
+        "analytic_context": pos.get("analytic_context", {}),
         "warnings": warnings,
     }
 
@@ -372,15 +375,17 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
         # Format broker data
         broker_data = {}
         if broker_data_raw:
+            behavior = summarize_broker_behavior(broker_data_raw, top_n=5)
             sorted_brokers = sorted(broker_data_raw, key=lambda x: float(x.get("net_value", 0) or 0), reverse=True)
-            top_buy = sorted_brokers[:3] if sorted_brokers else []
-            top_sell = sorted(broker_data_raw, key=lambda x: float(x.get("net_value", 0) or 0))[:3]
+            top_buy = sorted_brokers[:5] if sorted_brokers else []
+            top_sell = sorted(broker_data_raw, key=lambda x: float(x.get("net_value", 0) or 0))[:5]
             total_net = sum(float(b.get("net_value", 0) or 0) for b in broker_data_raw)
             broker_data = {
                 "top_broker_net_buy": total_net,
-                "top_buyers": [{"name": b.get("name"), "net_value": float(b.get("net_value", 0) or 0)} for b in top_buy],
-                "top_sellers": [{"name": b.get("name"), "net_value": float(b.get("net_value", 0) or 0)} for b in top_sell],
-                "total_net_value": total_net
+                "top_buyers": behavior.get("top_buyers") or [{"name": b.get("name"), "net_value": float(b.get("net_value", 0) or 0)} for b in top_buy],
+                "top_sellers": behavior.get("top_sellers") or [{"name": b.get("name"), "net_value": float(b.get("net_value", 0) or 0)} for b in top_sell],
+                "total_net_value": total_net,
+                "behavior": behavior,
             }
 
         # Format KSEI/Foreign data
@@ -398,7 +403,15 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
                 "foreign_ownership_pct": float(latest.get("foreign_pf", 0) or 0),
             }
 
-        engine_result = await run_monitoring_engines(ticker, normalized_ohlcv, mode, orderbook=orderbook, broker_data=broker_data, foreign_data=foreign_data)
+        engine_result = await run_monitoring_engines(
+            ticker,
+            normalized_ohlcv,
+            mode,
+            orderbook=orderbook,
+            broker_data=broker_data,
+            broker_summary_raw=broker_data_raw,
+            foreign_data=foreign_data,
+        )
         logger.warning(f"[DEBUG] engine_result keys: {list(engine_result.keys()) if engine_result else None}")
         logger.warning(f"[DEBUG] engines count: {len(engine_result.get('engines', []))}")
 
@@ -406,6 +419,7 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
             "PriceActionEngine",
             "VolumeIntelligenceEngine",
             "BandarmologyEngine",
+            "BrokerBehaviorEngine",
             "TrendStructureEngine",
             "RiskManagementEngine",
         ]
@@ -431,6 +445,7 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
             "rag_context_count": rag_count,
             "rag_engines": rag_engines,
             "bandarmology_included": "BandarmologyEngine" in rag_engines,
+            "broker_behavior_included": "BrokerBehaviorEngine" in rag_engines,
             "engine_details": sanitize_for_json({e["engine"]: e for e in engine_result.get("engines", [])}),
             "debug_keys": list(engine_result.keys()),
         }
@@ -473,6 +488,26 @@ async def stateless_monitoring_check(req: MonitoringRequest):
     engine_context = await get_monitoring_engine_context(req.ticker, req.mode)
     early_warnings = extract_early_warnings(engine_context)
     warnings = warnings + early_warnings
+    empirical_memory = {"available": False}
+    try:
+        from app.ml.historical_learning import get_empirical_context
+        empirical_memory = await get_empirical_context(req.ticker, mode=req.mode)
+        if empirical_memory.get("available") and empirical_memory.get("sample_count", 0) >= 30:
+            wr = float(empirical_memory.get("winrate", 0) or 0)
+            if wr <= 45:
+                warnings.append({
+                    "level": "medium",
+                    "msg": f"Empirical memory warning: setup historis mirip hanya winrate {wr:.1f}%",
+                    "type": "EMPIRICAL_LOW_EDGE",
+                })
+            elif wr >= 60:
+                warnings.append({
+                    "level": "low",
+                    "msg": f"Empirical memory support: setup historis mirip winrate {wr:.1f}%",
+                    "type": "EMPIRICAL_EDGE",
+                })
+    except Exception:
+        empirical_memory = {"available": False}
 
     result = sanitize_for_json({
         "ticker": req.ticker,
@@ -487,6 +522,8 @@ async def stateless_monitoring_check(req: MonitoringRequest):
         "smart_trailing_stop": calculate_smart_trailing_stop(req.entry_price, req.stop_loss, req.take_profit, current),
         "institutional_alerts": generate_institutional_alerts(req.entry_price, req.stop_loss, req.take_profit, current),
         "engine_context": engine_context,
+        "empirical_memory": empirical_memory,
+        "analytic_context": req.analytic_context,
         "warnings": warnings,
     })
     return JSONResponse(content=json.loads(json.dumps(result, cls=NumpyEncoder)))
@@ -605,6 +642,23 @@ def extract_early_warnings(engine_context: dict) -> list:
         elif net_foreign > 5e9:
             warnings.append({"level": "LOW", "type": "FOREIGN_HOLD",
                 "message": f"Foreign flow NET BUY {net_foreign/1e9:.1f}B — asing masih akumulasi"})
+    except Exception:
+        pass
+
+    # REV28: BrokerBehaviorEngine warning dari top 5 buyer/seller
+    try:
+        broker_behavior = engine_details.get("BrokerBehaviorEngine", {})
+        behavior_data = broker_behavior.get("data", {})
+        pressure = behavior_data.get("pressure", "")
+        smart_net = float(behavior_data.get("smart_money_net_bil", 0) or 0)
+        dominant_buyer = (behavior_data.get("dominant_buyer") or {}).get("code", "")
+        dominant_seller = (behavior_data.get("dominant_seller") or {}).get("code", "")
+        if pressure in ("distribution", "retail_exit_liquidity") and smart_net < -1:
+            warnings.append({"level": "HIGH", "type": "BROKER_DISTRIBUTION",
+                "message": f"BrokerBehavior: smart money net sell {smart_net:.1f}B, top seller {dominant_seller}. Waspadai distribusi."})
+        elif pressure in ("accumulation", "smart_accumulation") and smart_net > 1:
+            warnings.append({"level": "LOW", "type": "BROKER_ACCUMULATION",
+                "message": f"BrokerBehavior: smart money net buy {smart_net:.1f}B, top buyer {dominant_buyer}. Akumulasi broker mendukung posisi."})
     except Exception:
         pass
 

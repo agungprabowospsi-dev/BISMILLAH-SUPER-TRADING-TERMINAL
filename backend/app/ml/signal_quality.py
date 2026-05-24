@@ -11,6 +11,7 @@ from datetime import datetime
 from app.ml.kb_features import kb_features_to_array, extract_kb_features
 
 logger = logging.getLogger(__name__)
+EXPECTED_ENGINE_COUNT = 35
 
 # Model disimpan di memory (tidak perlu file)
 _model = None
@@ -40,10 +41,10 @@ def _build_features(engine_scores: Dict, market_regime: str, lq45_change: float,
         elif isinstance(v, dict):
             score_values.append(float(v.get('score', 0)))
     
-    # Pad atau trim ke 34 features
-    while len(score_values) < 34:
+    # Pad atau trim ke jumlah engine aktif.
+    while len(score_values) < EXPECTED_ENGINE_COUNT:
         score_values.append(0.0)
-    score_values = score_values[:34]
+    score_values = score_values[:EXPECTED_ENGINE_COUNT]
     
     # Composite features
     avg_score = np.mean(score_values) if score_values else 0
@@ -60,7 +61,7 @@ def _build_features(engine_scores: Dict, market_regime: str, lq45_change: float,
         max_score / 100.0,
         min_score / 100.0,
         std_score / 100.0,
-        float(high_count) / 34.0,
+        float(high_count) / float(EXPECTED_ENGINE_COUNT),
     ]
     
     # KB Features — wisdom dari 10+ buku trading
@@ -72,7 +73,7 @@ def _build_features(engine_scores: Dict, market_regime: str, lq45_change: float,
 def _rule_based_probability(engine_scores: Dict, market_regime: str, lq45_change: float, final_score: float) -> float:
     """
     Rule-based win probability ketika belum ada training data
-    Berdasarkan logika dari 12 buku trading di KB
+    Berdasarkan logika dari 13 buku trading di KB
     """
     prob = 50.0  # Base probability
     
@@ -141,7 +142,7 @@ def predict_win_probability(
     prob += (kb_win_rate - 0.5) * 15
     prob += (kb_consensus - 0.5) * 10
     prob = max(5.0, min(95.0, prob))
-    method = "Rule-Based + KB (12 buku)"
+    method = "Rule-Based + KB (13 buku)"
     confidence = "medium"
     n_samples = len(_training_data)
     
