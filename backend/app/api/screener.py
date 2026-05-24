@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import math
 import time
 from datetime import date, timedelta
@@ -28,6 +29,8 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 # ===== Defensive imports for existing project structure =====
@@ -274,7 +277,11 @@ async def invesgo_call(method_name: str, *args: Any, **kwargs: Any) -> Any:
     method = getattr(invesgo, method_name, None)
     if method is None:
         return None
-    return await call_maybe_async(method, *args, **kwargs)
+    try:
+        return await call_maybe_async(method, *args, **kwargs)
+    except Exception as exc:
+        logger.warning("[SCREENER] Invesgo call %s failed: %s", method_name, exc)
+        return None
 
 
 # ===== Phase 1: Universe Filter =====
@@ -415,13 +422,13 @@ async def build_universe(mode: str) -> list:
     async def score_liquidity(stock):
         ticker = stock.get("ticker","")
         try:
-            intraday = await invesgo.get_ohlcv_intraday(ticker, market="RG")
+            intraday = await invesgo_call("get_ohlcv_intraday", ticker, market="RG")
             if not intraday:
                 return {**stock, "_liq_value": 0, "_liq_freq": 0}
             value = float(intraday.get("value", 0) or 0)
             freq  = float(intraday.get("freq",  0) or 0)
             # Enrich tier dari category jika ada di cache
-            info_cached = await invesgo._cache_get(f"info:{ticker}")
+            info_cached = await invesgo_call("_cache_get", f"info:{ticker}")
             if info_cached and stock["_idx_tier"] == 2:
                 try:
                     info = _j.loads(info_cached)
@@ -481,6 +488,15 @@ async def build_universe(mode: str) -> list:
     soft.sort(key=lambda x: (x.get("_idx_tier",2), -x.get("_liq_value",0)))
 
     final = passed + soft
+    if not final and to_score:
+        logger.warning(
+            "[UNIVERSE] liquidity gate returned no stocks; using tiered fallback universe"
+        )
+        final = sorted(to_score, key=lambda x: x.get("_idx_tier", 2))[:80]
+        for s in final:
+            s.setdefault("_liq_value", 0)
+            s.setdefault("_liq_freq", 0)
+            s["_liquidity_fallback"] = True
 
     logger.info(
         f"[UNIVERSE] mode={mode} total_input={len(stocks)} "
@@ -2023,44 +2039,66 @@ async def run_screener(request: ScreenerRequest) -> Dict[str, Any]:
     mode: Mode = request.mode
     cfg = MODE_CONFIG[mode]
 
-    universe = await build_universe(mode)
-    candidates = await ohlcv_prefilter(universe, mode, request.filter_intensity)
-    scored = await score_candidates(candidates, mode)
-    qualified = apply_disqualifiers(scored, mode)
-    top = rank_top(qualified, request.limit)
+    try:
+        universe = await build_universe(mode)
+        candidates = await ohlcv_prefilter(universe, mode, request.filter_intensity)
+        scored = await score_candidates(candidates, mode)
+        qualified = apply_disqualifiers(scored, mode)
+        top = rank_top(qualified, request.limit)
 
-    response: Dict[str, Any] = {
-        "status": "ok",
-        "mode": mode,
-        "duration_sec": round(time.time() - started, 2),
-        "universe_count": len(universe),
-        "candidate_count": len(candidates),
-        "scored_count": len(scored),
-        "qualified_count": len(qualified),
-        "top_5": top,
-        "results": top,
-        "config": {
-            "rvol_min": cfg["rvol_min"],
-            "change_min": cfg["change_min"],
-            "candidate_max": cfg["candidate_max"],
-            "min_score": cfg["min_score"],
-        },
-    }
-
-    if request.include_debug:
-        disqualified = [x for x in scored if x.get("disqualify")]
-        response["debug"] = {
-            "prefilter": await debug_prefilter_rejections(universe, mode, request.filter_intensity),
-            "disqualified_count": len(disqualified),
-            "disqualified_sample": [
-                {
-                    "ticker": x.get("ticker"),
-                    "score": x.get("final_score"),
-                    "phase": x.get("phase"),
-                    "reason": x.get("disqualify_reason"),
-                }
-                for x in disqualified[:20]
-            ],
+        response: Dict[str, Any] = {
+            "status": "ok",
+            "mode": mode,
+            "duration_sec": round(time.time() - started, 2),
+            "universe_count": len(universe),
+            "candidate_count": len(candidates),
+            "scored_count": len(scored),
+            "qualified_count": len(qualified),
+            "top_5": top,
+            "results": top,
+            "config": {
+                "rvol_min": cfg["rvol_min"],
+                "change_min": cfg["change_min"],
+                "candidate_max": cfg["candidate_max"],
+                "min_score": cfg["min_score"],
+            },
         }
 
-    return response
+        if request.include_debug:
+            disqualified = [x for x in scored if x.get("disqualify")]
+            response["debug"] = {
+                "prefilter": await debug_prefilter_rejections(universe, mode, request.filter_intensity),
+                "disqualified_count": len(disqualified),
+                "disqualified_sample": [
+                    {
+                        "ticker": x.get("ticker"),
+                        "score": x.get("final_score"),
+                        "phase": x.get("phase"),
+                        "reason": x.get("disqualify_reason"),
+                    }
+                    for x in disqualified[:20]
+                ],
+            }
+
+        return response
+    except Exception as exc:
+        logger.exception("[SCREENER] run failed")
+        return {
+            "status": "degraded",
+            "mode": mode,
+            "duration_sec": round(time.time() - started, 2),
+            "universe_count": 0,
+            "candidate_count": 0,
+            "scored_count": 0,
+            "qualified_count": 0,
+            "top_5": [],
+            "results": [],
+            "error": f"{type(exc).__name__}: {str(exc)[:240]}",
+            "message": "Screener sementara berjalan dalam mode aman karena data upstream belum tersedia.",
+            "config": {
+                "rvol_min": cfg["rvol_min"],
+                "change_min": cfg["change_min"],
+                "candidate_max": cfg["candidate_max"],
+                "min_score": cfg["min_score"],
+            },
+        }
