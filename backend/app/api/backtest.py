@@ -56,6 +56,66 @@ def calc_atr(candles: list, period: int = 14) -> float:
         trs.append(tr)
     return sum(trs) / len(trs)
 
+def _avg(values: list) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+def fast_historical_score(window: list, mode: str) -> float:
+    """Fast deterministic score for repeated historical backtest windows."""
+    if len(window) < 30:
+        return 0.0
+
+    closes = [float(c.get("close", 0) or 0) for c in window]
+    highs = [float(c.get("high", 0) or 0) for c in window]
+    lows = [float(c.get("low", 0) or 0) for c in window]
+    volumes = [float(c.get("volume", 0) or 0) for c in window]
+    close = closes[-1]
+    prev = closes[-2] if len(closes) > 1 else close
+    if close <= 0 or prev <= 0:
+        return 0.0
+
+    ma5 = _avg(closes[-5:])
+    ma20 = _avg(closes[-20:])
+    ma50 = _avg(closes[-50:]) if len(closes) >= 50 else ma20
+    vol20 = _avg(volumes[-20:])
+    vol_ratio = volumes[-1] / vol20 if vol20 else 1.0
+    momentum_3 = (close - closes[-4]) / closes[-4] * 100 if len(closes) >= 4 and closes[-4] else 0
+    momentum_10 = (close - closes[-11]) / closes[-11] * 100 if len(closes) >= 11 and closes[-11] else 0
+    range20_high = max(highs[-20:])
+    range20_low = min(lows[-20:])
+    range_pos = (close - range20_low) / max(range20_high - range20_low, 1)
+    atr = calc_atr(window)
+    atr_pct = atr / close * 100 if close else 0
+
+    score = 45.0
+    if close > ma20:
+        score += 8
+    if ma20 > ma50:
+        score += 8
+    if ma5 > ma20:
+        score += 6
+    if 0.3 <= momentum_3 <= 6:
+        score += 7
+    elif momentum_3 < -1:
+        score -= 8
+    if 1 <= momentum_10 <= 15:
+        score += 7
+    elif momentum_10 < -3:
+        score -= 8
+    if 1.2 <= vol_ratio <= 3.5:
+        score += 8
+    elif vol_ratio < 0.7:
+        score -= 5
+    if 0.55 <= range_pos <= 0.9:
+        score += 7
+    elif range_pos > 0.96:
+        score -= 4
+    if mode == "intraday" and 1.0 <= atr_pct <= 6.0:
+        score += 4
+    elif atr_pct > 10:
+        score -= 6
+
+    return round(max(0.0, min(100.0, score)), 2)
+
 # ── Core backtest per saham ───────────────────────────────────
 async def backtest_single(ticker: str, candles: list, mode: str, min_score: float) -> dict:
     from app.engines.master_runner import run_all_engines
@@ -131,15 +191,19 @@ async def backtest_single(ticker: str, candles: list, mode: str, min_score: floa
         # Generate signal setiap 3 candle
         if not in_trade and i % 3 == 0:
             try:
-                eng = await run_all_engines(ticker, window, mode)
-                score = eng.get("composite_score", 0)
-
-                # RAG boost
-                try:
-                    rag = await kb_service.get_kb_context_for_engine("PriceActionEngine", ticker)
-                    rag_boost = 5 if rag and len(rag) > 100 else 0
-                except:
+                if mode == "intraday":
+                    score = fast_historical_score(window, mode)
                     rag_boost = 0
+                else:
+                    eng = await run_all_engines(ticker, window, mode)
+                    score = eng.get("composite_score", 0)
+
+                    # RAG boost
+                    try:
+                        rag = await kb_service.get_kb_context_for_engine("PriceActionEngine", ticker)
+                        rag_boost = 5 if rag and len(rag) > 100 else 0
+                    except:
+                        rag_boost = 0
 
                 total_score = score + rag_boost
 
@@ -344,7 +408,8 @@ async def run_universe_backtest(job_id: str, req: BacktestRequest):
                 "timeframe": req.timeframe,
                 "period": req.period,
                 "universe": req.universe,
-                "min_score": req.min_score
+                "min_score": req.min_score,
+                "signal_engine": "fast_historical_score" if req.mode == "intraday" else "full_engine_stack"
             },
             "summary": {
                 "total_stocks_tested": len(all_results),
