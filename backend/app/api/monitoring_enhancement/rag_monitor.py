@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 _memory_cache: dict = {}
 RAG_COOLDOWN_SEC = 900  # 15 menit
 
-# 12 active knowledge-base literatures in production.
+# 13 target knowledge-base literatures.
 ALL_KB_SOURCES = [
     "file_1766768812634",
     "file_1766768868107",
@@ -38,6 +38,7 @@ ALL_KB_SOURCES = [
     "Technical Analysis of the Financial Markets",
     "Trade Setup Handbook",
     "ORDER FLOW Trading Setups",
+    "Order Flow Trading - Daemon Goldsmith",
     "Advances in Financial Machine Learning",
     "Trading and Exchanges - Larry Harris",
 ]
@@ -168,7 +169,7 @@ def _build_query(
 def _select_sources(trigger: RAGTrigger) -> list:
     """
     Pilih source KB yang paling relevan per trigger.
-    Tidak selalu query semua 12 buku — lebih efisien.
+    Tidak selalu query semua 13 buku — lebih efisien.
     """
     bandarmologi_books = ALL_KB_SOURCES[:3]
     technical_books    = ALL_KB_SOURCES[3:8]

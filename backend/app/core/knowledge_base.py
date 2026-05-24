@@ -17,6 +17,7 @@ ACTIVE_KB_LITERATURE = [
     "Technical Analysis of the Financial Markets - John Murphy",
     "Trade Setup Handbook",
     "ORDER FLOW Trading Setups - Trader Dale",
+    "Order Flow Trading: For Fun and Profit - Daemon Goldsmith",
     "Stock Trading & Investing Using Volume Price Analysis - Anna Coulling",
     "Advances in Financial Machine Learning - Marcos Lopez de Prado",
     "Trading and Exchanges / Market Microstructure - Larry Harris",
@@ -56,6 +57,12 @@ BOOK_PATTERNS: Dict[str, List[str]] = {
         "ORDER FLOW",
         "Trader Dale",
     ],
+    "goldsmith_orderflow": [
+        "Order Flow Trading",
+        "For Fun and Profit",
+        "Daemon Goldsmith",
+        "Goldsmith",
+    ],
     "murphy": [
         "Technical Analysis of the Financial Markets",
         "Murphy",
@@ -83,6 +90,7 @@ COLLECTION_TO_ENGINE = {
     "trend": "TrendStructureEngine",
     "support_resistance": "SupportResistanceEngine",
     "orderbook": "OrderbookEngine",
+    "order_flow": "OrderbookEngine",
     "broker_behavior": "BrokerBehaviorEngine",
     "bandarmologi": "BandarmologyEngine",
     "technical": "PriceActionEngine",
@@ -104,18 +112,18 @@ ENGINE_BOOK_MAP = {
     "VolumeIntelligenceEngine": ["coulling_vpa", "harris"],
     "RelativeVolumeEngine": ["coulling_vpa"],
     "MultiTimeframeEngine": ["murphy", "setup"],
-    "OrderBlockEngine": ["harris", "dale", "setup"],
-    "BreakOrderEngine": ["harris", "dale", "setup"],
-    "FairValueGapEngine": ["harris", "dale"],
-    "LiquidityEngine": ["harris", "dale", "coulling_vpa"],
+    "OrderBlockEngine": ["harris", "dale", "goldsmith_orderflow", "setup"],
+    "BreakOrderEngine": ["harris", "dale", "goldsmith_orderflow", "setup"],
+    "FairValueGapEngine": ["harris", "dale", "goldsmith_orderflow"],
+    "LiquidityEngine": ["harris", "dale", "goldsmith_orderflow", "coulling_vpa"],
     "BandarmologyEngine": ["bandarmologi", "coulling_vpa", "harris"],
     "InventoryEngine": ["harris", "coulling_vpa", "bandarmologi"],
-    "FlowMappingEngine": ["harris", "dale", "coulling_vpa"],
-    "IntradayPositioningEngine": ["dale", "harris", "coulling_vpa"],
-    "BrokerBehaviorEngine": ["harris", "coulling_vpa", "dale", "bandarmologi"],
+    "FlowMappingEngine": ["harris", "dale", "goldsmith_orderflow", "coulling_vpa"],
+    "IntradayPositioningEngine": ["dale", "goldsmith_orderflow", "harris", "coulling_vpa"],
+    "BrokerBehaviorEngine": ["harris", "coulling_vpa", "dale", "goldsmith_orderflow", "bandarmologi"],
     "ForeignFlowEngine": ["harris", "coulling_vpa", "bandarmologi"],
     "QuantEdgeEngine": ["lopezdeprado", "setup"],
-    "OrderbookEngine": ["dale", "harris"],
+    "OrderbookEngine": ["dale", "goldsmith_orderflow", "harris"],
     "RelativeStrengthEngine": ["murphy", "lopezdeprado"],
     "FibonacciEngine": ["boroden", "murphy"],
     "AIPatternRecognitionEngine": ["bulkowski", "murphy", "coulling_vpa"],
@@ -132,7 +140,7 @@ ENGINE_BOOK_MAP = {
     "AIConfidenceEngine": ["lopezdeprado", "setup"],
     "SmartRotationEngine": ["murphy", "harris"],
     "RealtimeAlertEngine": ["setup", "coulling_vpa"],
-    "LiquidityQualityEngine": ["harris", "dale", "coulling_vpa"],
+    "LiquidityQualityEngine": ["harris", "dale", "goldsmith_orderflow", "coulling_vpa"],
     # Monitoring enhancement aliases.
     "BandarTypeClassifier": ["harris", "coulling_vpa", "bandarmologi"],
     "BandarmologiMonitor": ["bandarmologi", "coulling_vpa"],
@@ -142,7 +150,7 @@ ENGINE_BOOK_MAP = {
     "RAGMonitor": ["bandarmologi", "harris", "murphy", "setup"],
     "AnalyticSetup": ["setup", "murphy", "coulling_vpa", "lopezdeprado"],
     "ScreenerBandarmologi": ["bandarmologi", "coulling_vpa", "harris"],
-    "ScalpingOrderflow": ["dale", "harris", "coulling_vpa"],
+    "ScalpingOrderflow": ["dale", "goldsmith_orderflow", "harris", "coulling_vpa"],
     "MLProbability": ["lopezdeprado"],
 }
 
@@ -285,6 +293,10 @@ async def query_trader_dale(query: str, n: int = 2) -> str:
     return await _query_book("dale", query, n)
 
 
+async def query_goldsmith_orderflow(query: str, n: int = 2) -> str:
+    return await _query_book("goldsmith_orderflow", query, n)
+
+
 async def query_murphy_ta(query: str, n: int = 2) -> str:
     return await _query_book("murphy", query, n)
 
@@ -300,7 +312,10 @@ async def query_lopezdeprado(query: str, n: int = 2) -> str:
 async def query_all_technical(query: str, n_per_book: int = 1) -> str:
     import asyncio
 
-    books = ["bulkowski", "boroden", "coulling_vpa", "harris", "dale", "murphy", "setup", "lopezdeprado"]
+    books = [
+        "bulkowski", "boroden", "coulling_vpa", "harris", "dale",
+        "goldsmith_orderflow", "murphy", "setup", "lopezdeprado"
+    ]
 
     async def safe_query(book):
         try:

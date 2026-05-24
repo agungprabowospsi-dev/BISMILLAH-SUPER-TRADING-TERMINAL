@@ -5,7 +5,7 @@ const BACKEND = 'https://backend-production-daed.up.railway.app'
 const CHECKS = [
   { key:'backend', label:'Backend API', endpoint:'/health', ok: d => d?.status==='ok'||d?.returncode===0 },
   { key:'data', label:'PostgreSQL Data', endpoint:'/api/analytic/data/status', ok: d => d?.status==='ok' },
-  { key:'kb', label:'Knowledge Base (12 buku)', endpoint:'/api/kb/documents', ok: d => d?.success&&d?.documents?.length>0 },
+  { key:'kb', label:'Knowledge Base (13 buku)', endpoint:'/api/kb/documents', ok: d => d?.success&&d?.documents?.length>0 },
 ]
 
 function dot(color, pulse=false) {
