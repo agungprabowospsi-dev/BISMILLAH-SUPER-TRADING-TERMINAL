@@ -83,6 +83,254 @@ class AnalyticRequest(BaseModel):
     mode: str = "swing"
     screener_context: ScreenerContext = None  # SA-1: dari screener
 
+
+def _round_price(value, fallback=0.0):
+    try:
+        value = float(value or fallback or 0)
+    except Exception:
+        value = float(fallback or 0)
+    return float(round(value, 0))
+
+
+def build_setup_action_plan(
+    *,
+    mode: str,
+    verdict: str,
+    setup_type: str,
+    setup_reason: str,
+    entry_method: str,
+    current: float,
+    entry: float,
+    stop_loss: float,
+    tp1: float,
+    tp2: float,
+    tp3: float,
+    atr: float,
+    range_high_20: float,
+    range_low_20: float,
+    ma20: float,
+    ma50: float,
+    rvol: float,
+    wyckoff_phase: str,
+    weinstein_stage: int,
+    vsa_signal: str,
+    enrichment_verdict: str,
+    foreign_signal: str,
+    price_dist: dict,
+    empirical_memory: dict,
+) -> dict:
+    """Turn a verdict into an executable setup contract for Swing/Intraday."""
+    mode_l = (mode or "swing").lower()
+    is_intraday = mode_l in ("intraday", "scalping")
+    setup = (setup_type or "neutral").lower()
+    verdict = verdict or "WAIT"
+    wyckoff = (wyckoff_phase or "UNKNOWN").upper()
+    vsa = (vsa_signal or "NONE").upper()
+    foreign = (foreign_signal or "NEUTRAL").upper()
+    poc = float((price_dist or {}).get("poc_price", 0) or 0)
+    support = _round_price(range_low_20 or current)
+    resistance = _round_price(range_high_20 or current)
+    ma_level = _round_price(ma20 or current)
+    trigger_buffer = 1.002 if is_intraday else 1.005
+    trigger = _round_price((resistance or current) * trigger_buffer)
+    retest_zone = _round_price(resistance or ma_level or current)
+    accumulation_zone = _round_price(poc if poc > 0 else support)
+    invalidation = _round_price(min(support, stop_loss or support))
+    min_rvol = 1.2 if is_intraday else 1.3
+
+    action = {
+        "decision": verdict,
+        "setup_type": (setup_type or "neutral").upper(),
+        "order_type": entry_method or "MARKET_ORDER",
+        "timeframe": "INTRADAY" if is_intraday else "SWING",
+        "current_price": _round_price(current),
+        "trigger_price": trigger,
+        "entry_price": _round_price(entry or current),
+        "entry_zone_low": _round_price(entry or current),
+        "entry_zone_high": _round_price(entry or current),
+        "stop_loss": _round_price(stop_loss or invalidation),
+        "take_profit_1": _round_price(tp1),
+        "take_profit_2": _round_price(tp2),
+        "take_profit_3": _round_price(tp3),
+        "support": support,
+        "resistance": resistance,
+        "invalidation_price": invalidation,
+        "next_action": setup_reason or "Tunggu setup lebih jelas.",
+        "confirmation_needed": [],
+        "invalidation_rules": [],
+        "aggressive_plan": "",
+        "conservative_plan": "",
+    }
+
+    bearish_structure = wyckoff in ("MARKDOWN", "DISTRIBUTION") or setup.startswith("bearish") or setup == "distribution_warning"
+    reversal_signal = vsa in ("STOPPING_VOLUME", "NO_SUPPLY", "TEST") or wyckoff == "ACCUMULATION"
+    empirical_ok = bool(
+        (empirical_memory or {}).get("available")
+        and float((empirical_memory or {}).get("winrate", 0) or 0) >= 58
+    )
+
+    if verdict == "NO GO" or setup in ("bearish_breakdown", "bearish_continuation", "bearish_reversal", "distribution_warning"):
+        action.update({
+            "decision": "NO GO",
+            "setup_type": "NO_LONG_ENTRY",
+            "order_type": "NO_LONG_ENTRY",
+            "entry_zone_low": 0,
+            "entry_zone_high": 0,
+            "next_action": "Tidak ada entry long valid sampai struktur bearish batal.",
+            "confirmation_needed": [
+                f"Reclaim di atas {trigger} dengan RVOL >= {min_rvol}",
+                "Wyckoff tidak lagi MARKDOWN/DISTRIBUTION",
+                "Tidak ada distribusi lanjutan atau foreign heavy sell",
+            ],
+            "invalidation_rules": [
+                f"Close tetap di bawah support {support}",
+                "Weinstein Stage 4 atau breakdown lanjutan",
+            ],
+            "aggressive_plan": "Tidak disarankan.",
+            "conservative_plan": "Masukkan watchlist saja sampai reversal/reclaim terkonfirmasi.",
+        })
+        return action
+
+    if bearish_structure and not (reversal_signal and empirical_ok):
+        action.update({
+            "decision": "WAIT",
+            "setup_type": "WAIT_REVERSAL_CONFIRMATION",
+            "order_type": "NO_MARKET_ENTRY",
+            "trigger_price": trigger,
+            "entry_price": trigger,
+            "entry_zone_low": retest_zone,
+            "entry_zone_high": trigger,
+            "stop_loss": invalidation,
+            "invalidation_price": invalidation,
+            "next_action": "Tunggu perubahan struktur dari markdown/distribution menjadi reversal yang terkonfirmasi.",
+            "confirmation_needed": [
+                f"Reclaim dan close di atas {trigger}",
+                f"RVOL >= {min_rvol}",
+                "Wyckoff berubah ke ACCUMULATION/REACCUMULATION atau muncul SPRING/SOS/TEST",
+                "Tidak ada UPTHRUST/NO_DEMAND setelah reclaim",
+            ],
+            "invalidation_rules": [
+                f"Close breakdown di bawah {support}",
+                "Foreign berubah NET SELL besar atau bandar score makin melemah",
+            ],
+            "aggressive_plan": f"Buy stop hanya setelah reclaim {trigger}.",
+            "conservative_plan": f"Tunggu retest valid ke {retest_zone} setelah reclaim.",
+        })
+        return action
+
+    if setup == "bullish_breakout" or entry_method in ("BUY_STOP_BREAKOUT", "BULKOWSKI_MEASURE_RULE"):
+        action.update({
+            "setup_type": "GO_BUY_STOP_BREAKOUT" if verdict in ("GO", "STRONG GO") else "WAIT_BREAKOUT_CONFIRMATION",
+            "order_type": "BUY_STOP_BREAKOUT" if verdict in ("GO", "STRONG GO") else "WAIT_CLOSE_CONFIRMATION",
+            "trigger_price": trigger,
+            "entry_price": trigger,
+            "entry_zone_low": trigger,
+            "entry_zone_high": _round_price(trigger + atr * 0.3),
+            "next_action": f"Tunggu breakout valid di atas {trigger}.",
+            "confirmation_needed": [
+                f"Close di atas resistance {resistance}",
+                f"RVOL >= {min_rvol}",
+                "Breakout tidak langsung kembali ke bawah resistance",
+            ],
+            "invalidation_rules": [f"Close kembali di bawah {resistance}", f"Breakdown support {support}"],
+            "aggressive_plan": f"Buy stop di {trigger}.",
+            "conservative_plan": f"Tunggu throwback/retest ke {resistance}.",
+        })
+    elif setup == "bullish_pullback":
+        zone_low = _round_price(ma_level - atr * 0.25)
+        zone_high = _round_price(ma_level + atr * 0.25)
+        action.update({
+            "setup_type": "GO_LIMIT_PULLBACK" if verdict in ("GO", "STRONG GO") else "WAIT_PULLBACK_ZONE",
+            "order_type": "LIMIT_PULLBACK",
+            "trigger_price": zone_high,
+            "entry_price": ma_level,
+            "entry_zone_low": zone_low,
+            "entry_zone_high": zone_high,
+            "next_action": f"Tunggu pullback sehat ke area {zone_low}-{zone_high}.",
+            "confirmation_needed": [
+                "Trend tetap di atas MA utama",
+                "Volume koreksi lebih kecil dari volume naik",
+                "Muncul bounce/rejection di area pullback",
+            ],
+            "invalidation_rules": [f"Close di bawah {invalidation}", "Pullback berubah jadi distribusi"],
+            "aggressive_plan": f"Limit bertahap di area {zone_low}-{zone_high}.",
+            "conservative_plan": f"Tunggu candle bounce dari area {zone_low}-{zone_high}.",
+        })
+    elif setup == "bullish_accumulation":
+        zone = accumulation_zone or support
+        action.update({
+            "setup_type": "GO_LIMIT_ACCUMULATION" if verdict in ("GO", "STRONG GO") and wyckoff != "MARKDOWN" else "WAIT_ACCUMULATION_CONFIRMATION",
+            "order_type": "LIMIT_ACCUMULATION" if verdict in ("GO", "STRONG GO") and wyckoff != "MARKDOWN" else "NO_MARKET_ENTRY",
+            "trigger_price": trigger,
+            "entry_price": zone,
+            "entry_zone_low": _round_price(zone - atr * 0.25),
+            "entry_zone_high": _round_price(zone + atr * 0.25),
+            "next_action": f"Pantau akumulasi di area {zone}; jangan chase.",
+            "confirmation_needed": [
+                "Absorption/POC tetap bertahan",
+                "Foreign/institusi tetap net buy",
+                f"Reclaim resistance {resistance} untuk upgrade menjadi GO breakout",
+            ],
+            "invalidation_rules": [f"Close di bawah {support}", "POC gagal bertahan atau muncul distribusi"],
+            "aggressive_plan": f"Akumulasi kecil dekat {zone} hanya jika risk terkendali.",
+            "conservative_plan": f"Tunggu reclaim {trigger} atau retest valid setelah reclaim.",
+        })
+    elif setup == "bullish_reversal":
+        action.update({
+            "decision": "WAIT" if verdict == "GO" else verdict,
+            "setup_type": "WAIT_REVERSAL_CONFIRMATION",
+            "order_type": "NO_MARKET_ENTRY",
+            "trigger_price": trigger,
+            "entry_price": trigger,
+            "entry_zone_low": support,
+            "entry_zone_high": trigger,
+            "next_action": "Tunggu reversal confirmation sebelum entry.",
+            "confirmation_needed": [
+                f"Reclaim {trigger}",
+                "Spring/stopping volume/test terkonfirmasi",
+                "Higher low terbentuk setelah reclaim",
+            ],
+            "invalidation_rules": [f"Close di bawah {support}", "Reversal gagal dan breakdown berlanjut"],
+            "aggressive_plan": f"Buy stop di {trigger} setelah reclaim.",
+            "conservative_plan": f"Tunggu retest higher low di atas {support}.",
+        })
+    elif setup == "bullish_continuation":
+        action.update({
+            "setup_type": "GO_MARKET_MOMENTUM" if is_intraday and verdict in ("GO", "STRONG GO") else "GO_CONTINUATION_CONFIRMATION",
+            "order_type": "MARKET_MOMENTUM" if is_intraday and verdict in ("GO", "STRONG GO") else "WAIT_CLOSE_CONFIRMATION",
+            "confirmation_needed": [
+                "Momentum tetap di atas support intraday/MA",
+                f"RVOL >= {min_rvol}",
+                "Tidak ada exhaustion/upthrust",
+            ],
+            "invalidation_rules": [f"Close di bawah {ma_level}", f"Breakdown support {support}"],
+            "aggressive_plan": "Market hanya jika momentum dan likuiditas masih aktif.",
+            "conservative_plan": f"Tunggu pullback ke {ma_level}.",
+        })
+    else:
+        action.update({
+            "decision": "WAIT" if verdict in ("GO", "STRONG GO") else verdict,
+            "setup_type": "WAIT_SETUP_CONFIRMATION",
+            "order_type": "NO_MARKET_ENTRY",
+            "next_action": "Belum ada entry dominan; tunggu trigger yang lebih bersih.",
+            "confirmation_needed": [
+                f"Breakout di atas {trigger} atau pullback valid ke {ma_level}",
+                "Volume dan broker flow mendukung",
+            ],
+            "invalidation_rules": [f"Breakdown di bawah {support}"],
+            "aggressive_plan": "Tidak disarankan sebelum setup jelas.",
+            "conservative_plan": "Masuk watchlist sampai trigger muncul.",
+        })
+
+    if enrichment_verdict == "SKIP":
+        action["decision"] = "NO GO"
+        action["order_type"] = "NO_LONG_ENTRY"
+        action["setup_type"] = "NO_LONG_ENTRY"
+        action["next_action"] = "Enrichment SKIP; tunggu kondisi membaik."
+
+    return action
+
+
 @router.post("/analyze")
 async def analyze(req: AnalyticRequest):
     try:
@@ -123,7 +371,7 @@ async def analyze(req: AnalyticRequest):
         # ALIGNMENT-FIX: Trust screener Grade A/B to avoid re-computation
         use_screener_score = False
         if req.screener_context and req.screener_context.grade.upper() in ("A", "B"):
-            if req.screener_context.score >= 65:
+            if req.screener_context.score >= 55:
                 # Screener already validated — use its score
                 use_screener_score = True
                 score = float(req.screener_context.score)
@@ -246,7 +494,7 @@ async def analyze(req: AnalyticRequest):
             sc_score = req.screener_context.score
             if sc_grade == "A" and sc_score >= 75:
                 go_reasons.append(f"Screener Grade A (score {sc_score:.1f}) — fully pre-validated")
-            elif sc_grade == "B" and sc_score >= 65:
+            elif sc_grade == "B" and sc_score >= 55:
                 go_reasons.append(f"Screener Grade B (score {sc_score:.1f}) — qualified candidate")
             elif sc_grade in ("C", "D"):
                 no_go_reasons.append(f"Screener Grade {sc_grade} — kandidat lemah dari screener")
@@ -270,8 +518,8 @@ async def analyze(req: AnalyticRequest):
             # Grade A + score >= 75 → override score<55 dan no_score<=2
             if sc_grade == "A" and sc_score >= 75 and no_score <= 2:
                 screener_grade_override = True
-            # Grade B + score >= 65 → override score<55 saja, no_score<=1
-            elif sc_grade == "B" and sc_score >= 65 and no_score <= 1:
+            # Grade B + score >= 55 -> override score<55 saja, no_score<=1
+            elif sc_grade == "B" and sc_score >= 55 and no_score <= 1:
                 screener_grade_override = True
 
         if (enrichment_verdict == "SKIP" or weinstein_stage == 4 or score < 55) and not screener_grade_override:
@@ -774,7 +1022,7 @@ Top Brokers: {", ".join(top_brokers[:5])}
             sc_score = req.screener_context.score
             if sc_grade == "A" and sc_score >= 75 and no_score <= 2:
                 screener_grade_override = True
-            elif sc_grade == "B" and sc_score >= 65 and no_score <= 1:
+            elif sc_grade == "B" and sc_score >= 55 and no_score <= 1:
                 screener_grade_override = True
 
         if (enrichment_verdict == "SKIP" or weinstein_stage == 4 or score < 55) and not screener_grade_override:
@@ -793,6 +1041,39 @@ Top Brokers: {", ".join(top_brokers[:5])}
             go_no_go = "WAIT"
             go_confidence = 50
 
+        action_plan = build_setup_action_plan(
+            mode=req.mode,
+            verdict=go_no_go,
+            setup_type=setup_type,
+            setup_reason=setup_reason,
+            entry_method=entry_method if 'entry_method' in locals() else "MARKET_ORDER",
+            current=current,
+            entry=entry,
+            stop_loss=sl,
+            tp1=tp1,
+            tp2=tp2,
+            tp3=tp3,
+            atr=atr,
+            range_high_20=range_high_20,
+            range_low_20=range_low_20,
+            ma20=ma20,
+            ma50=ma50,
+            rvol=rvol,
+            wyckoff_phase=wyckoff_phase,
+            weinstein_stage=weinstein_stage,
+            vsa_signal=vsa_signal,
+            enrichment_verdict=enrichment_verdict,
+            foreign_signal=foreign_signal if 'foreign_signal' in locals() else "NEUTRAL",
+            price_dist=price_dist if 'price_dist' in locals() else {},
+            empirical_memory=empirical_memory,
+        )
+        if action_plan.get("decision") in ("WAIT", "NO GO"):
+            go_no_go = action_plan["decision"]
+            if go_no_go == "WAIT" and go_confidence < 45:
+                go_confidence = 45
+        setup_type = action_plan.get("setup_type", setup_type)
+        entry_method = action_plan.get("order_type", entry_method if 'entry_method' in locals() else "MARKET_ORDER")
+
         rationale = await ask_claude(
             system="Kamu adalah analis saham IDX profesional. Berikan analisis trading yang jelas dan actionable dalam Bahasa Indonesia.",
             prompt=f"""
@@ -802,6 +1083,8 @@ Entry: {entry} | SL: {sl} | TP1: {tp1} | TP2: {tp2} | TP3: {tp3}
 R:R = {rr}
 Setup Type: {setup_type}
 Setup Reason: {setup_reason}
+Action Plan: {action_plan.get('decision')} | {action_plan.get('setup_type')} | {action_plan.get('order_type')}
+Trigger: {action_plan.get('trigger_price')} | Entry Zone: {action_plan.get('entry_zone_low')} - {action_plan.get('entry_zone_high')} | Invalidation: {action_plan.get('invalidation_price')}
 Engine: {all_engines.get('bullish_count', 0)} bullish, {all_engines.get('bearish_count', 0)} bearish dari 10 engines
 {market_regime_context}
 {foreign_flow_context}
@@ -846,6 +1129,15 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "market_regime": regime if 'regime' in dir() else "N/A",
             "setup_type": setup_type,
             "setup_reason": setup_reason,
+            "action_plan": action_plan,
+            "entry_order_type": action_plan.get("order_type"),
+            "trigger_price": action_plan.get("trigger_price"),
+            "entry_zone_low": action_plan.get("entry_zone_low"),
+            "entry_zone_high": action_plan.get("entry_zone_high"),
+            "invalidation_price": action_plan.get("invalidation_price"),
+            "next_action": action_plan.get("next_action"),
+            "confirmation_needed": action_plan.get("confirmation_needed", []),
+            "invalidation_rules": action_plan.get("invalidation_rules", []),
             "setup_metrics": {
                 "ma20": float(ma20),
                 "ma50": float(ma50),

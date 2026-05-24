@@ -14,6 +14,11 @@ const GROUPS = [
   {key:'group4',label:'Decision Control',color:'#8B5CF6'},
 ]
 
+const fmtPrice = (value) => {
+  const n = Number(value || 0)
+  return n > 0 ? `Rp ${n.toLocaleString('id-ID')}` : '-'
+}
+
 export default function AnalyticPage() {
   const { analyticTicker, setAnalyticTicker, analyticMode, setAnalyticMode, screenerSelectedStock,
     analyticResult, setAnalyticResult, analyticLoading, setAnalyticLoading,
@@ -32,7 +37,7 @@ export default function AnalyticPage() {
         const s = screenerSelectedStock
         const sc = s.final_score || s.score || 0
         screenerCtx = {
-          grade: sc >= 75 ? 'A' : sc >= 65 ? 'B' : sc >= 55 ? 'C' : 'D',
+          grade: sc >= 75 ? 'A' : sc >= 55 ? 'B' : sc >= 45 ? 'C' : 'D',
           score: sc,
           wyckoff_phase: s.bandarmology?.wyckoff_phase || s.wyckoff_phase || '',
           weinstein_stage: s.bandarmology?.weinstein_stage || s.weinstein_stage || 0,
@@ -339,6 +344,43 @@ export default function AnalyticPage() {
                 </div>
               )}
               {/* WIN PROBABILITY — ML Engine */}
+              {r.action_plan && (
+                <div className="w-full rounded-xl border border-accent-gold/40 bg-accent-gold/10 px-3 py-3 text-left">
+                  <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500 mb-2">
+                    Executable Setup Plan
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      ['Setup', String(r.action_plan.setup_type || r.setup_type || '').replace(/_/g, ' ')],
+                      ['Order', String(r.action_plan.order_type || r.entry_order_type || '').replace(/_/g, ' ')],
+                      ['Trigger', fmtPrice(r.action_plan.trigger_price)],
+                      ['Entry Zone', `${fmtPrice(r.action_plan.entry_zone_low)} - ${fmtPrice(r.action_plan.entry_zone_high)}`],
+                      ['Stop', fmtPrice(r.action_plan.stop_loss || r.stop_loss)],
+                      ['Invalidation', fmtPrice(r.action_plan.invalidation_price)],
+                    ].map(([k,v]) => (
+                      <div key={k} className="rounded-lg border border-slate-200 bg-white/70 px-2 py-1.5">
+                        <p className="font-mono text-[9px] uppercase tracking-wider text-slate-500">{k}</p>
+                        <p className="font-mono text-[11px] font-bold text-slate-900">{v}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {r.action_plan.next_action && (
+                    <p className="mt-2 font-mono text-[11px] leading-relaxed text-slate-700">
+                      {r.action_plan.next_action}
+                    </p>
+                  )}
+                  {r.action_plan.confirmation_needed?.length > 0 && (
+                    <div className="mt-2">
+                      <p className="font-mono text-[9px] uppercase tracking-widest text-slate-500">Confirmation Needed</p>
+                      <div className="mt-1 space-y-0.5">
+                        {r.action_plan.confirmation_needed.slice(0, 4).map((x, i) => (
+                          <p key={i} className="font-mono text-[10px] text-slate-700">- {x}</p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
               {r.win_probability && (
                 <div className="w-full rounded-xl border px-3 py-2 text-center" style={{borderColor: r.win_probability.color+'40', background: r.win_probability.color+'10'}}>
                   <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">Win Probability</p>
@@ -363,8 +405,11 @@ export default function AnalyticPage() {
             <div className="card p-5 space-y-3">
               <p className="label-xs">Trade Setup</p>
               {[
-                ['Entry Price', r.entry, 'text-accent-green'],
-                ['Stop Loss', r.dynamic_sltp?.sl || r.stop_loss||r.sl, 'text-accent-red'],
+                ['Order Type', String(r.action_plan?.order_type || r.entry_order_type || r.entry_method || '').replace(/_/g, ' '), 'text-accent-blue'],
+                ['Trigger Price', r.action_plan?.trigger_price || r.trigger_price, 'text-accent-gold'],
+                ['Entry Price', r.action_plan?.entry_price || r.entry, 'text-accent-green'],
+                ['Entry Zone', r.action_plan ? `${fmtPrice(r.action_plan.entry_zone_low)} - ${fmtPrice(r.action_plan.entry_zone_high)}` : null, 'text-accent-green'],
+                ['Stop Loss', r.action_plan?.stop_loss || r.dynamic_sltp?.sl || r.stop_loss||r.sl, 'text-accent-red'],
                 ['Take Profit 1', r.dynamic_sltp?.tp1 || r.tp1, 'text-accent-gold'],
                 ['Take Profit 2', r.dynamic_sltp?.tp2 || r.tp2, 'text-accent-gold'],
                 ['Take Profit 3', r.dynamic_sltp?.tp3 || r.tp3, 'text-accent-gold'],
@@ -400,8 +445,8 @@ export default function AnalyticPage() {
               )}
               <button onClick={() => sendToMonitoring({
                 ticker:r.ticker||analyticTicker,
-                entry_price:r.entry,
-                stop_loss:r.dynamic_sltp?.sl||r.stop_loss||r.sl,
+                entry_price:r.action_plan?.entry_price||r.entry,
+                stop_loss:r.action_plan?.stop_loss||r.dynamic_sltp?.sl||r.stop_loss||r.sl,
                 take_profit:r.dynamic_sltp?.tp1||r.tp1,
                 take_profit_1:r.dynamic_sltp?.tp1||r.tp1,
                 take_profit_2:r.dynamic_sltp?.tp2||r.tp2,
@@ -419,7 +464,8 @@ export default function AnalyticPage() {
                   go_confidence: r.go_confidence || 50,
                   go_reasons: r.go_reasons || [],
                   no_go_reasons: r.no_go_reasons || [],
-                  win_probability: r.win_probability || 50
+                  win_probability: r.win_probability || 50,
+                  action_plan: r.action_plan || null
                 }
               })} className="btn-primary w-full flex items-center justify-center gap-2 mt-2">
                 Monitor Posisi<ArrowRight className="w-4 h-4"/>
