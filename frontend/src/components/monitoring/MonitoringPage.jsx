@@ -58,6 +58,18 @@ function formatBil(value) {
   return `${sign}${num.toLocaleString('id-ID', { maximumFractionDigits: 2 })}B`
 }
 
+function normalizeEngineScores(scores) {
+  if (Array.isArray(scores)) {
+    return Object.fromEntries(scores.map((e) => [e.engine || e.name || 'unknown', Number(e.score || 0)]))
+  }
+  if (scores && typeof scores === 'object') return scores
+  return {}
+}
+
+function warningLevel(level) {
+  return String(level || 'LOW').toUpperCase()
+}
+
 export default function MonitoringPage() {
   const [positions, setPositions] = useState(() => {
     try {
@@ -143,6 +155,7 @@ export default function MonitoringPage() {
       warnings: engine?.warnings ?? pos.warnings,
       rr: engine?.rr ?? pos.rr,
       analytic_context: engine?.analytic_context ?? pos.analytic_context,
+      empirical_memory: engine?.empirical_memory ?? pos.empirical_memory,
     }
   }
 
@@ -164,6 +177,7 @@ export default function MonitoringPage() {
       alert('Ticker, Entry Price, dan Stop Loss wajib diisi!')
       return
     }
+    const inputCtx = useStore.getState().monitoringInput || {}
     const newPos = {
       id: Date.now(),
       ticker,
@@ -182,12 +196,16 @@ export default function MonitoringPage() {
       status: 'HOLD',
       pnl: 0, pnl_pct: 0,
       institutional_alerts: [], engine_context: null, warnings: [], rr: null,
-      engine_scores: (useStore.getState().monitoringInput || {}).engine_scores || {},
-      market_regime: (useStore.getState().monitoringInput || {}).market_regime || 'SIDEWAYS',
-      final_score: (useStore.getState().monitoringInput || {}).final_score || 50.0,
-      kb_context: (useStore.getState().monitoringInput || {}).kb_context || '',
-      analytic_context: (useStore.getState().monitoringInput || {}).analytic_context || {},
+      engine_scores: normalizeEngineScores(inputCtx.engine_scores || {}),
+      market_regime: inputCtx.market_regime || 'SIDEWAYS',
+      lq45_change: inputCtx.lq45_change || 0,
+      breadth_ratio: inputCtx.breadth_ratio || 50,
+      final_score: inputCtx.final_score || 50.0,
+      kb_context: inputCtx.kb_context || '',
+      analytic_context: inputCtx.analytic_context || {},
+      empirical_memory: inputCtx.analytic_context?.empirical_memory || null,
     }
+    setMonitoringInput(null)
     setShowForm(false)
     setForm({ ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'INTRADAY',lot:'',broker:'',entry_score:'' })
     const enriched = (await refreshOne(newPos)) || newPos
@@ -436,6 +454,54 @@ export default function MonitoringPage() {
                         </p>
                       </div>
                     </div>
+                    {pos.analytic_context.action_plan && (
+                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border-dim text-xs font-mono">
+                        <div>
+                          <p className="text-slate-600">Setup</p>
+                          <p className="text-white font-bold uppercase">
+                            {String(pos.analytic_context.action_plan.setup_type || pos.analytic_context.setup_type || '-').replace(/_/g, ' ')}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-slate-600">Order</p>
+                          <p className="text-accent-blue font-bold uppercase">
+                            {String(pos.analytic_context.action_plan.order_type || '-').replace(/_/g, ' ')}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-slate-600">Trigger</p>
+                          <p className="text-accent-gold font-bold">
+                            Rp {Number(pos.analytic_context.action_plan.trigger_price || 0).toLocaleString('id-ID')}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-slate-600">Invalidation</p>
+                          <p className="text-accent-red font-bold">
+                            Rp {Number(pos.analytic_context.action_plan.invalidation_price || 0).toLocaleString('id-ID')}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {pos.empirical_memory && (
+                  <div className="bg-bg-secondary border border-border-dim rounded p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="label-xs">15Y HISTORICAL MEMORY</p>
+                      <span className={clsx('text-[10px] font-mono font-bold px-2 py-0.5 rounded border',
+                        pos.empirical_memory.available
+                          ? 'text-accent-green border-accent-green/30 bg-accent-green/5'
+                          : 'text-accent-gold border-accent-gold/30 bg-accent-gold/5')}>
+                        {pos.empirical_memory.available ? 'ACTIVE' : 'LEARNING'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                      <div><p className="text-slate-600">Pattern</p><p className="text-white font-bold">{pos.empirical_memory.pattern_key || '-'}</p></div>
+                      <div><p className="text-slate-600">Sample</p><p className="text-white font-bold">{pos.empirical_memory.sample_count || '-'}</p></div>
+                      <div><p className="text-slate-600">Winrate</p><p className="text-white font-bold">{pos.empirical_memory.available ? `${Number(pos.empirical_memory.winrate || 0).toFixed(1)}%` : '-'}</p></div>
+                      <div><p className="text-slate-600">Expectancy</p><p className="text-white font-bold">{pos.empirical_memory.available ? `${Number(pos.empirical_memory.expectancy_pct || 0).toFixed(2)}%` : '-'}</p></div>
+                    </div>
                   </div>
                 )}
 
@@ -443,7 +509,7 @@ export default function MonitoringPage() {
                 {pos.engine_context && (
                   <div className="bg-bg-secondary border border-border-dim rounded p-3 space-y-2">
                     <div className="flex items-center justify-between">
-                      <p className="label-xs">35 ENGINE CONTEXT</p>
+                      <p className="label-xs">MONITORING ENGINE CONTEXT</p>
                       <span className="text-[10px] font-mono text-accent-green border border-accent-green/30 bg-accent-green/5 px-2 py-0.5 rounded">
                         Score: {Number(pos.engine_context.composite_score||0).toFixed(1)}
                       </span>
@@ -460,7 +526,18 @@ export default function MonitoringPage() {
                           {pos.engine_context.bandarmology_included?'ACTIVE':'OFF'}
                         </p>
                       </div>
-                      <div><p className="text-slate-600">Engines</p><p className="text-white font-bold">{pos.engine_context.total_engines||35}</p></div>
+                      <div><p className="text-slate-600">BrokerBehavior</p>
+                        <p className={pos.engine_context.broker_behavior_included?'text-accent-green font-bold':'text-slate-500'}>
+                          {pos.engine_context.broker_behavior_included?'ACTIVE':'OFF'}
+                        </p>
+                      </div>
+                      <div><p className="text-slate-600">Engines</p><p className="text-white font-bold">{pos.engine_context.total_engines||8}</p></div>
+                      <div>
+                        <p className="text-slate-600">Bull/Bear</p>
+                        <p className="text-white font-bold">
+                          {Number(pos.engine_context.bullish_count || 0)}/{Number(pos.engine_context.bearish_count || 0)}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -612,11 +689,11 @@ export default function MonitoringPage() {
                 {/* Early Warning System */}
                 {pos.warnings?.length > 0 && pos.warnings.map((w,j) => (
                   <div key={j} className={`flex items-center gap-2 text-xs font-mono rounded px-2 py-1 ${
-                    w.level==='HIGH'?'text-accent-red bg-accent-red/5 border border-accent-red/20':
-                    w.level==='MEDIUM'?'text-accent-gold bg-accent-gold/5 border border-accent-gold/20':
+                    warningLevel(w.level)==='HIGH'?'text-accent-red bg-accent-red/5 border border-accent-red/20':
+                    warningLevel(w.level)==='MEDIUM'?'text-accent-gold bg-accent-gold/5 border border-accent-gold/20':
                     'text-slate-400 bg-slate-600/5 border border-slate-600/20'}`}>
                     <AlertTriangle className="w-3 h-3 shrink-0"/>
-                    <span className="font-bold mr-1">[{w.level||'INFO'}]</span>{w.message||w}
+                    <span className="font-bold mr-1">[{warningLevel(w.level)}]</span>{w.message||w.msg||w}
                   </div>
                 ))}
 

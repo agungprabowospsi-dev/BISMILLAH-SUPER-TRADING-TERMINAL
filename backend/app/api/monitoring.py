@@ -2,8 +2,8 @@ from app.ml.signal_quality import add_training_sample
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import JSONResponse
 import json
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Any, Optional
 import asyncio
 import json
 from app.core import invesgo
@@ -53,20 +53,67 @@ class MonitoringRequest(BaseModel):
     take_profit_3: float = 0.0  # M-1: TP3
     mode: str = "swing"
     # ML Training fields — diisi otomatis dari Analytic
-    engine_scores: dict = {}
+    engine_scores: Any = Field(default_factory=dict)
     market_regime: str = "SIDEWAYS"
     lq45_change: float = 0.0
     breadth_ratio: float = 50.0
     final_score: float = 50.0
     kb_context: str = ""
-    analytic_context: dict = {}
+    analytic_context: dict = Field(default_factory=dict)
 
 _active_monitors = {}
+
+def normalize_engine_scores(scores: Any) -> dict:
+    if isinstance(scores, dict):
+        return scores
+    if isinstance(scores, list):
+        normalized = {}
+        for item in scores:
+            if isinstance(item, dict):
+                name = item.get("engine") or item.get("name")
+                if name:
+                    normalized[name] = float(item.get("score") or 0)
+        return normalized
+    return {}
+
+def analytic_alignment_warnings(analytic_context: dict, current: float) -> list:
+    warnings = []
+    if not analytic_context:
+        return warnings
+
+    verdict = str(analytic_context.get("go_no_go") or "").upper()
+    if verdict in ("NO GO", "WAIT"):
+        warnings.append({
+            "level": "MEDIUM",
+            "type": "ANALYTIC_DECISION_CONTEXT",
+            "message": f"Analytic decision awal adalah {verdict}; posisi wajib dimonitor lebih ketat terhadap invalidation.",
+        })
+
+    action_plan = analytic_context.get("action_plan") or {}
+    if action_plan:
+        invalidation = float(action_plan.get("invalidation_price") or 0)
+        trigger = float(action_plan.get("trigger_price") or 0)
+        order_type = str(action_plan.get("order_type") or "").upper()
+        if invalidation > 0 and current <= invalidation:
+            warnings.append({
+                "level": "HIGH",
+                "type": "ACTION_PLAN_INVALIDATION",
+                "message": f"Current price {current} sudah menyentuh/bawah invalidation {invalidation}.",
+            })
+        if order_type in ("NO_MARKET_ENTRY", "WAIT_CLOSE_CONFIRMATION") and trigger > 0 and current < trigger:
+            warnings.append({
+                "level": "LOW",
+                "type": "TRIGGER_NOT_CONFIRMED",
+                "message": f"Trigger analytic {trigger} belum terkonfirmasi; jangan tambah posisi sebelum reclaim.",
+            })
+    return warnings
 
 @router.post("/start")
 async def start_monitoring(req: MonitoringRequest):
     monitoring_id = f"{req.ticker}_{req.mode}_{int(req.entry_price)}"
-    _active_monitors[monitoring_id] = req.dict()
+    payload = req.dict()
+    payload["engine_scores"] = normalize_engine_scores(payload.get("engine_scores"))
+    _active_monitors[monitoring_id] = payload
     return {"monitoring_id": monitoring_id, "status": "active"}
 
 @router.get("/status/{monitoring_id}")
@@ -89,7 +136,7 @@ async def get_status(monitoring_id: str):
         # ML Training — outcome = 0 (loss)
         try:
             add_training_sample(
-                engine_scores=pos.get("engine_scores", {}),
+                engine_scores=normalize_engine_scores(pos.get("engine_scores", {})),
                 market_regime=pos.get("market_regime", "SIDEWAYS"),
                 lq45_change=pos.get("lq45_change", 0.0),
                 breadth_ratio=pos.get("breadth_ratio", 50.0),
@@ -105,7 +152,7 @@ async def get_status(monitoring_id: str):
         # ML Training — outcome = 1 (win)
         try:
             add_training_sample(
-                engine_scores=pos.get("engine_scores", {}),
+                engine_scores=normalize_engine_scores(pos.get("engine_scores", {})),
                 market_regime=pos.get("market_regime", "SIDEWAYS"),
                 lq45_change=pos.get("lq45_change", 0.0),
                 breadth_ratio=pos.get("breadth_ratio", 50.0),
@@ -433,6 +480,9 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
             except Exception:
                 continue
 
+        engine_details = sanitize_for_json({e["engine"]: e for e in engine_result.get("engines", [])})
+        engine_names = set(engine_details.keys())
+
         return {
             "engines_used": True,
             "engine_scope": "monitoring_bridge",
@@ -444,9 +494,10 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
             "rag_used": rag_count > 0,
             "rag_context_count": rag_count,
             "rag_engines": rag_engines,
-            "bandarmology_included": "BandarmologyEngine" in rag_engines,
-            "broker_behavior_included": "BrokerBehaviorEngine" in rag_engines,
-            "engine_details": sanitize_for_json({e["engine"]: e for e in engine_result.get("engines", [])}),
+            "monitoring_engine_names": sorted(engine_names),
+            "bandarmology_included": "BandarmologyEngine" in engine_names,
+            "broker_behavior_included": "BrokerBehaviorEngine" in engine_names,
+            "engine_details": engine_details,
             "debug_keys": list(engine_result.keys()),
         }
 
@@ -488,6 +539,7 @@ async def stateless_monitoring_check(req: MonitoringRequest):
     engine_context = await get_monitoring_engine_context(req.ticker, req.mode)
     early_warnings = extract_early_warnings(engine_context)
     warnings = warnings + early_warnings
+    warnings = warnings + analytic_alignment_warnings(req.analytic_context, current)
     empirical_memory = {"available": False}
     try:
         from app.ml.historical_learning import get_empirical_context

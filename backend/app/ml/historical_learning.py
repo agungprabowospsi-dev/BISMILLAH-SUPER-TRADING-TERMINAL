@@ -445,6 +445,7 @@ async def mine_empirical_patterns(mode: str = "swing", min_samples: int = 30) ->
 
 async def get_empirical_context(ticker: str, mode: str = "swing", candles: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     try:
+        await ensure_historical_tables()
         source_candles = candles or await load_ohlcv(ticker, years=1)
         if len(source_candles) < 60:
             return {"available": False, "reason": "insufficient_recent_data"}
