@@ -27,6 +27,12 @@ async def fake_engine_context(ticker, mode="swing"):
         "rag_context_count": 2,
         "bandarmology_included": True,
         "broker_behavior_included": True,
+        "orderbook_included": True,
+        "orderbook_execution": {
+            "available": True,
+            "execution_recommendation": "GO_LIMIT_PULLBACK",
+            "overlay_policy": "additive_only_no_decision_override",
+        },
         "engine_details": {
             "BrokerBehaviorEngine": {
                 "engine": "BrokerBehaviorEngine",
@@ -65,6 +71,10 @@ class MonitoringE2ERegressionTest(unittest.TestCase):
                     "trigger_price": 105,
                     "invalidation_price": 95,
                 },
+                "orderbook_execution": {
+                    "execution_recommendation": "GO_LIMIT_PULLBACK",
+                    "overlay_policy": "additive_only_no_decision_override",
+                },
             },
         }
 
@@ -84,6 +94,11 @@ class MonitoringE2ERegressionTest(unittest.TestCase):
         self.assertEqual(checked.status_code, 200, checked.text)
         checked_body = checked.json()
         self.assertTrue(checked_body["engine_context"]["broker_behavior_included"])
+        self.assertTrue(checked_body["engine_context"]["orderbook_included"])
+        self.assertEqual(
+            checked_body["engine_context"]["orderbook_execution"]["overlay_policy"],
+            "additive_only_no_decision_override",
+        )
         self.assertTrue(any(w.get("type") == "ANALYTIC_DECISION_CONTEXT" for w in checked_body["warnings"]))
 
         status = self.client.get(f"/api/monitoring/status/{monitoring_id}")

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from app.core import invesgo
 from app.engines.master_runner import run_all_engines, run_monitoring_engines
 from app.engines.broker_behavior_engine import summarize_broker_behavior
+from app.engines.orderbook_microstructure import build_orderbook_execution_overlay, normalize_orderbook
 from app.knowledge_base import kb_service
 import logging
 
@@ -547,12 +548,17 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
 
         # Ambil data real dari Invesgo untuk Orderbook + Bandarmology + Foreign
         intraday_data = {}
+        orderbook_raw = {}
         broker_data_raw = []
         ksei_data_raw = []
         try:
             intraday_data = await invesgo.get_ohlcv_intraday(ticker, market="RG")
         except Exception as e:
             logger.warning(f"[INTRADAY] skip for {ticker}: {e}")
+        try:
+            orderbook_raw = await invesgo.get_orderbook(ticker)
+        except Exception as e:
+            logger.warning(f"[ORDERBOOK] skip for {ticker}: {e}")
         try:
             broker_data_raw = await invesgo.get_broker_summary(ticker, investor="all", market="RG")
         except Exception as e:
@@ -562,21 +568,11 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
         except Exception as e:
             logger.warning(f"[KSEI] skip for {ticker}: {e}")
 
-        # Format orderbook dari intraday
-        orderbook = {}
-        if intraday_data:
-            bid_price = intraday_data.get("bid_price", 0)
-            offer_price = intraday_data.get("offer_price", 0)
-            bid_lot = intraday_data.get("bid_lot", 0)
-            offer_lot = intraday_data.get("offer_lot", 0)
-            if bid_price and offer_price:
-                orderbook = {
-                    "bids": [[bid_price, bid_lot]],
-                    "asks": [[offer_price, offer_lot]],
-                    "bid_freq": intraday_data.get("bid_freq", 0),
-                    "offer_freq": intraday_data.get("offer_freq", 0),
-                    "spread_pct": round((offer_price - bid_price) / bid_price * 100, 3) if bid_price else 0
-                }
+        # Format orderbook dari Invesgo; fallback ke top-of-book intraday.
+        orderbook = normalize_orderbook(orderbook_raw)
+        if not orderbook.get("available") and intraday_data:
+            orderbook = normalize_orderbook(intraday_data)
+        orderbook_execution = build_orderbook_execution_overlay(orderbook, mode=mode)
 
         # Format broker data
         broker_data = {}
@@ -656,6 +652,8 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
             "monitoring_engine_names": sorted(engine_names),
             "bandarmology_included": "BandarmologyEngine" in engine_names,
             "broker_behavior_included": "BrokerBehaviorEngine" in engine_names,
+            "orderbook_included": "OrderbookEngine" in engine_names,
+            "orderbook_execution": orderbook_execution,
             "engine_details": engine_details,
             "debug_keys": list(engine_result.keys()),
         }

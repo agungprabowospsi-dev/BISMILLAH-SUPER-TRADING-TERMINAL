@@ -597,6 +597,28 @@ export default function MonitoringPage() {
                         </div>
                       </div>
                     )}
+                    {(pos.analytic_context.orderbook_execution || pos.analytic_context.action_plan?.orderbook_execution) && (
+                      (() => {
+                        const obx = pos.analytic_context.orderbook_execution || pos.analytic_context.action_plan?.orderbook_execution
+                        return (
+                          <div className="pt-2 border-t border-border-dim text-xs font-mono space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-slate-600">Orderbook Execution</p>
+                              <p className="text-cyan-300 font-bold uppercase text-right">
+                                {String(obx.execution_recommendation || 'USE_EXISTING_PLAN').replace(/_/g, ' ')}
+                              </p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div><p className="text-slate-600">Liquidity</p><p className="text-white font-bold uppercase">{String(obx.liquidity_bias || '-').replace(/_/g, ' ')}</p></div>
+                              <div><p className="text-slate-600">Spread</p><p className="text-white font-bold uppercase">{String(obx.spread_health || '-').replace(/_/g, ' ')}</p></div>
+                              <div><p className="text-slate-600">Bid/Ask</p><p className="text-white font-bold">{Number(obx.bid_ask_ratio || 0).toFixed(2)}x</p></div>
+                              <div><p className="text-slate-600">Limit</p><p className="text-accent-green font-bold">Rp {Number(obx.suggested_limit_entry || 0).toLocaleString('id-ID')}</p></div>
+                            </div>
+                            {obx.reason && <p className="text-slate-400 leading-relaxed">{obx.reason}</p>}
+                          </div>
+                        )
+                      })()
+                    )}
                   </div>
                 )}
 
@@ -644,6 +666,11 @@ export default function MonitoringPage() {
                       <div><p className="text-slate-600">BrokerBehavior</p>
                         <p className={pos.engine_context.broker_behavior_included?'text-accent-green font-bold':'text-slate-500'}>
                           {pos.engine_context.broker_behavior_included?'ACTIVE':'OFF'}
+                        </p>
+                      </div>
+                      <div><p className="text-slate-600">Orderbook</p>
+                        <p className={pos.engine_context.orderbook_included?'text-accent-green font-bold':'text-slate-500'}>
+                          {pos.engine_context.orderbook_included?'ACTIVE':'OFF'}
                         </p>
                       </div>
                       <div><p className="text-slate-600">Engines</p><p className="text-white font-bold">{pos.engine_context.total_engines||8}</p></div>
