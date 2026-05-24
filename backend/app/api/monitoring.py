@@ -2,10 +2,11 @@ from app.ml.signal_quality import add_training_sample
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import JSONResponse
 import json
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, Optional
 import asyncio
 import json
+from datetime import datetime, timezone
 from app.core import invesgo
 from app.engines.master_runner import run_all_engines, run_monitoring_engines
 from app.engines.broker_behavior_engine import summarize_broker_behavior
@@ -44,6 +45,8 @@ def sanitize_for_json(obj):
 router = APIRouter()
 
 class MonitoringRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     ticker: str
     entry_price: float
     stop_loss: float
@@ -61,7 +64,32 @@ class MonitoringRequest(BaseModel):
     kb_context: str = ""
     analytic_context: dict = Field(default_factory=dict)
 
+class MonitoringRemoveRequest(BaseModel):
+    monitoring_id: Optional[str] = None
+    ticker: Optional[str] = None
+
 _active_monitors = {}
+MONITORING_SET_KEY = "monitoring:active"
+MONITORING_KEY_PREFIX = "monitoring:position:"
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+def _to_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+def _normalize_mode(mode: Any) -> str:
+    value = str(mode or "swing").lower()
+    if value == "daytrading":
+        return "intraday"
+    if value in ("swing", "intraday", "scalping"):
+        return value
+    return "swing"
 
 def normalize_engine_scores(scores: Any) -> dict:
     if isinstance(scores, dict):
@@ -75,6 +103,117 @@ def normalize_engine_scores(scores: Any) -> dict:
                     normalized[name] = float(item.get("score") or 0)
         return normalized
     return {}
+
+def normalize_monitoring_payload(payload: Any) -> dict:
+    if hasattr(payload, "model_dump"):
+        payload = payload.model_dump()
+    elif hasattr(payload, "dict"):
+        payload = payload.dict()
+    payload = dict(payload or {})
+
+    ticker = str(payload.get("ticker") or "").upper().strip()
+    mode = _normalize_mode(payload.get("mode"))
+    entry = _to_float(payload.get("entry_price"))
+    stop = _to_float(payload.get("stop_loss"))
+    tp1 = _to_float(payload.get("take_profit_1"), _to_float(payload.get("take_profit")))
+    tp2 = _to_float(payload.get("take_profit_2"))
+    tp3 = _to_float(payload.get("take_profit_3"))
+    take_profit = _to_float(payload.get("take_profit"), tp1 or entry)
+    monitoring_id = payload.get("monitoring_id") or f"{ticker}_{mode}_{int(entry or 0)}"
+    created_at = payload.get("created_at") or _now_iso()
+
+    normalized = {
+        **payload,
+        "monitoring_id": monitoring_id,
+        "ticker": ticker,
+        "mode": mode,
+        "entry_price": entry,
+        "stop_loss": stop,
+        "take_profit": take_profit,
+        "take_profit_1": tp1,
+        "take_profit_2": tp2,
+        "take_profit_3": tp3,
+        "current_price": _to_float(payload.get("current_price"), entry),
+        "lot": _to_float(payload.get("lot"), 1.0),
+        "entry_score": _to_float(payload.get("entry_score"), _to_float(payload.get("final_score"))),
+        "final_score": _to_float(payload.get("final_score"), 50.0),
+        "lq45_change": _to_float(payload.get("lq45_change"), 0.0),
+        "breadth_ratio": _to_float(payload.get("breadth_ratio"), 50.0),
+        "engine_scores": normalize_engine_scores(payload.get("engine_scores")),
+        "market_regime": payload.get("market_regime") or "SIDEWAYS",
+        "kb_context": payload.get("kb_context") or "",
+        "analytic_context": payload.get("analytic_context") or {},
+        "empirical_memory": payload.get("empirical_memory") or (payload.get("analytic_context") or {}).get("empirical_memory"),
+        "broker": payload.get("broker") or "",
+        "name": payload.get("name") or ticker,
+        "status": payload.get("status") or "HOLD",
+        "created_at": created_at,
+        "updated_at": _now_iso(),
+        "state_source": "backend",
+    }
+    return sanitize_for_json(normalized)
+
+def _monitoring_key(monitoring_id: str) -> str:
+    return f"{MONITORING_KEY_PREFIX}{monitoring_id}"
+
+def _redis_client():
+    try:
+        from app.core.redis_client import get_redis
+        return get_redis()
+    except Exception:
+        return None
+
+async def save_monitoring_position(position: dict) -> dict:
+    position = normalize_monitoring_payload(position)
+    monitoring_id = position["monitoring_id"]
+    _active_monitors[monitoring_id] = position
+    redis = _redis_client()
+    if redis:
+        try:
+            await redis.sadd(MONITORING_SET_KEY, monitoring_id)
+            await redis.set(_monitoring_key(monitoring_id), json.dumps(position, cls=NumpyEncoder))
+        except Exception as exc:
+            logger.warning(f"Redis monitoring save skipped [{monitoring_id}]: {exc}")
+    return position
+
+async def load_monitoring_positions() -> list:
+    redis = _redis_client()
+    if redis:
+        try:
+            ids = await redis.smembers(MONITORING_SET_KEY)
+            positions = []
+            for monitoring_id in sorted(ids):
+                raw = await redis.get(_monitoring_key(monitoring_id))
+                if not raw:
+                    continue
+                position = normalize_monitoring_payload(json.loads(raw))
+                _active_monitors[position["monitoring_id"]] = position
+                positions.append(position)
+            if positions:
+                return positions
+        except Exception as exc:
+            logger.warning(f"Redis monitoring load skipped: {exc}")
+    return list(_active_monitors.values())
+
+async def delete_monitoring_position(monitoring_id: str) -> bool:
+    existed = monitoring_id in _active_monitors
+    _active_monitors.pop(monitoring_id, None)
+    redis = _redis_client()
+    if redis:
+        try:
+            await redis.srem(MONITORING_SET_KEY, monitoring_id)
+            await redis.delete(_monitoring_key(monitoring_id))
+            existed = True
+        except Exception as exc:
+            logger.warning(f"Redis monitoring delete skipped [{monitoring_id}]: {exc}")
+    return existed
+
+async def clear_monitoring_positions() -> int:
+    positions = await load_monitoring_positions()
+    for pos in positions:
+        await delete_monitoring_position(pos["monitoring_id"])
+    _active_monitors.clear()
+    return len(positions)
 
 def analytic_alignment_warnings(analytic_context: dict, current: float) -> list:
     warnings = []
@@ -110,17 +249,19 @@ def analytic_alignment_warnings(analytic_context: dict, current: float) -> list:
 
 @router.post("/start")
 async def start_monitoring(req: MonitoringRequest):
-    monitoring_id = f"{req.ticker}_{req.mode}_{int(req.entry_price)}"
-    payload = req.dict()
-    payload["engine_scores"] = normalize_engine_scores(payload.get("engine_scores"))
-    _active_monitors[monitoring_id] = payload
-    return {"monitoring_id": monitoring_id, "status": "active"}
+    position = await save_monitoring_position(req)
+    return {"monitoring_id": position["monitoring_id"], "status": "active", "position": position}
 
 @router.get("/status/{monitoring_id}")
 async def get_status(monitoring_id: str):
-    if monitoring_id not in _active_monitors:
+    positions = {pos["monitoring_id"]: pos for pos in await load_monitoring_positions()}
+    if monitoring_id not in positions:
         raise HTTPException(404, "Monitor not found")
-    pos = _active_monitors[monitoring_id]
+    pos = positions[monitoring_id]
+    snapshot = await build_monitoring_result(pos)
+    await save_monitoring_position(snapshot)
+    return sanitize_for_json(snapshot)
+
     try:
         tick = await invesgo.get_tick(pos["ticker"])
         current = tick.get("last_price", pos["entry_price"])
@@ -167,7 +308,8 @@ async def get_status(monitoring_id: str):
 
     engine_context = await get_monitoring_engine_context(pos["ticker"], pos.get("mode", "swing"))
 
-    return {
+    snapshot = {
+        **pos,
         "monitoring_id": monitoring_id,
         "ticker": pos["ticker"],
         "current_price": current,
@@ -183,6 +325,9 @@ async def get_status(monitoring_id: str):
         "analytic_context": pos.get("analytic_context", {}),
         "warnings": warnings,
     }
+    snapshot["status"] = "EXIT" if position_status == "exit" else pos.get("status", "HOLD")
+    await save_monitoring_position(snapshot)
+    return sanitize_for_json(snapshot)
 
 
 # ─── ADDITIVE MONITORING HELPERS — RR TRACKING ────────────────────────────────
@@ -212,30 +357,44 @@ def calculate_rr(entry_price: float, stop_loss: float, take_profit: float, curre
 
 @router.get("/active")
 async def list_active_monitors():
+    positions = await load_monitoring_positions()
     return {
-        "count": len(_active_monitors),
-        "monitors": [
-            {
-                "monitoring_id": monitoring_id,
-                "ticker": data.get("ticker"),
-                "entry_price": data.get("entry_price"),
-                "stop_loss": data.get("stop_loss"),
-                "take_profit": data.get("take_profit"),
-                "mode": data.get("mode"),
-            }
-            for monitoring_id, data in _active_monitors.items()
-        ],
+        "count": len(positions),
+        "monitors": sanitize_for_json(positions),
     }
+
+@router.post("/remove")
+async def remove_monitoring(req: MonitoringRemoveRequest):
+    positions = await load_monitoring_positions()
+    ids = []
+    if req.monitoring_id:
+        ids = [req.monitoring_id]
+    elif req.ticker:
+        ticker = req.ticker.upper()
+        ids = [pos["monitoring_id"] for pos in positions if pos.get("ticker") == ticker]
+    if not ids:
+        raise HTTPException(404, "Monitor not found")
+    removed = 0
+    for monitoring_id in ids:
+        if await delete_monitoring_position(monitoring_id):
+            removed += 1
+    return {"status": "removed", "removed": removed, "monitoring_ids": ids}
+
+@router.post("/clear")
+async def clear_monitoring():
+    removed = await clear_monitoring_positions()
+    return {"status": "cleared", "removed": removed}
 
 
 @router.get("/portfolio-risk")
 async def portfolio_risk_summary():
-    total_positions = len(_active_monitors)
+    active_positions = await load_monitoring_positions()
+    total_positions = len(active_positions)
     total_risk_value = 0
     total_reward_value = 0
     positions = []
 
-    for monitoring_id, pos in _active_monitors.items():
+    for pos in active_positions:
         risk = abs(pos["entry_price"] - pos["stop_loss"])
         reward = abs(pos["take_profit"] - pos["entry_price"])
         rr_target = round(reward / risk, 2) if risk else 0
@@ -244,7 +403,7 @@ async def portfolio_risk_summary():
         total_reward_value += reward
 
         positions.append({
-            "monitoring_id": monitoring_id,
+            "monitoring_id": pos["monitoring_id"],
             "ticker": pos["ticker"],
             "mode": pos.get("mode", "swing"),
             "risk_per_share": risk,
@@ -512,8 +671,76 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
 
 # ─── ADDITIVE STATELESS MONITORING CHECK ──────────────────────────────────────
 
+async def build_monitoring_result(payload: Any) -> dict:
+    pos = normalize_monitoring_payload(payload)
+    try:
+        tick = await invesgo.get_tick(pos["ticker"])
+        current = tick.get("last_price", pos["entry_price"])
+    except Exception:
+        current = pos["entry_price"]
+
+    warnings = []
+    position_status = "hold"
+
+    if current <= pos["stop_loss"]:
+        position_status = "exit"
+        warnings.append({"level": "high", "msg": f"STOP LOSS HIT at {current}"})
+    elif pos["take_profit_3"] and current >= pos["take_profit_3"]:
+        position_status = "exit"
+        warnings.append({"level": "high", "msg": f"TP3 HIT at {current} - full target tercapai!"})
+    elif pos["take_profit_2"] and current >= pos["take_profit_2"]:
+        warnings.append({"level": "high", "msg": f"TP2 HIT at {current} - partial exit, trail SL ke entry"})
+    elif current >= pos["take_profit"] or (pos["take_profit_1"] and current >= pos["take_profit_1"]):
+        warnings.append({"level": "high", "msg": f"TP1 HIT at {current} - partial exit 50%, trail SL ke breakeven"})
+    elif current <= pos["entry_price"] * 0.97:
+        warnings.append({"level": "medium", "msg": "Price down 3% from entry - monitor closely"})
+
+    engine_context = await get_monitoring_engine_context(pos["ticker"], pos["mode"])
+    warnings = warnings + extract_early_warnings(engine_context)
+    warnings = warnings + analytic_alignment_warnings(pos.get("analytic_context", {}), current)
+
+    empirical_memory = {"available": False}
+    try:
+        from app.ml.historical_learning import get_empirical_context
+        empirical_memory = await get_empirical_context(pos["ticker"], mode=pos["mode"])
+        if empirical_memory.get("available") and empirical_memory.get("sample_count", 0) >= 30:
+            wr = float(empirical_memory.get("winrate", 0) or 0)
+            if wr <= 45:
+                warnings.append({
+                    "level": "medium",
+                    "msg": f"Empirical memory warning: setup historis mirip hanya winrate {wr:.1f}%",
+                    "type": "EMPIRICAL_LOW_EDGE",
+                })
+            elif wr >= 60:
+                warnings.append({
+                    "level": "low",
+                    "msg": f"Empirical memory support: setup historis mirip winrate {wr:.1f}%",
+                    "type": "EMPIRICAL_EDGE",
+                })
+    except Exception:
+        empirical_memory = pos.get("empirical_memory") or {"available": False}
+
+    result = {
+        **pos,
+        "current_price": current,
+        "position": position_status,
+        "status": "EXIT" if position_status == "exit" else pos.get("status", "HOLD"),
+        "pnl_pct": round((current - pos["entry_price"]) / pos["entry_price"] * 100, 2) if pos["entry_price"] else 0,
+        "rr": calculate_rr(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
+        "smart_trailing_stop": calculate_smart_trailing_stop(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
+        "institutional_alerts": generate_institutional_alerts(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
+        "engine_context": engine_context,
+        "empirical_memory": empirical_memory,
+        "analytic_context": pos.get("analytic_context", {}),
+        "warnings": warnings,
+    }
+    return sanitize_for_json(result)
+
 @router.post("/check")
 async def stateless_monitoring_check(req: MonitoringRequest):
+    result = await build_monitoring_result(req)
+    return JSONResponse(content=json.loads(json.dumps(result, cls=NumpyEncoder)))
+
     try:
         tick = await invesgo.get_tick(req.ticker)
         current = tick.get("last_price", req.entry_price)

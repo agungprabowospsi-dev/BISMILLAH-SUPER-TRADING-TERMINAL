@@ -45,11 +45,8 @@ export async function analyzeStock(ticker, mode = "swing", screenerContext = nul
   });
 }
 
-export async function getMonitoring() {
-  return apiFetch("/api/monitoring/status", {
-    method: "POST",
-    body: JSON.stringify({ ticker }),
-  });
+export async function getMonitoring(monitoringId) {
+  return apiFetch(`/api/monitoring/status/${monitoringId}`, { method: "GET" });
 }
 
 export async function getMonitoringList() {
@@ -63,10 +60,12 @@ export async function startMonitoring(payload) {
   });
 }
 
-export async function removeMonitoring(ticker) {
+export async function removeMonitoring(payload) {
   return apiFetch("/api/monitoring/remove", {
     method: "POST",
-    body: JSON.stringify({ ticker }),
+    body: JSON.stringify(
+      typeof payload === "string" ? { ticker: payload } : payload
+    ),
   });
 }
 
