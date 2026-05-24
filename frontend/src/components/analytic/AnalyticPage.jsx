@@ -141,6 +141,24 @@ export default function AnalyticPage() {
     blue: 'border-sky-500/40 bg-sky-500/10 text-sky-500',
     slate: 'border-slate-400/40 bg-slate-400/10 text-slate-500',
   }
+  const actionOrderType = String(r?.action_plan?.order_type || r?.entry_order_type || '').toUpperCase()
+  const noActionableLong = ['NO_LONG_ENTRY', 'NO_MARKET_ENTRY'].includes(actionOrderType)
+  const valueOrFallback = (value, fallback) =>
+    value !== undefined && value !== null && value !== '' ? value : fallback
+  const tradeEntry = noActionableLong && actionOrderType === 'NO_LONG_ENTRY'
+    ? null
+    : valueOrFallback(r?.action_plan?.entry_price, r?.entry)
+  const tradeStop = valueOrFallback(r?.action_plan?.stop_loss, valueOrFallback(r?.dynamic_sltp?.sl, r?.stop_loss || r?.sl))
+  const tradeTp1 = noActionableLong && actionOrderType === 'NO_LONG_ENTRY'
+    ? null
+    : valueOrFallback(r?.action_plan?.take_profit_1, valueOrFallback(r?.dynamic_sltp?.tp1, r?.tp1))
+  const tradeTp2 = noActionableLong && actionOrderType === 'NO_LONG_ENTRY'
+    ? null
+    : valueOrFallback(r?.action_plan?.take_profit_2, valueOrFallback(r?.dynamic_sltp?.tp2, r?.tp2))
+  const tradeTp3 = noActionableLong && actionOrderType === 'NO_LONG_ENTRY'
+    ? null
+    : valueOrFallback(r?.action_plan?.take_profit_3, valueOrFallback(r?.dynamic_sltp?.tp3, r?.tp3))
+  const canSendToMonitoring = Boolean(tradeEntry && tradeStop && tradeTp1 && !noActionableLong)
 
   const groupEngineKeys = {
     group1:['priceaction','trend','support','resistance','volumeintelligence','relativevolume','multitime','orderblock','breakorder','fairvalue','liquidity'],
@@ -501,13 +519,13 @@ export default function AnalyticPage() {
               {[
                 ['Order Type', String(r.action_plan?.order_type || r.entry_order_type || r.entry_method || '').replace(/_/g, ' '), 'text-accent-blue'],
                 ['Trigger Price', r.action_plan?.trigger_price || r.trigger_price, 'text-accent-gold'],
-                ['Entry Price', r.action_plan?.entry_price || r.entry, 'text-accent-green'],
+                ['Entry Price', tradeEntry, 'text-accent-green'],
                 ['Entry Zone', r.action_plan ? `${fmtPrice(r.action_plan.entry_zone_low)} - ${fmtPrice(r.action_plan.entry_zone_high)}` : null, 'text-accent-green'],
-                ['Stop Loss', r.action_plan?.stop_loss || r.dynamic_sltp?.sl || r.stop_loss||r.sl, 'text-accent-red'],
-                ['Take Profit 1', r.dynamic_sltp?.tp1 || r.tp1, 'text-accent-gold'],
-                ['Take Profit 2', r.dynamic_sltp?.tp2 || r.tp2, 'text-accent-gold'],
-                ['Take Profit 3', r.dynamic_sltp?.tp3 || r.tp3, 'text-accent-gold'],
-                ['Risk:Reward', r.risk_reward ? `1:${Number(r.risk_reward).toFixed(2)}` : null, 'text-accent-blue'],
+                ['Stop Loss', tradeStop, 'text-accent-red'],
+                ['Take Profit 1', tradeTp1, 'text-accent-gold'],
+                ['Take Profit 2', tradeTp2, 'text-accent-gold'],
+                ['Take Profit 3', tradeTp3, 'text-accent-gold'],
+                ['Risk:Reward', !noActionableLong && r.risk_reward ? `1:${Number(r.risk_reward).toFixed(2)}` : null, 'text-accent-blue'],
               ].filter(([,v]) => v).map(([k,v,c]) => (
                 <div key={k} className="flex justify-between items-center py-1.5 border-b border-border-dim last:border-0">
                   <span className="font-mono text-xs text-slate-500">{k}</span>
@@ -516,6 +534,11 @@ export default function AnalyticPage() {
                   </span>
                 </div>
               ))}
+              {noActionableLong && (
+                <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 font-mono text-xs leading-relaxed text-amber-700">
+                  Belum ada long entry aktif. Gunakan trigger dan confirmation needed sebagai syarat sebelum target profit dianggap valid.
+                </div>
+              )}
               {/* Dynamic SL/TP — hidden, sudah digabung ke Trade Setup primary */}
               {false && r.dynamic_sltp && r.dynamic_sltp.method !== 'error' && (
                 <div className="mt-2 rounded-lg border border-accent-blue/30 bg-accent-blue/5 p-3">
@@ -539,12 +562,12 @@ export default function AnalyticPage() {
               )}
               <button onClick={() => sendToMonitoring({
                 ticker:r.ticker||analyticTicker,
-                entry_price:r.action_plan?.entry_price||r.entry,
-                stop_loss:r.action_plan?.stop_loss||r.dynamic_sltp?.sl||r.stop_loss||r.sl,
-                take_profit:r.dynamic_sltp?.tp1||r.tp1,
-                take_profit_1:r.dynamic_sltp?.tp1||r.tp1,
-                take_profit_2:r.dynamic_sltp?.tp2||r.tp2,
-                take_profit_3:r.dynamic_sltp?.tp3||r.tp3,
+                entry_price:tradeEntry,
+                stop_loss:tradeStop,
+                take_profit:tradeTp1,
+                take_profit_1:tradeTp1,
+                take_profit_2:tradeTp2,
+                take_profit_3:tradeTp3,
                 mode:analyticMode,
                 final_score:r.score||r.composite_score||50,
                 market_regime:r.market_regime||'SIDEWAYS',
@@ -561,8 +584,8 @@ export default function AnalyticPage() {
                   win_probability: r.win_probability || 50,
                   action_plan: r.action_plan || null
                 }
-              })} className="btn-primary w-full flex items-center justify-center gap-2 mt-2">
-                Monitor Posisi<ArrowRight className="w-4 h-4"/>
+              })} disabled={!canSendToMonitoring} className="btn-primary w-full flex items-center justify-center gap-2 mt-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                {canSendToMonitoring ? 'Monitor Posisi' : 'Belum Bisa Monitor'}<ArrowRight className="w-4 h-4"/>
               </button>
             </div>
           </div>
