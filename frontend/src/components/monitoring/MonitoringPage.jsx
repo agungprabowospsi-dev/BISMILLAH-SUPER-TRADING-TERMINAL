@@ -42,6 +42,12 @@ async function fetchEngineData(pos) {
   } catch { return null }
 }
 
+function formatBil(value) {
+  const num = Number(value || 0)
+  const sign = num > 0 ? '+' : ''
+  return `${sign}${num.toLocaleString('id-ID', { maximumFractionDigits: 2 })}B`
+}
+
 export default function MonitoringPage() {
   const [positions, setPositions] = useState(() => {
     try {
@@ -459,13 +465,31 @@ export default function MonitoringPage() {
                 {pos.engine_context?.engine_details && (
                   (() => {
                     const bandar = pos.engine_context.engine_details.BandarmologyEngine
+                    const brokerBehavior = pos.engine_context.engine_details.BrokerBehaviorEngine
                     const foreign = pos.engine_context.engine_details.ForeignFlowEngine
                     const ob = pos.engine_context.engine_details.OrderbookEngine
-                    if (!bandar && !foreign && !ob) return null
+                    const behavior = brokerBehavior?.data
+                    if (!bandar && !brokerBehavior && !foreign && !ob) return null
                     return (
                       <div className="bg-bg-secondary border border-border-dim rounded p-3 space-y-2">
                         <p className="label-xs">SMART MONEY DATA</p>
                         <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                          {behavior && (
+                            <>
+                              <div>
+                                <p className="text-slate-600">Broker Behavior</p>
+                                <p className={brokerBehavior.signal==='bullish'?'text-accent-green font-bold':brokerBehavior.signal==='bearish'?'text-accent-red font-bold':'text-slate-400 font-bold'}>
+                                  {(behavior.pressure||'neutral').replace(/_/g,' ').toUpperCase()}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-slate-600">Smart Net</p>
+                                <p className={Number(behavior.smart_money_net_bil)>0?'text-accent-green font-bold':Number(behavior.smart_money_net_bil)<0?'text-accent-red font-bold':'text-slate-400 font-bold'}>
+                                  {formatBil(behavior.smart_money_net_bil)}
+                                </p>
+                              </div>
+                            </>
+                          )}
                           {foreign?.data && (
                             <>
                               <div>
@@ -499,6 +523,33 @@ export default function MonitoringPage() {
                             </>
                           )}
                         </div>
+
+                        {behavior && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-border-dim">
+                            <div>
+                              <p className="text-[10px] font-mono font-bold text-accent-green mb-1">TOP 5 BUYERS</p>
+                              <div className="space-y-1">
+                                {(behavior.top_buyers || []).slice(0, 5).map((b) => (
+                                  <div key={`buy-${b.code}`} className="flex items-center justify-between text-[10px] font-mono">
+                                    <span className="text-slate-300 font-bold">{b.code || b.name}</span>
+                                    <span className="text-accent-green">{formatBil(b.buy_bil)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-mono font-bold text-accent-red mb-1">TOP 5 SELLERS</p>
+                              <div className="space-y-1">
+                                {(behavior.top_sellers || []).slice(0, 5).map((b) => (
+                                  <div key={`sell-${b.code}`} className="flex items-center justify-between text-[10px] font-mono">
+                                    <span className="text-slate-300 font-bold">{b.code || b.name}</span>
+                                    <span className="text-accent-red">{formatBil(b.sell_bil)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )
                   })()

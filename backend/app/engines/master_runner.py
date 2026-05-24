@@ -5,6 +5,7 @@ from app.engines.smart_money_engines import (
     BandarmologyEngine, InventoryEngine, FlowMappingEngine,
     IntradayPositioningEngine, ForeignFlowEngine
 )
+from app.engines.broker_behavior_engine import BrokerBehaviorEngine
 from app.engines.execution_engines import (
     QuantEdgeEngine, OrderbookEngine, RelativeStrengthEngine,
     FibonacciEngine, AIPatternRecognitionEngine, SectorRotationEngine,
@@ -120,6 +121,7 @@ _monitoring_engines = [
     PriceActionEngine(),
     VolumeIntelligenceEngine(),
     BandarmologyEngine(),
+    BrokerBehaviorEngine(),
     TrendStructureEngine(),
     SupportResistanceEngine(),
     OrderbookEngine(),

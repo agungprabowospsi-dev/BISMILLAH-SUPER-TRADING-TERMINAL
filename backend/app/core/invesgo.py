@@ -30,6 +30,72 @@ def _headers():
         "Content-Type": "application/json"
     }
 
+def _to_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value or default)
+    except (TypeError, ValueError):
+        return default
+
+def _unwrap_list(data) -> list:
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ("data", "results", "items", "stocks", "rows"):
+            value = data.get(key)
+            if isinstance(value, list):
+                return value
+    return []
+
+def _normalize_mover(row: dict, source: str = "") -> dict:
+    code = row.get("code") or row.get("ticker") or row.get("symbol") or row.get("stock_code")
+    close = _to_float(row.get("close") or row.get("last") or row.get("last_price") or row.get("price"))
+    prev = _to_float(row.get("prev") or row.get("previous") or row.get("previous_close") or row.get("prev_close"))
+    change = row.get("change")
+    if change is None and close and prev:
+        change = close - prev
+    change = _to_float(change)
+    change_pct = (
+        row.get("change_pct")
+        or row.get("change_percent")
+        or row.get("pct_change")
+        or row.get("percent")
+    )
+    if change_pct is None and close and prev:
+        change_pct = (close - prev) / prev * 100
+
+    return {
+        **row,
+        "code": code,
+        "ticker": code,
+        "name": row.get("name") or row.get("company_name") or code,
+        "close": close,
+        "prev": prev,
+        "change": round(change, 4),
+        "change_pct": round(_to_float(change_pct), 4),
+        "volume": _to_float(row.get("volume")),
+        "value": _to_float(row.get("value") or row.get("value_idr")),
+        "freq": _to_float(row.get("freq") or row.get("frequency")),
+        "source": source or row.get("source", ""),
+    }
+
+async def _get_json_first_success(client: httpx.AsyncClient, candidates: list, fallback=None):
+    last_error = None
+    for path, params in candidates:
+        try:
+            r = await client.get(f"{INVESGO_BASE_URL}{path}", headers=_headers(), params=params or {})
+            r.raise_for_status()
+            data = r.json()
+            if data not in (None, "", []):
+                return data
+        except Exception as exc:
+            last_error = exc
+            logger.debug(f"[INVESGO] endpoint fallback {path} failed: {exc}")
+    if fallback is not None:
+        return fallback
+    if last_error:
+        raise last_error
+    return None
+
 async def get_stock_list() -> list:
     """Ambil semua saham IDX"""
     async with httpx.AsyncClient(timeout=30) as client:
@@ -336,25 +402,50 @@ async def get_sector_rotation() -> dict:
         return r.json()
 
 async def get_market_summary() -> dict:
-    """Market summary / IHSG"""
+    """Market summary / IHSG.
+
+    REV28: /analysis/market/summary is currently dead on Invesgo. Try known
+    market-summary variants first, then fall back to intraday-index IHSG/LQ45.
+    """
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/analysis/market/summary", headers=_headers())
-        r.raise_for_status()
-        return r.json()
+        data = await _get_json_first_success(client, [
+            ("/analysis/market/summary", None),
+            ("/analysis/market-summary", None),
+            ("/analysis/summary/market", None),
+            ("/analysis/intraday-index/IHSG", None),
+        ], fallback={})
+
+    if not isinstance(data, dict):
+        return {"source": "unavailable", "data": data}
+
+    if data.get("code") or data.get("index") or data.get("close"):
+        close = _to_float(data.get("close"))
+        prev = _to_float(data.get("prev") or data.get("previous_close"))
+        change = close - prev if close and prev else _to_float(data.get("change"))
+        change_pct = (change / prev * 100) if prev else _to_float(data.get("change_pct"))
+        return {
+            **data,
+            "source": data.get("source") or "intraday-index",
+            "index": data.get("index") or data.get("code") or "IHSG",
+            "close": close,
+            "prev": prev,
+            "change": round(change, 4),
+            "change_pct": round(change_pct, 4),
+            "positive": int(_to_float(data.get("positive"))),
+            "negative": int(_to_float(data.get("negative"))),
+            "neutral": int(_to_float(data.get("neutral"))),
+        }
+
+    data.setdefault("source", "market-summary")
+    return data
 
 async def get_top_gainer() -> list:
     """Top gainer saham IDX"""
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/analysis/market/top-gainer", headers=_headers())
-        r.raise_for_status()
-        return r.json()
+    return await get_top_movers(sort="gainer", limit=20)
 
 async def get_top_loser() -> list:
     """Top loser saham IDX"""
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{INVESGO_BASE_URL}/analysis/market/top-loser", headers=_headers())
-        r.raise_for_status()
-        return r.json()
+    return await get_top_movers(sort="loser", limit=20)
 
 async def get_chart_composite() -> list:
     """IHSG composite chart"""
@@ -414,15 +505,82 @@ async def get_intraday_index(index: str = "IHSG") -> dict:
         return r.json()
 
 async def get_top_movers(sort: str = "gainer", limit: int = 20) -> list:
-    """Top Gainers, Losers, Most Active - sort: gainer/loser/active/value/freq/foreign"""
+    """Top Gainers, Losers, Most Active - sort: gainer/loser/active/value/freq/foreign.
+
+    REV28: /analysis/top-change and /analysis/market/top-* may return 404.
+    Keep the public function stable by trying endpoint variants and falling
+    back to stock-list sorting when the list payload already contains change,
+    value, volume, or frequency fields.
+    """
+    sort_key = (sort or "gainer").lower()
+    endpoint_by_sort = {
+        "gainer": [
+            ("/analysis/top-change", {"sort": "gainer", "limit": limit}),
+            ("/analysis/top-change", {"type": "gainer", "limit": limit}),
+            ("/analysis/top-change", {"filter": "gainer", "limit": limit}),
+            ("/analysis/top-change/gainer", {"limit": limit}),
+            ("/analysis/market/top-gainer", None),
+            ("/analysis/top-gainer", None),
+        ],
+        "loser": [
+            ("/analysis/top-change", {"sort": "loser", "limit": limit}),
+            ("/analysis/top-change", {"type": "loser", "limit": limit}),
+            ("/analysis/top-change", {"filter": "loser", "limit": limit}),
+            ("/analysis/top-change/loser", {"limit": limit}),
+            ("/analysis/market/top-loser", None),
+            ("/analysis/top-loser", None),
+        ],
+        "active": [
+            ("/analysis/top-change", {"sort": "active", "limit": limit}),
+            ("/analysis/top-active", None),
+            ("/analysis/market/top-active", None),
+        ],
+        "value": [
+            ("/analysis/top-change", {"sort": "value", "limit": limit}),
+            ("/analysis/top-value", None),
+            ("/analysis/market/top-value", None),
+        ],
+        "freq": [
+            ("/analysis/top-change", {"sort": "freq", "limit": limit}),
+            ("/analysis/top-frequency", None),
+            ("/analysis/market/top-frequency", None),
+        ],
+        "foreign": [
+            ("/analysis/top-change", {"sort": "foreign", "limit": limit}),
+            ("/analysis/market/foreign-net", None),
+        ],
+    }
+    candidates = endpoint_by_sort.get(sort_key, endpoint_by_sort["gainer"])
+
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(
-            f"{INVESGO_BASE_URL}/analysis/top-change",
-            headers=_headers(),
-            params={"sort": sort, "limit": limit}
-        )
-        r.raise_for_status()
-        return r.json()
+        data = await _get_json_first_success(client, candidates, fallback=[])
+
+    rows = [_normalize_mover(row, source="top-movers") for row in _unwrap_list(data) if isinstance(row, dict)]
+    if rows:
+        return rows[:limit]
+
+    try:
+        stock_rows = [_normalize_mover(row, source="stock-list-fallback") for row in await get_stock_list() if isinstance(row, dict)]
+    except Exception as exc:
+        logger.warning(f"[INVESGO] top movers fallback stock list failed: {exc}")
+        return []
+
+    if sort_key == "loser":
+        stock_rows = [row for row in stock_rows if row.get("change_pct", 0) < 0]
+        stock_rows.sort(key=lambda row: row.get("change_pct", 0))
+    elif sort_key in ("active", "volume"):
+        stock_rows.sort(key=lambda row: row.get("volume", 0), reverse=True)
+    elif sort_key == "value":
+        stock_rows.sort(key=lambda row: row.get("value", 0), reverse=True)
+    elif sort_key in ("freq", "frequency"):
+        stock_rows.sort(key=lambda row: row.get("freq", 0), reverse=True)
+    elif sort_key == "foreign":
+        stock_rows.sort(key=lambda row: abs(row.get("foreign_net", 0) or 0), reverse=True)
+    else:
+        stock_rows = [row for row in stock_rows if row.get("change_pct", 0) > 0]
+        stock_rows.sort(key=lambda row: row.get("change_pct", 0), reverse=True)
+
+    return stock_rows[:limit]
 
 async def get_market_regime() -> dict:
     # RC-3: Cache 10 menit (600 detik)
