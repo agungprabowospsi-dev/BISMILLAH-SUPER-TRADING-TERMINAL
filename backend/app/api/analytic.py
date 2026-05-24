@@ -745,6 +745,27 @@ Top Brokers: {", ".join(top_brokers[:5])}
         if rr < 1.0 and rr > 0 and rr_msg not in no_go_reasons:
             no_go_reasons.append(rr_msg)
 
+        empirical_memory = {"available": False}
+        empirical_context = ""
+        try:
+            from app.ml.historical_learning import get_empirical_context
+            empirical_memory = await get_empirical_context(req.ticker, mode=req.mode, candles=ohlcv)
+            if empirical_memory.get("available"):
+                empirical_context = (
+                    "Empirical IDX Memory: "
+                    f"pattern {empirical_memory.get('pattern_key')} | "
+                    f"sample {empirical_memory.get('sample_count')} | "
+                    f"winrate {empirical_memory.get('winrate'):.1f}% | "
+                    f"expectancy {empirical_memory.get('expectancy_pct'):.2f}%. "
+                    f"{empirical_memory.get('literature', '')}"
+                )
+                if empirical_memory.get("winrate", 0) >= 58:
+                    go_reasons.append(f"Empirical memory winrate {empirical_memory.get('winrate'):.1f}%")
+                elif empirical_memory.get("winrate", 100) <= 45 and empirical_memory.get("sample_count", 0) >= 30:
+                    no_go_reasons.append(f"Empirical memory lemah: winrate {empirical_memory.get('winrate'):.1f}%")
+        except Exception:
+            empirical_memory = {"available": False}
+
         go_score = len(go_reasons)
         no_score = len(no_go_reasons)
         screener_grade_override = False
@@ -787,6 +808,7 @@ Engine: {all_engines.get('bullish_count', 0)} bullish, {all_engines.get('bearish
 {price_dist_context}
 {bandar_engines_context}
 {bulkowski_context}
+{empirical_context}
 Phase2: {wyckoff_phase} | Weinstein: {weinstein_stage} | VSA: {vsa_signal} | Verdict: {phase2_verdict}
 Screener: {f"Grade {req.screener_context.grade} Score {req.screener_context.score:.1f} Phase {req.screener_context.phase}" if req.screener_context and req.screener_context.grade else "Direct analysis (no screener context)"}
 LQ45 Change: {lq45_chg:+.2f}% | Market Breadth: {breadth:.0f}%
@@ -866,6 +888,7 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "foreign_net_bil":   round(foreign_net_val / 1e9, 2) if 'foreign_net_val' in locals() else 0,
             "lq45_change":       round(lq45_chg, 2) if 'lq45_chg' in locals() else 0,
             "market_breadth":    round(breadth, 1) if 'breadth' in locals() else 50,
+            "empirical_memory": empirical_memory,
         }
 
         # ML — Win Probability

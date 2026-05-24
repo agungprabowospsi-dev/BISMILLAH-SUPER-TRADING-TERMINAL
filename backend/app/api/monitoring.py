@@ -488,6 +488,26 @@ async def stateless_monitoring_check(req: MonitoringRequest):
     engine_context = await get_monitoring_engine_context(req.ticker, req.mode)
     early_warnings = extract_early_warnings(engine_context)
     warnings = warnings + early_warnings
+    empirical_memory = {"available": False}
+    try:
+        from app.ml.historical_learning import get_empirical_context
+        empirical_memory = await get_empirical_context(req.ticker, mode=req.mode)
+        if empirical_memory.get("available") and empirical_memory.get("sample_count", 0) >= 30:
+            wr = float(empirical_memory.get("winrate", 0) or 0)
+            if wr <= 45:
+                warnings.append({
+                    "level": "medium",
+                    "msg": f"Empirical memory warning: setup historis mirip hanya winrate {wr:.1f}%",
+                    "type": "EMPIRICAL_LOW_EDGE",
+                })
+            elif wr >= 60:
+                warnings.append({
+                    "level": "low",
+                    "msg": f"Empirical memory support: setup historis mirip winrate {wr:.1f}%",
+                    "type": "EMPIRICAL_EDGE",
+                })
+    except Exception:
+        empirical_memory = {"available": False}
 
     result = sanitize_for_json({
         "ticker": req.ticker,
@@ -502,6 +522,7 @@ async def stateless_monitoring_check(req: MonitoringRequest):
         "smart_trailing_stop": calculate_smart_trailing_stop(req.entry_price, req.stop_loss, req.take_profit, current),
         "institutional_alerts": generate_institutional_alerts(req.entry_price, req.stop_loss, req.take_profit, current),
         "engine_context": engine_context,
+        "empirical_memory": empirical_memory,
         "analytic_context": req.analytic_context,
         "warnings": warnings,
     })

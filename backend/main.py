@@ -11,6 +11,7 @@ from app.api import knowledge_base as kb_api
 from app.api import enhancement as enhancement_api
 from app.api.monitoring_enhancement.router import router as monitoring_enhancement_router
 from app.api import data_accumulation as data_api
+from app.api import historical_learning as historical_learning_api
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -51,6 +52,7 @@ app.include_router(kb_api.router)
 app.include_router(enhancement_api.router)
 app.include_router(monitoring_enhancement_router, prefix="/api", tags=["Monitoring Enhancement"])
 app.include_router(data_api.router)
+app.include_router(historical_learning_api.router)
 # Fri May 15 19:26:37 WIB 2026
 
 # Enrichment Layer (REV21)

@@ -1630,6 +1630,22 @@ async def calculate_rag_boost(ticker: str, mode: Mode, context: Dict[str, Any]) 
     # Akumulasi signal context
     akum_ctx = " ".join(akumulasi_signals[:3]) if akumulasi_signals else ""
 
+    empirical = {"available": False}
+    empirical_boost = 0
+    try:
+        from app.ml.historical_learning import get_empirical_context
+        empirical = await get_empirical_context(ticker, mode=str(mode))
+        if empirical.get("available") and empirical.get("sample_count", 0) >= 30:
+            wr = float(empirical.get("winrate", 0) or 0)
+            if wr >= 65:
+                empirical_boost = 4
+            elif wr >= 58:
+                empirical_boost = 2
+            elif wr <= 42:
+                empirical_boost = -2
+    except Exception:
+        empirical = {"available": False}
+
     # Build final query — gabungkan dengan insight bandarmologi IDX
     query = (
         f"{phase_queries.get(phase, phase_queries['neutral'])} "
@@ -1709,7 +1725,7 @@ async def calculate_rag_boost(ticker: str, mode: Mode, context: Dict[str, Any]) 
 
             # Net boost: bullish - bearish, max 8
             net_boost = bull_count - bear_count
-            boost = max(0, min(8, net_boost))
+            boost = max(0, min(8, net_boost + empirical_boost))
 
             # Bonus kalau phase match dengan KB content
             if phase in ["early_accumulation", "accumulation"] and bull_count >= 3:
@@ -1717,16 +1733,17 @@ async def calculate_rag_boost(ticker: str, mode: Mode, context: Dict[str, Any]) 
 
             return {
                 "boost": boost,
-                "reason": f"KB: {bull_count} bullish / {bear_count} bearish signals",
+                "reason": f"KB: {bull_count} bullish / {bear_count} bearish signals; empirical {empirical_boost:+d}",
                 "source": method_name,
                 "query_phase": phase,
                 "bull_signals": bull_count,
-                "bear_signals": bear_count
+                "bear_signals": bear_count,
+                "empirical_memory": empirical,
             }
     except Exception as exc:
-        return {"boost": 0, "reason": f"KB error: {exc}"}
+        return {"boost": max(0, empirical_boost), "reason": f"KB error: {exc}; empirical {empirical_boost:+d}", "empirical_memory": empirical}
 
-    return {"boost": 0, "reason": "compatible KB method not found"}
+    return {"boost": max(0, empirical_boost), "reason": f"compatible KB method not found; empirical {empirical_boost:+d}", "empirical_memory": empirical}
 
 
 # ===== Phase 3 Combined Scoring =====
