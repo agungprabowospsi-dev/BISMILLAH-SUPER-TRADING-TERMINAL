@@ -93,6 +93,58 @@ def _round_price(value, fallback=0.0):
     return float(round(value, 0))
 
 
+def _finalize_action_plan_levels(action: dict, atr: float, mode: str) -> dict:
+    """Keep long-entry levels internally consistent for UI and monitoring."""
+    order_type = str(action.get("order_type") or "").upper()
+    if order_type == "NO_LONG_ENTRY":
+        action.update({
+            "entry_price": 0,
+            "take_profit_1": 0,
+            "take_profit_2": 0,
+            "take_profit_3": 0,
+        })
+        return action
+
+    entry = float(action.get("entry_price") or action.get("trigger_price") or 0)
+    if entry <= 0:
+        return action
+
+    stop = float(action.get("stop_loss") or action.get("invalidation_price") or 0)
+    atr_value = max(float(atr or 0), entry * 0.01)
+    risk = entry - stop if stop > 0 and stop < entry else atr_value
+    risk = max(risk, atr_value * 0.7)
+
+    mode_l = (mode or "swing").lower()
+    multipliers = {
+        "scalping": (1.0, 1.6, 2.4),
+        "intraday": (1.2, 2.0, 3.0),
+        "swing": (1.5, 2.5, 4.0),
+    }.get(mode_l, (1.5, 2.5, 4.0))
+
+    projected = [
+        _round_price(entry + risk * multipliers[0]),
+        _round_price(entry + risk * multipliers[1]),
+        _round_price(entry + risk * multipliers[2]),
+    ]
+    original = [
+        float(action.get("take_profit_1") or 0),
+        float(action.get("take_profit_2") or 0),
+        float(action.get("take_profit_3") or 0),
+    ]
+    fixed = [
+        _round_price(original[i]) if original[i] > entry else projected[i]
+        for i in range(3)
+    ]
+    fixed[1] = max(fixed[1], _round_price(fixed[0] + risk * 0.5))
+    fixed[2] = max(fixed[2], _round_price(fixed[1] + risk * 0.5))
+    action.update({
+        "take_profit_1": fixed[0],
+        "take_profit_2": fixed[1],
+        "take_profit_3": fixed[2],
+    })
+    return action
+
+
 def build_setup_action_plan(
     *,
     mode: str,
@@ -190,7 +242,7 @@ def build_setup_action_plan(
             "aggressive_plan": "Tidak disarankan.",
             "conservative_plan": "Masukkan watchlist saja sampai reversal/reclaim terkonfirmasi.",
         })
-        return action
+        return _finalize_action_plan_levels(action, atr, mode_l)
 
     if bearish_structure and not (reversal_signal and empirical_ok):
         action.update({
@@ -217,7 +269,7 @@ def build_setup_action_plan(
             "aggressive_plan": f"Buy stop hanya setelah reclaim {trigger}.",
             "conservative_plan": f"Tunggu retest valid ke {retest_zone} setelah reclaim.",
         })
-        return action
+        return _finalize_action_plan_levels(action, atr, mode_l)
 
     if setup == "bullish_breakout" or entry_method in ("BUY_STOP_BREAKOUT", "BULKOWSKI_MEASURE_RULE"):
         action.update({
@@ -329,7 +381,7 @@ def build_setup_action_plan(
         action["setup_type"] = "NO_LONG_ENTRY"
         action["next_action"] = "Enrichment SKIP; tunggu kondisi membaik."
 
-    return action
+    return _finalize_action_plan_levels(action, atr, mode_l)
 
 
 @router.post("/analyze")
@@ -1057,14 +1109,25 @@ Top Brokers: {", ".join(top_brokers[:5])}
                 go_confidence = 45
         setup_type = action_plan.get("setup_type", setup_type)
         entry_method = action_plan.get("order_type", entry_method if 'entry_method' in locals() else "MARKET_ORDER")
+        no_long_entry = entry_method == "NO_LONG_ENTRY"
+        response_entry = 0.0 if no_long_entry else float(action_plan.get("entry_price") or entry or 0)
+        response_sl = float(action_plan.get("stop_loss") or sl or 0)
+        response_tp1 = float(action_plan.get("take_profit_1") or 0)
+        response_tp2 = float(action_plan.get("take_profit_2") or 0)
+        response_tp3 = float(action_plan.get("take_profit_3") or 0)
+        response_rr = (
+            round((response_tp1 - response_entry) / (response_entry - response_sl), 2)
+            if response_entry > 0 and response_tp1 > response_entry and response_sl < response_entry
+            else 0
+        )
 
         rationale = await ask_claude(
             system="Kamu adalah analis saham IDX profesional. Berikan analisis trading yang jelas dan actionable dalam Bahasa Indonesia.",
             prompt=f"""
 Ticker: {req.ticker} | Mode: {req.mode}
 Score: {score:.1f}/100 | Signal: {all_engines['signal']}
-Entry: {entry} | SL: {sl} | TP1: {tp1} | TP2: {tp2} | TP3: {tp3}
-R:R = {rr}
+Entry: {response_entry} | SL: {response_sl} | TP1: {response_tp1} | TP2: {response_tp2} | TP3: {response_tp3}
+R:R = {response_rr}
 Setup Type: {setup_type}
 Setup Reason: {setup_reason}
 Action Plan: {action_plan.get('decision')} | {action_plan.get('setup_type')} | {action_plan.get('order_type')}
@@ -1103,10 +1166,10 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
         result = {
             "ticker": req.ticker,
             "mode": req.mode,
-            "entry": float(entry) if entry else 0,
-            "stop_loss": float(sl) if sl else 0,
-            "tp1": float(tp1), "tp2": float(tp2), "tp3": float(tp3),
-            "rr_ratio": float(rr),
+            "entry": response_entry,
+            "stop_loss": response_sl,
+            "tp1": response_tp1, "tp2": response_tp2, "tp3": response_tp3,
+            "rr_ratio": float(response_rr),
             "score": float(score),
             "confidence": float(min(95, score)),
             "signal": all_engines['signal'],
@@ -1211,18 +1274,21 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             result["win_probability"] = {"probability": 50.0, "grade": "C", "grade_label": "Moderate", "color": "#fbbf24", "method": "fallback", "error": str(e), "trace": traceback.format_exc()[:200]}
         # Dynamic SL/TP
         try:
-            dynamic = calculate_dynamic_sltp(
-                entry_price=float(entry) if entry else float(result.get("entry", 0)),
-                ohlcv=ohlcv,  # FIX1: was normalized_ohlcv (undefined)
-                market_regime=str(result.get("market_regime", "SIDEWAYS")),
-                final_score=float(score),
-                mode=req.mode,
-                akumulasi_score=float(
-                    req.screener_context.akumulasi_score
-                    if req.screener_context and req.screener_context.akumulasi_score > 50
-                    else score
-                )  # SA-3: pakai screener akumulasi_score jika tersedia
-            )
+            if no_long_entry or float(result.get("entry", 0) or 0) <= 0:
+                dynamic = {"method": "inactive_no_long_entry"}
+            else:
+                dynamic = calculate_dynamic_sltp(
+                    entry_price=float(result.get("entry", 0)),
+                    ohlcv=ohlcv,  # FIX1: was normalized_ohlcv (undefined)
+                    market_regime=str(result.get("market_regime", "SIDEWAYS")),
+                    final_score=float(score),
+                    mode=req.mode,
+                    akumulasi_score=float(
+                        req.screener_context.akumulasi_score
+                        if req.screener_context and req.screener_context.akumulasi_score > 50
+                        else score
+                    )  # SA-3: pakai screener akumulasi_score jika tersedia
+                )
             result["dynamic_sltp"] = dynamic
         except Exception as e:
             result["dynamic_sltp"] = {"method": "error", "error": str(e)}
