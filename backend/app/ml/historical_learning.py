@@ -474,6 +474,54 @@ async def get_empirical_context(ticker: str, mode: str = "swing", candles: Optio
         return {"available": False, "reason": str(exc)}
 
 
+async def query_empirical_literature(query: str, mode: str = "swing", limit: int = 3) -> str:
+    """Return mined IDX empirical patterns as compact KB-like literature."""
+    terms = [
+        t.lower() for t in (query or "").replace("|", " ").replace("_", " ").split()
+        if len(t) >= 3
+    ][:12]
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(text("""
+                SELECT pattern_key, sample_count, winrate, expectancy_pct, confidence, literature
+                FROM empirical_patterns
+                WHERE mode = :mode
+                ORDER BY confidence DESC, sample_count DESC, winrate DESC
+                LIMIT 80
+            """), {"mode": mode})
+            rows = [dict(r._mapping) for r in result.fetchall()]
+    except Exception as exc:
+        logger.debug(f"Empirical literature unavailable: {exc}")
+        return ""
+
+    if not rows:
+        return ""
+
+    def rank(row: Dict[str, Any]) -> tuple:
+        haystack = f"{row.get('pattern_key', '')} {row.get('literature', '')}".lower()
+        lexical = sum(1 for term in terms if term in haystack)
+        return (
+            lexical,
+            float(row.get("confidence") or 0),
+            int(row.get("sample_count") or 0),
+            float(row.get("winrate") or 0),
+        )
+
+    rows.sort(key=rank, reverse=True)
+    parts = []
+    for row in rows[:limit]:
+        parts.append(
+            "[IDX_EMPIRICAL_MEMORY]\n"
+            f"Pattern: {row.get('pattern_key')}\n"
+            f"Sample: {int(row.get('sample_count') or 0)} | "
+            f"Winrate: {float(row.get('winrate') or 0):.1f}% | "
+            f"Expectancy: {float(row.get('expectancy_pct') or 0):.2f}% | "
+            f"Confidence: {float(row.get('confidence') or 0):.1f}\n"
+            f"{row.get('literature') or ''}"
+        )
+    return "\n\n---\n\n".join(parts)
+
+
 async def get_learning_status(limit: int = 25) -> Dict[str, Any]:
     await ensure_historical_tables()
     async with AsyncSessionLocal() as db:
@@ -513,3 +561,19 @@ async def sync_many(tickers: List[str], years: int = 15, force: bool = False, co
                 return {"ticker": ticker.upper(), "status": "error", "error": str(exc)[:160]}
 
     return await asyncio.gather(*[one(t) for t in tickers])
+
+
+async def get_stock_universe(limit: int = 50) -> List[str]:
+    """Pick a liquid-ish universe from cached Invesgo stock list."""
+    rows = await invesgo.get_stock_list()
+    candidates = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        code = row.get("code") or row.get("ticker") or row.get("symbol") or row.get("stock_code")
+        if not code or "-" in str(code) or len(str(code)) > 6:
+            continue
+        liquidity = _num(row, "value", "value_idr") + (_num(row, "freq", "frequency") * 1_000_000)
+        candidates.append((str(code).upper(), liquidity))
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    return [code for code, _ in candidates[:max(1, limit)]]

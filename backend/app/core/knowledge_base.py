@@ -98,6 +98,8 @@ COLLECTION_TO_ENGINE = {
     "ml": "ProbabilityEngine",
 }
 
+EMPIRICAL_COLLECTIONS = {"empirical", "historical", "idx_empirical", "empirical_memory"}
+
 COLLECTION_TO_BOOK = {
     "anna_couling": "coulling_vpa",
     "anna_coulling": "coulling_vpa",
@@ -205,6 +207,14 @@ async def query_knowledge_base(collection_key: str, query: str = "", n_results: 
     if not query:
         query = collection_key
         collection_key = "technical"
+
+    if collection_key in EMPIRICAL_COLLECTIONS:
+        try:
+            from app.ml.historical_learning import query_empirical_literature
+            return await query_empirical_literature(query, limit=n_results)
+        except Exception as e:
+            logger.debug(f"Empirical literature query skipped: {e}")
+            return ""
 
     book_key = COLLECTION_TO_BOOK.get(collection_key)
     if book_key:
@@ -339,4 +349,11 @@ async def query_kb_for_engine(engine_name: str, context: str) -> str:
             return ""
 
     parts = [r for r in await asyncio.gather(*[safe_q(b) for b in books]) if r]
+    try:
+        from app.ml.historical_learning import query_empirical_literature
+        empirical = await query_empirical_literature(f"{engine_name} {context}", limit=2)
+        if empirical:
+            parts.append(empirical)
+    except Exception:
+        pass
     return "\n\n---\n\n".join(parts)

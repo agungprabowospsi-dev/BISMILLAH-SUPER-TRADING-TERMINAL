@@ -12,7 +12,9 @@ from app.ml.historical_learning import (
     ensure_historical_tables,
     get_empirical_context,
     get_learning_status,
+    get_stock_universe,
     mine_empirical_patterns,
+    query_empirical_literature,
     sync_many,
     sync_ticker_history,
 )
@@ -23,6 +25,8 @@ router = APIRouter(prefix="/api/historical-learning", tags=["historical_learning
 
 class HistoricalSyncRequest(BaseModel):
     tickers: List[str] = Field(default_factory=list)
+    use_stock_list: bool = False
+    universe_limit: int = Field(default=50, ge=1, le=500)
     years: int = Field(default=15, ge=1, le=15)
     force: bool = False
     concurrency: int = Field(default=3, ge=1, le=6)
@@ -34,6 +38,12 @@ class LearnRequest(BaseModel):
     ticker: str
     mode: str = "swing"
     years: int = Field(default=15, ge=1, le=15)
+
+
+class EmpiricalSearchRequest(BaseModel):
+    query: str = ""
+    mode: str = "swing"
+    limit: int = Field(default=3, ge=1, le=10)
 
 
 def _redis():
@@ -58,6 +68,8 @@ async def _get_job(job_id: str):
 
 async def _run_sync_job(job_id: str, req: HistoricalSyncRequest):
     tickers = [t.upper().strip() for t in req.tickers if t.strip()]
+    if not tickers and req.use_stock_list:
+        tickers = await get_stock_universe(limit=req.universe_limit)
     await _save_job(job_id, {
         "status": "running",
         "progress": 5,
@@ -112,8 +124,8 @@ async def status(limit: int = 25):
 
 @router.post("/sync")
 async def sync_history(req: HistoricalSyncRequest, background_tasks: BackgroundTasks):
-    if not req.tickers:
-        return {"status": "error", "message": "tickers is required"}
+    if not req.tickers and not req.use_stock_list:
+        return {"status": "error", "message": "tickers is required unless use_stock_list=true"}
     job_id = str(uuid.uuid4())[:8]
     await _save_job(job_id, {"status": "queued", "progress": 0, "message": "queued"})
     background_tasks.add_task(_run_sync_job, job_id, req)
@@ -149,3 +161,14 @@ async def mine(mode: str = "swing", min_samples: int = 30):
 @router.get("/context/{ticker}")
 async def context(ticker: str, mode: str = "swing"):
     return await get_empirical_context(ticker.upper(), mode=mode)
+
+
+@router.get("/universe")
+async def universe(limit: int = 50):
+    return {"status": "ok", "tickers": await get_stock_universe(limit=limit)}
+
+
+@router.post("/literature/search")
+async def literature_search(req: EmpiricalSearchRequest):
+    text = await query_empirical_literature(req.query, mode=req.mode, limit=req.limit)
+    return {"status": "ok", "mode": req.mode, "query": req.query, "literature": text, "available": bool(text)}
