@@ -11,6 +11,7 @@ from app.ml.dynamic_sltp import calculate_dynamic_sltp
 from pydantic import BaseModel
 from app.core import invesgo
 from app.engines.master_runner import run_all_engines
+from app.engines.orderbook_microstructure import build_orderbook_execution_overlay
 from app.core.claude_client import ask_claude
 from app.knowledge_base import kb_service
 import logging
@@ -420,6 +421,11 @@ async def analyze(req: AnalyticRequest):
             broker_data_for_engines = await invesgo.get_broker_summary(req.ticker)
         except Exception as broker_err:
             logger.debug(f"[BROKER] analytic prefetch skip: {broker_err}")
+        orderbook_for_engines = {}
+        try:
+            orderbook_for_engines = await invesgo.get_orderbook(req.ticker)
+        except Exception as orderbook_err:
+            logger.debug(f"[ORDERBOOK] analytic prefetch skip: {orderbook_err}")
 
         # Screener is context, not a replacement for Analytic's 35-engine run.
         # Keeping the full engine run prevents a Grade B watchlist candidate from
@@ -429,6 +435,7 @@ async def analyze(req: AnalyticRequest):
             ohlcv,
             req.mode,
             broker_summary_raw=broker_data_for_engines,
+            orderbook=orderbook_for_engines,
         )
         score = all_engines["composite_score"]
 
@@ -1107,6 +1114,12 @@ Top Brokers: {", ".join(top_brokers[:5])}
             go_no_go = action_plan["decision"]
             if go_no_go == "WAIT" and go_confidence < 45:
                 go_confidence = 45
+        orderbook_execution = build_orderbook_execution_overlay(
+            orderbook_for_engines if "orderbook_for_engines" in locals() else {},
+            action_plan=action_plan,
+            mode=req.mode,
+        )
+        action_plan["orderbook_execution"] = orderbook_execution
         setup_type = action_plan.get("setup_type", setup_type)
         entry_method = action_plan.get("order_type", entry_method if 'entry_method' in locals() else "MARKET_ORDER")
         no_long_entry = entry_method == "NO_LONG_ENTRY"
@@ -1132,6 +1145,7 @@ Setup Type: {setup_type}
 Setup Reason: {setup_reason}
 Action Plan: {action_plan.get('decision')} | {action_plan.get('setup_type')} | {action_plan.get('order_type')}
 Trigger: {action_plan.get('trigger_price')} | Entry Zone: {action_plan.get('entry_zone_low')} - {action_plan.get('entry_zone_high')} | Invalidation: {action_plan.get('invalidation_price')}
+Orderbook Execution Overlay: {orderbook_execution.get('execution_recommendation')} | Bias: {orderbook_execution.get('liquidity_bias')} | Spread: {orderbook_execution.get('spread_health')} | Reason: {orderbook_execution.get('reason')}
 Engine: {all_engines.get('bullish_count', 0)} bullish, {all_engines.get('bearish_count', 0)} bearish dari 10 engines
 {market_regime_context}
 {foreign_flow_context}
@@ -1177,6 +1191,7 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "setup_type": setup_type,
             "setup_reason": setup_reason,
             "action_plan": action_plan,
+            "orderbook_execution": orderbook_execution,
             "entry_order_type": action_plan.get("order_type"),
             "trigger_price": action_plan.get("trigger_price"),
             "entry_zone_low": action_plan.get("entry_zone_low"),

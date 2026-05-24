@@ -2,6 +2,7 @@ import numpy as np
 from app.engines.base_engine import BaseEngine, EngineResult
 from app.core.claude_client import ask_claude
 from app.core.knowledge_base import query_knowledge_base
+from app.engines.orderbook_microstructure import build_orderbook_execution_overlay, normalize_orderbook
 
 
 # ─── ENGINE #16: QUANT EDGE ───────────────────────────────────────────────────
@@ -56,8 +57,9 @@ class OrderbookEngine(BaseEngine):
     async def analyze(self, ticker: str, ohlcv: list, mode: str, **kwargs) -> EngineResult:
         try:
             ob = kwargs.get("orderbook") or {}
-            bids = ob.get("bids", [])
-            asks = ob.get("asks", [])
+            normalized = normalize_orderbook(ob)
+            bids = normalized.get("bids", [])
+            asks = normalized.get("asks", [])
 
             if not bids or not asks:
                 # Proxy dari OHLCV
@@ -71,9 +73,11 @@ class OrderbookEngine(BaseEngine):
                     data={"data_source": "proxy", "spread_proxy_pct": round(spread_proxy, 3)}
                 )
 
-            total_bid = sum(b[1] for b in bids[:5]) if bids else 0
-            total_ask = sum(a[1] for a in asks[:5]) if asks else 0
+            depth = 10 if str(mode).lower() in ("intraday", "daytrading", "scalping") else 5
+            total_bid = sum(b["lot"] for b in bids[:depth]) if bids else 0
+            total_ask = sum(a["lot"] for a in asks[:depth]) if asks else 0
             bid_ask_ratio = total_bid / total_ask if total_ask > 0 else 1
+            overlay = build_orderbook_execution_overlay(ob, mode=mode)
 
             score = 50.0
             if bid_ask_ratio > 2:
@@ -84,12 +88,28 @@ class OrderbookEngine(BaseEngine):
                 score = 20.0
             elif bid_ask_ratio < 0.8:
                 score = 35.0
+            if overlay.get("spread_health") == "wide":
+                score = max(20, score - 10)
+            if overlay.get("fake_bid_wall"):
+                score = max(20, score - 12)
 
             return EngineResult(
                 engine_name=self.name, score=score,
                 signal=self._signal_from_score(score), confidence=80.0,
                 rationale=f"Bid/Ask ratio: {bid_ask_ratio:.2f}. Total bid: {total_bid:,.0f}, Total ask: {total_ask:,.0f}. {'Strong buy wall — bullish orderbook pressure.' if bid_ask_ratio > 1.5 else 'Heavy ask wall — selling pressure dominates.' if bid_ask_ratio < 0.7 else 'Balanced orderbook.'}",
-                data={"bid_ask_ratio": round(bid_ask_ratio, 3), "total_bid": total_bid, "total_ask": total_ask}
+                data={
+                    "bid_ask_ratio": round(bid_ask_ratio, 3),
+                    "total_bid": total_bid,
+                    "total_ask": total_ask,
+                    "spread_pct": normalized.get("spread_pct", 0),
+                    "execution_recommendation": overlay.get("execution_recommendation"),
+                    "liquidity_bias": overlay.get("liquidity_bias"),
+                    "spread_health": overlay.get("spread_health"),
+                    "support_wall_price": overlay.get("support_wall_price"),
+                    "resistance_wall_price": overlay.get("resistance_wall_price"),
+                    "fake_bid_wall": overlay.get("fake_bid_wall"),
+                    "source": normalized.get("source"),
+                }
             )
         except Exception as e:
             return self._safe_result(str(e))

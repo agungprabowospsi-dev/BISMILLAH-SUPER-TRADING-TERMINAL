@@ -152,6 +152,7 @@ export default function AnalyticPage() {
     slate: 'border-slate-400/40 bg-slate-400/10 text-slate-500',
   }
   const actionOrderType = String(r?.action_plan?.order_type || r?.entry_order_type || '').toUpperCase()
+  const orderbookExecution = r?.orderbook_execution || r?.action_plan?.orderbook_execution || null
   const noActionableLong = ['NO_LONG_ENTRY', 'NO_MARKET_ENTRY'].includes(actionOrderType)
   const valueOrFallback = (value, fallback) =>
     value !== undefined && value !== null && value !== '' ? value : fallback
@@ -444,6 +445,42 @@ export default function AnalyticPage() {
                 </div>
               )}
 
+              {orderbookExecution && (
+                <div className="w-full rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-3 text-left">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
+                        Orderbook Execution Overlay
+                      </p>
+                      <p className="mt-1 font-mono text-[11px] font-bold uppercase text-slate-900">
+                        {String(orderbookExecution.execution_recommendation || 'USE_EXISTING_PLAN').replace(/_/g, ' ')}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-cyan-600">
+                      Additive
+                    </span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    {[
+                      ['Bias', formatLabel(orderbookExecution.liquidity_bias)],
+                      ['Spread', formatLabel(orderbookExecution.spread_health)],
+                      ['Bid/Ask', orderbookExecution.bid_ask_ratio ? `${Number(orderbookExecution.bid_ask_ratio).toFixed(2)}x` : '-'],
+                      ['Spread %', orderbookExecution.spread_pct !== undefined ? fmtPercent(orderbookExecution.spread_pct, 2) : '-'],
+                      ['Limit Entry', orderbookExecution.suggested_limit_entry ? fmtPrice(orderbookExecution.suggested_limit_entry) : '-'],
+                      ['Ask Trigger', orderbookExecution.suggested_market_trigger ? fmtPrice(orderbookExecution.suggested_market_trigger) : '-'],
+                    ].map(([k, v]) => (
+                      <div key={k} className="rounded-lg border border-slate-200 bg-white/70 px-2 py-1.5">
+                        <p className="font-mono text-[9px] uppercase tracking-wider text-slate-500">{k}</p>
+                        <p className="font-mono text-[11px] font-bold text-slate-900">{v}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-2 font-mono text-[11px] leading-relaxed text-slate-700">
+                    {orderbookExecution.reason || 'Orderbook hanya menajamkan cara eksekusi, bukan mengganti keputusan setup.'}
+                  </p>
+                </div>
+              )}
+
               {empiricalMemory && (
                 <div className="w-full rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-3 text-left">
                   <div className="flex items-start justify-between gap-3">
@@ -593,6 +630,7 @@ export default function AnalyticPage() {
                   no_go_reasons: r.no_go_reasons || [],
                   win_probability: r.win_probability || 50,
                   action_plan: r.action_plan || null,
+                  orderbook_execution: orderbookExecution || null,
                   empirical_memory: r.empirical_memory || null,
                   setup_type: r.setup_type || '',
                   setup_reason: r.setup_reason || ''
