@@ -29,23 +29,7 @@ async function fetchEngineData(pos) {
     const res = await fetch(`${BACKEND}/api/monitoring/check`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ticker: pos.ticker,
-        entry_price: pos.entry_price,
-        stop_loss: pos.stop_loss,
-        take_profit: pos.take_profit_1 || pos.entry_price,
-        take_profit_1: pos.take_profit_1 || 0,
-        take_profit_2: pos.take_profit_2 || 0,
-        take_profit_3: pos.take_profit_3 || 0,
-        mode: String(pos.mode || 'intraday').toLowerCase(),
-        engine_scores: pos.engine_scores || {},
-        market_regime: pos.market_regime || 'SIDEWAYS',
-        lq45_change: pos.lq45_change || 0,
-        breadth_ratio: pos.breadth_ratio || 50,
-        final_score: pos.final_score || 50,
-        kb_context: pos.kb_context || '',
-        analytic_context: pos.analytic_context || {}
-      })
+      body: JSON.stringify(buildMonitoringPayload(pos))
     })
     if (!res.ok) return null
     return res.json()
@@ -68,6 +52,82 @@ function normalizeEngineScores(scores) {
 
 function warningLevel(level) {
   return String(level || 'LOW').toUpperCase()
+}
+
+function buildMonitoringPayload(pos) {
+  return {
+    monitoring_id: pos.monitoring_id || pos.id,
+    ticker: pos.ticker,
+    entry_price: Number(pos.entry_price || 0),
+    stop_loss: Number(pos.stop_loss || 0),
+    take_profit: Number(pos.take_profit || pos.take_profit_1 || pos.entry_price || 0),
+    take_profit_1: Number(pos.take_profit_1 || pos.take_profit || 0),
+    take_profit_2: Number(pos.take_profit_2 || 0),
+    take_profit_3: Number(pos.take_profit_3 || 0),
+    mode: String(pos.mode || 'intraday').toLowerCase(),
+    current_price: Number(pos.current_price || pos.entry_price || 0),
+    lot: Number(pos.lot || 1),
+    broker: pos.broker || '',
+    entry_score: Number(pos.entry_score || pos.final_score || 0),
+    final_score: Number(pos.final_score || pos.entry_score || 50),
+    engine_scores: normalizeEngineScores(pos.engine_scores || {}),
+    market_regime: pos.market_regime || 'SIDEWAYS',
+    lq45_change: Number(pos.lq45_change || 0),
+    breadth_ratio: Number(pos.breadth_ratio || 50),
+    kb_context: pos.kb_context || '',
+    analytic_context: pos.analytic_context || {},
+    empirical_memory: pos.empirical_memory || pos.analytic_context?.empirical_memory || null,
+    name: pos.name || pos.ticker,
+    status: pos.status || 'HOLD',
+    created_at: pos.created_at,
+  }
+}
+
+function normalizeServerPosition(pos) {
+  const normalized = {
+    ...pos,
+    id: pos.monitoring_id || pos.id || `${pos.ticker}_${pos.mode}_${pos.entry_price}`,
+    monitoring_id: pos.monitoring_id || pos.id,
+    take_profit_1: pos.take_profit_1 || pos.take_profit || null,
+    take_profit_2: pos.take_profit_2 || null,
+    take_profit_3: pos.take_profit_3 || null,
+    lot: Number(pos.lot || 1),
+    modal: pos.modal || Number(pos.entry_price || 0) * Number(pos.lot || 1) * 100,
+    engine_scores: normalizeEngineScores(pos.engine_scores || {}),
+    analytic_context: pos.analytic_context || {},
+    empirical_memory: pos.empirical_memory || pos.analytic_context?.empirical_memory || null,
+  }
+  return normalized
+}
+
+async function fetchServerPositions() {
+  const res = await fetch(`${BACKEND}/api/monitoring/active`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+async function startServerPosition(pos) {
+  const res = await fetch(`${BACKEND}/api/monitoring/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildMonitoringPayload(pos))
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+async function removeServerPosition(pos) {
+  const res = await fetch(`${BACKEND}/api/monitoring/remove`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ monitoring_id: pos.monitoring_id || pos.id, ticker: pos.ticker })
+  })
+  if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`)
+}
+
+async function clearServerPositions() {
+  const res = await fetch(`${BACKEND}/api/monitoring/clear`, { method: 'POST' })
+  if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`)
 }
 
 export default function MonitoringPage() {
@@ -125,6 +185,31 @@ export default function MonitoringPage() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(positions))
     } catch { }
   }, [positions])
+
+  useEffect(() => {
+    let cancelled = false
+    const syncServerState = async () => {
+      try {
+        const data = await fetchServerPositions()
+        if (cancelled) return
+        const serverPositions = (data.monitors || []).map(normalizeServerPosition)
+        if (serverPositions.length > 0) {
+          setBackendOnline(true)
+          setPositions(serverPositions)
+          return
+        }
+        const localPositions = positionsRef.current
+        if (localPositions.length > 0) {
+          await Promise.all(localPositions.map((pos) => startServerPosition(pos).catch(() => null)))
+          setBackendOnline(true)
+        }
+      } catch {
+        if (!cancelled) setBackendOnline(false)
+      }
+    }
+    syncServerState()
+    return () => { cancelled = true }
+  }, [])
 
   const refreshOne = async (pos) => {
     const [market, engine] = await Promise.all([
@@ -208,7 +293,15 @@ export default function MonitoringPage() {
     setMonitoringInput(null)
     setShowForm(false)
     setForm({ ticker:'',entry_price:'',stop_loss:'',take_profit_1:'',take_profit_2:'',take_profit_3:'',mode:'INTRADAY',lot:'',broker:'',entry_score:'' })
-    const enriched = (await refreshOne(newPos)) || newPos
+    let serverPos = newPos
+    try {
+      const saved = await startServerPosition(newPos)
+      serverPos = normalizeServerPosition(saved.position || { ...newPos, monitoring_id: saved.monitoring_id })
+      setBackendOnline(true)
+    } catch {
+      setBackendOnline(false)
+    }
+    const enriched = (await refreshOne(serverPos)) || serverPos
     setPositions(prev => {
       const next = [enriched, ...prev]
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)) } catch {}
@@ -216,7 +309,29 @@ export default function MonitoringPage() {
     })
   }
 
-  const handleRemove = (id) => setPositions(prev => prev.filter(p => p.id !== id))
+  const handleRemove = async (id) => {
+    const target = positionsRef.current.find(p => p.id === id || p.monitoring_id === id)
+    setPositions(prev => prev.filter(p => p.id !== id && p.monitoring_id !== id))
+    if (target) {
+      try {
+        await removeServerPosition(target)
+        setBackendOnline(true)
+      } catch {
+        setBackendOnline(false)
+      }
+    }
+  }
+
+  const handleReset = async () => {
+    try {
+      await clearServerPositions()
+      setBackendOnline(true)
+    } catch {
+      setBackendOnline(false)
+    }
+    localStorage.removeItem(STORAGE_KEY)
+    setPositions([])
+  }
 
   return (
     <div className="p-4 lg:p-6 max-w-7xl mx-auto animate-fade-in">
@@ -241,7 +356,7 @@ export default function MonitoringPage() {
             )}
           </div>
         </div>
-        <button onClick={() => { localStorage.removeItem("bismillah_positions"); window.location.reload(); }} className="btn-ghost flex items-center gap-1 text-xs mr-2">🗑 Reset</button>
+        <button onClick={handleReset} className="btn-ghost flex items-center gap-1 text-xs mr-2">Reset</button>
         <button onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center gap-2">
           <Plus className="w-4 h-4"/>Add Position
         </button>
