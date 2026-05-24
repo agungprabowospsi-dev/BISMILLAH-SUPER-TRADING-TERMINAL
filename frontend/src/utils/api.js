@@ -36,9 +36,12 @@ export async function checkHealth() {
 }
 
 export async function analyzeStock(ticker, mode = "swing", screenerContext = null) {
+  const payload = { ticker, mode: mode.toLowerCase() };
+  if (screenerContext) payload.screener_context = screenerContext;
+
   return apiFetch(`/api/analytic/analyze`, {
     method: "POST",
-    body: JSON.stringify({ ticker, mode: mode.toLowerCase(), screener_context: screenerContext }),
+    body: JSON.stringify(payload),
   });
 }
 

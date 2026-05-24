@@ -3,6 +3,7 @@ from fastapi import APIRouter as _R, HTTPException
 from fastapi.responses import JSONResponse
 import json
 import numpy as np
+from typing import Optional
 from sqlalchemy import text as sql_text
 from app.core.database import AsyncSessionLocal as _AsyncSessionLocal
 from app.ml.signal_quality import predict_win_probability, get_model_status
@@ -81,7 +82,7 @@ class ScreenerContext(BaseModel):
 class AnalyticRequest(BaseModel):
     ticker: str
     mode: str = "swing"
-    screener_context: ScreenerContext = None  # SA-1: dari screener
+    screener_context: Optional[ScreenerContext] = None  # SA-1: dari screener
 
 
 def _round_price(value, fallback=0.0):

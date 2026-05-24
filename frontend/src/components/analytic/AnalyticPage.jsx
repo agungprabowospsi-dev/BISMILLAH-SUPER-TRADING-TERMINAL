@@ -19,6 +19,13 @@ const fmtPrice = (value) => {
   return n > 0 ? `Rp ${n.toLocaleString('id-ID')}` : '-'
 }
 
+const fmtPercent = (value, digits = 1) => {
+  const n = Number(value)
+  return Number.isFinite(n) ? `${n.toFixed(digits)}%` : '-'
+}
+
+const formatLabel = (value) => String(value || '-').replace(/_/g, ' ').toUpperCase()
+
 export default function AnalyticPage() {
   const { analyticTicker, setAnalyticTicker, analyticMode, setAnalyticMode, screenerSelectedStock,
     analyticResult, setAnalyticResult, analyticLoading, setAnalyticLoading,
@@ -107,6 +114,32 @@ export default function AnalyticPage() {
       Number(groupScores.execution || 0) < 60 && `Execution layer belum cukup kuat`,
       Number(groupScores.decision || 0) < 60 && `Decision control masih perlu konfirmasi`,
     ].filter(Boolean),
+  }
+
+  const empiricalMemory = r?.empirical_memory || null
+  const empiricalAvailable = Boolean(empiricalMemory?.available)
+  const empiricalSample = Number(empiricalMemory?.sample_count || 0)
+  const empiricalWinrate = Number(empiricalMemory?.winrate || 0)
+  const empiricalExpectancy = Number(empiricalMemory?.expectancy_pct || 0)
+  const empiricalConfidence = Number(empiricalMemory?.confidence || 0)
+  const empiricalFeatures = empiricalMemory?.features || {}
+  const empiricalVerdict = !empiricalMemory
+    ? { label: 'NO DATA', color: 'slate', impact: 'Historical memory belum dikirim oleh backend analytic.' }
+    : !empiricalAvailable
+    ? { label: 'LEARNING', color: 'amber', impact: 'Pattern sudah dikenali, tetapi agregat historis belum cukup untuk menjadi bukti utama.' }
+    : empiricalSample < 30
+    ? { label: 'REFERENCE ONLY', color: 'amber', impact: 'Sample historis masih tipis, gunakan sebagai referensi pendukung.' }
+    : empiricalWinrate >= 58
+    ? { label: 'SUPPORTS SETUP', color: 'green', impact: 'Historis 15 tahun mendukung setup ini sebagai faktor penguat keputusan.' }
+    : empiricalWinrate <= 45
+    ? { label: 'HISTORICAL WARNING', color: 'red', impact: 'Historis 15 tahun memperingatkan setup ini, perlu konfirmasi ekstra atau hindari entry agresif.' }
+    : { label: 'NEUTRAL', color: 'blue', impact: 'Historis tidak cukup kuat untuk mendukung atau menolak setup.' }
+  const empiricalColorClasses = {
+    green: 'border-green-500/40 bg-green-500/10 text-green-500',
+    red: 'border-red-500/40 bg-red-500/10 text-red-500',
+    amber: 'border-amber-500/40 bg-amber-500/10 text-amber-500',
+    blue: 'border-sky-500/40 bg-sky-500/10 text-sky-500',
+    slate: 'border-slate-400/40 bg-slate-400/10 text-slate-500',
   }
 
   const groupEngineKeys = {
@@ -379,6 +412,66 @@ export default function AnalyticPage() {
                         ))}
                       </div>
                     </div>
+                  )}
+                </div>
+              )}
+
+              {empiricalMemory && (
+                <div className="w-full rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-3 text-left">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
+                        15Y Historical Memory
+                      </p>
+                      <p className="mt-1 font-mono text-[11px] font-bold text-slate-900">
+                        {empiricalMemory.pattern_key || 'Pattern belum tersedia'}
+                      </p>
+                    </div>
+                    <span className={clsx(
+                      'shrink-0 rounded-full border px-2 py-1 font-mono text-[9px] font-bold uppercase tracking-wider',
+                      empiricalColorClasses[empiricalVerdict.color]
+                    )}>
+                      {empiricalVerdict.label}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    {[
+                      ['Sample', empiricalSample ? empiricalSample.toLocaleString('id-ID') : '-'],
+                      ['Winrate', empiricalAvailable ? fmtPercent(empiricalWinrate) : '-'],
+                      ['Expectancy', empiricalAvailable ? fmtPercent(empiricalExpectancy, 2) : '-'],
+                      ['Confidence', empiricalAvailable ? fmtPercent(empiricalConfidence) : '-'],
+                    ].map(([k, v]) => (
+                      <div key={k} className="rounded-lg border border-slate-200 bg-white/70 px-2 py-1.5">
+                        <p className="font-mono text-[9px] uppercase tracking-wider text-slate-500">{k}</p>
+                        <p className="font-mono text-[11px] font-bold text-slate-900">{v}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {(empiricalFeatures.trend_state || empiricalFeatures.momentum_state || empiricalFeatures.volume_state || empiricalFeatures.location_state) && (
+                    <div className="mt-2 grid grid-cols-2 gap-1.5">
+                      {[
+                        ['Trend', empiricalFeatures.trend_state],
+                        ['Momentum', empiricalFeatures.momentum_state],
+                        ['Volume', empiricalFeatures.volume_state],
+                        ['Location', empiricalFeatures.location_state],
+                      ].filter(([, v]) => v).map(([k, v]) => (
+                        <div key={k} className="flex justify-between gap-2 rounded border border-slate-200 bg-white/50 px-2 py-1">
+                          <span className="font-mono text-[9px] uppercase text-slate-500">{k}</span>
+                          <span className="font-mono text-[9px] font-bold text-slate-800">{formatLabel(v)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="mt-2 font-mono text-[11px] leading-relaxed text-slate-700">
+                    {empiricalVerdict.impact}
+                  </p>
+                  {empiricalMemory.literature && (
+                    <p className="mt-2 rounded-lg border border-slate-200 bg-white/60 px-2 py-1.5 font-mono text-[10px] leading-relaxed text-slate-600">
+                      {empiricalMemory.literature}
+                    </p>
                   )}
                 </div>
               )}
