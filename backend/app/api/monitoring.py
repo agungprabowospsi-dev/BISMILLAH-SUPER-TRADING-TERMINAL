@@ -59,6 +59,7 @@ class MonitoringRequest(BaseModel):
     breadth_ratio: float = 50.0
     final_score: float = 50.0
     kb_context: str = ""
+    analytic_context: dict = {}
 
 _active_monitors = {}
 
@@ -132,6 +133,7 @@ async def get_status(monitoring_id: str):
         "smart_trailing_stop": calculate_smart_trailing_stop(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
         "institutional_alerts": generate_institutional_alerts(pos["entry_price"], pos["stop_loss"], pos["take_profit"], current),
         "engine_context": engine_context,
+        "analytic_context": pos.get("analytic_context", {}),
         "warnings": warnings,
     }
 
@@ -443,6 +445,7 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
             "rag_context_count": rag_count,
             "rag_engines": rag_engines,
             "bandarmology_included": "BandarmologyEngine" in rag_engines,
+            "broker_behavior_included": "BrokerBehaviorEngine" in rag_engines,
             "engine_details": sanitize_for_json({e["engine"]: e for e in engine_result.get("engines", [])}),
             "debug_keys": list(engine_result.keys()),
         }
@@ -499,6 +502,7 @@ async def stateless_monitoring_check(req: MonitoringRequest):
         "smart_trailing_stop": calculate_smart_trailing_stop(req.entry_price, req.stop_loss, req.take_profit, current),
         "institutional_alerts": generate_institutional_alerts(req.entry_price, req.stop_loss, req.take_profit, current),
         "engine_context": engine_context,
+        "analytic_context": req.analytic_context,
         "warnings": warnings,
     })
     return JSONResponse(content=json.loads(json.dumps(result, cls=NumpyEncoder)))

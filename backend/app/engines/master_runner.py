@@ -20,7 +20,7 @@ from app.engines.decision_engines import (
 
 # Singleton engines
 _g2 = [BandarmologyEngine(), InventoryEngine(), FlowMappingEngine(),
-       IntradayPositioningEngine(), ForeignFlowEngine()]
+       IntradayPositioningEngine(), BrokerBehaviorEngine(), ForeignFlowEngine()]
 
 _g3 = [QuantEdgeEngine(), OrderbookEngine(), RelativeStrengthEngine(),
        FibonacciEngine(), AIPatternRecognitionEngine(), SectorRotationEngine(),
@@ -31,8 +31,18 @@ _g3 = [QuantEdgeEngine(), OrderbookEngine(), RelativeStrengthEngine(),
 _g4 = [RiskManagementEngine(), FinalScorecardEngine(), AIConfidenceEngine(),
        SmartRotationEngine(), RealtimeAlertEngine(), LiquidityQualityEngine()]
 
-G2_WEIGHTS = {"swing": [25,20,20,15,20], "daytrading": [28,20,20,20,12], "scalping": [30,20,20,20,10]}
-G3_WEIGHTS = {"swing": [10,5,8,10,12,10,8,8,5,8,6,5,5], "daytrading": [10,8,8,8,10,8,6,6,4,10,5,8,9], "scalping": [12,15,8,6,8,5,4,4,3,8,3,12,12]}
+G2_WEIGHTS = {
+    "swing": [22, 18, 18, 14, 16, 12],
+    "intraday": [24, 18, 18, 18, 14, 8],
+    "daytrading": [24, 18, 18, 18, 14, 8],
+    "scalping": [26, 18, 16, 18, 16, 6],
+}
+G3_WEIGHTS = {
+    "swing": [10,5,8,10,12,10,8,8,5,8,6,5,5],
+    "intraday": [10,8,8,8,10,8,6,6,4,10,5,8,9],
+    "daytrading": [10,8,8,8,10,8,6,6,4,10,5,8,9],
+    "scalping": [12,15,8,6,8,5,4,4,3,8,3,12,12],
+}
 
 async def run_all_engines(ticker: str, ohlcv: list, mode: str, **kwargs) -> dict:
     """Jalankan semua 34 engines dan return hasil lengkap"""
@@ -48,8 +58,9 @@ async def run_all_engines(ticker: str, ohlcv: list, mode: str, **kwargs) -> dict
 
     # Run G1, G2, G3 paralel
     g1, *g2_g3 = await asyncio.gather(g1_task, *g2_tasks, *g3_tasks, return_exceptions=True)
-    g2_results = g2_g3[:5]
-    g3_results = g2_g3[5:]
+    g2_count = len(_g2)
+    g2_results = g2_g3[:g2_count]
+    g3_results = g2_g3[g2_count:]
 
     # Hitung group scores
     def group_score(results, weights_key, weights_dict):
@@ -81,7 +92,12 @@ async def run_all_engines(ticker: str, ohlcv: list, mode: str, **kwargs) -> dict
             all_results.append(r.to_dict())
 
     # Composite sementara untuk G4
-    gw = {"swing": [0.35,0.30,0.25,0.10], "daytrading": [0.30,0.35,0.25,0.10], "scalping": [0.20,0.40,0.30,0.10]}
+    gw = {
+        "swing": [0.35,0.30,0.25,0.10],
+        "intraday": [0.30,0.35,0.25,0.10],
+        "daytrading": [0.30,0.35,0.25,0.10],
+        "scalping": [0.20,0.40,0.30,0.10],
+    }
     w = gw.get(mode, gw["swing"])
     composite = g1_score*w[0] + g2_score*w[1] + g3_score*w[2] + 50*w[3]
 

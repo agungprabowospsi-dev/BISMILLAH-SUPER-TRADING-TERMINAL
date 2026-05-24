@@ -114,6 +114,12 @@ async def analyze(req: AnalyticRequest):
             "volume": float(c.get("volume", 0) or 0),
         } for c in ohlcv]
 
+        broker_data_for_engines = []
+        try:
+            broker_data_for_engines = await invesgo.get_broker_summary(req.ticker)
+        except Exception as broker_err:
+            logger.debug(f"[BROKER] analytic prefetch skip: {broker_err}")
+
         # ALIGNMENT-FIX: Trust screener Grade A/B to avoid re-computation
         use_screener_score = False
         if req.screener_context and req.screener_context.grade.upper() in ("A", "B"):
@@ -134,10 +140,32 @@ async def analyze(req: AnalyticRequest):
         
         if not use_screener_score:
             # Fresh analysis — run all engines
-            all_engines = await run_all_engines(req.ticker, ohlcv, req.mode)
+            all_engines = await run_all_engines(
+                req.ticker,
+                ohlcv,
+                req.mode,
+                broker_summary_raw=broker_data_for_engines,
+            )
             score = all_engines["composite_score"]
 
         current = ohlcv[-1]["close"]
+        regime = "SIDEWAYS"
+        regime_data = {}
+        lq45_chg = 0.0
+        breadth = 50.0
+        entry_strat = {}
+        price_dist = {}
+        detected_pattern = {}
+        pat_stats = {}
+        bulkowski_context = ""
+        price_dist_context = ""
+        bandar_engines_context = ""
+        foreign_flow_context = ""
+        foreign_signal = "NEUTRAL"
+        foreign_net_val = 0.0
+        broker_conc = {}
+        value_inflow = {}
+        bid_offer = {}
 
         # ── Enrichment + Phase 2 Integration ──────────────────────
         enrichment_verdict  = "CAUTION"
@@ -522,7 +550,7 @@ Top Losers: {", ".join([s.get("code","") for s in (top_loser[:3] if top_loser el
                 pname = pat.get("pattern", "")
                 detected_pattern = pat
                 idx_calib = get_idx_calibration(pname)
-                pat_stats = get_pattern_stats(pname, market_regime, idx_calib)
+                pat_stats = get_pattern_stats(pname, regime, idx_calib)
                 entry_strat = compute_entry_strategy(
                     pname,
                     current_price=float(ohlcv[-1].get("close", 0)) if ohlcv else 0,
@@ -551,7 +579,7 @@ Top Losers: {", ".join([s.get("code","") for s in (top_loser[:3] if top_loser el
             from app.engines.value_inflow_engine import analyze_value_inflow
             from app.engines.bid_offer_depth_engine import analyze_bid_offer_depth
 
-            broker_data = await invesgo.get_broker_summary(req.ticker)
+            broker_data = broker_data_for_engines or await invesgo.get_broker_summary(req.ticker)
             intraday    = await invesgo.get_ohlcv_intraday(req.ticker, market="RG")
 
             # BE-1: Broker Concentration
@@ -621,7 +649,7 @@ Divergence: {value_inflow.get('divergence','')}
         foreign_signal = "NEUTRAL"
         foreign_net_val = 0.0
         try:
-            broker_data = await invesgo.get_broker_summary(req.ticker)
+            broker_data = broker_data_for_engines or await invesgo.get_broker_summary(req.ticker)
             if broker_data:
                 FOREIGN_BROKERS_SET = {"YP","BK","RX","ZP","AK","CC","DB","MS","CS","ML","DP","KI","OD","LG"}
                 f_buy = 0.0; f_sell = 0.0; f_net = 0.0
@@ -655,6 +683,94 @@ Top Brokers: {", ".join(top_brokers[:5])}
                     setup_reason = f"Foreign broker distribusi net {f_net/1e9:.1f}B — waspadai exit."
         except Exception as ff_err:
             logger.debug(f"[FOREIGN FLOW] skip: {ff_err}")
+
+        # Final entry strategy: run after Bulkowski, price distribution,
+        # broker engines, and foreign flow can refine setup_type.
+        atr = _calc_atr(ohlcv)
+        sl_mult = {"swing": 2.0, "intraday": 1.5, "scalping": 1.0}.get(req.mode, 1.5)
+
+        if entry_strat and entry_strat.get("entry_type") not in ("NO_ENTRY", "WAIT_CLOSE", ""):
+            entry = entry_strat.get("entry_price", current)
+            sl    = entry_strat.get("stop_loss", round(entry - atr * sl_mult, 0))
+            tp1   = entry_strat.get("take_profit_1", round(entry + atr * sl_mult * 1.5, 0))
+            tp2   = entry_strat.get("take_profit_2", round(entry + atr * sl_mult * 2.5, 0))
+            tp3   = entry_strat.get("take_profit_3", round(entry + atr * sl_mult * 4.0, 0))
+            entry_method = "BULKOWSKI_MEASURE_RULE"
+        elif setup_type == "bullish_accumulation":
+            poc = price_dist.get("poc_price", 0) if price_dist else 0
+            entry = round(poc if poc > 0 else current * 0.99, 0)
+            sl    = round(entry - atr * sl_mult, 0)
+            tp1   = round(entry + atr * sl_mult * 1.5, 0)
+            tp2   = round(entry + atr * sl_mult * 2.5, 0)
+            tp3   = round(entry + atr * sl_mult * 4.0, 0)
+            entry_method = "LIMIT_AT_POC"
+        elif setup_type == "bullish_pullback":
+            ma20 = sum(c["close"] for c in ohlcv[-20:]) / 20 if len(ohlcv) >= 20 else current
+            ema9 = sum(c["close"] for c in ohlcv[-9:]) / 9 if len(ohlcv) >= 9 else current
+            ma_level = ema9 if req.mode.lower() == "intraday" else ma20
+            entry = round(ma_level, 0)
+            sl    = round(entry - atr * sl_mult, 0)
+            tp1   = round(entry + atr * sl_mult * 1.5, 0)
+            tp2   = round(entry + atr * sl_mult * 2.5, 0)
+            tp3   = round(entry + atr * sl_mult * 4.0, 0)
+            entry_method = "LIMIT_AT_MA"
+        elif setup_type == "bullish_breakout":
+            recent_high = max(c["high"] for c in ohlcv[-20:]) if len(ohlcv) >= 20 else current
+            entry = round(recent_high * 1.005, 0)
+            sl    = round(recent_high - atr * sl_mult, 0)
+            tp1   = round(entry + atr * sl_mult * 1.5, 0)
+            tp2   = round(entry + atr * sl_mult * 2.5, 0)
+            tp3   = round(entry + atr * sl_mult * 4.0, 0)
+            entry_method = "BUY_STOP_BREAKOUT"
+        elif setup_type in ("bearish_distribution", "bearish_continuation", "bearish_reversal", "bearish_breakdown", "distribution_warning"):
+            entry = current
+            sl    = round(entry - atr * sl_mult, 0)
+            tp1   = round(entry + atr * sl_mult * 1.5, 0)
+            tp2   = round(entry + atr * sl_mult * 2.5, 0)
+            tp3   = round(entry + atr * sl_mult * 4.0, 0)
+            entry_method = "NO_LONG_ENTRY"
+            msg = "Setup " + setup_type + " - tidak ada entry long yang valid"
+            if msg not in no_go_reasons:
+                no_go_reasons.append(msg)
+        else:
+            entry = current
+            sl    = round(entry - atr * sl_mult, 0)
+            tp1   = round(entry + atr * sl_mult * 1.5, 0)
+            tp2   = round(entry + atr * sl_mult * 2.5, 0)
+            tp3   = round(entry + atr * sl_mult * 4.0, 0)
+            entry_method = "MARKET_ORDER"
+
+        rr = round((tp1 - entry) / (entry - sl), 2) if entry != sl else 0
+        rr_msg = f"RR={rr} < 1.0 - risk lebih besar dari reward, setup tidak layak"
+        if rr < 1.0 and rr > 0 and rr_msg not in no_go_reasons:
+            no_go_reasons.append(rr_msg)
+
+        go_score = len(go_reasons)
+        no_score = len(no_go_reasons)
+        screener_grade_override = False
+        if req.screener_context and req.screener_context.grade:
+            sc_grade = req.screener_context.grade.upper()
+            sc_score = req.screener_context.score
+            if sc_grade == "A" and sc_score >= 75 and no_score <= 2:
+                screener_grade_override = True
+            elif sc_grade == "B" and sc_score >= 65 and no_score <= 1:
+                screener_grade_override = True
+
+        if (enrichment_verdict == "SKIP" or weinstein_stage == 4 or score < 55) and not screener_grade_override:
+            go_no_go = "NO GO"
+            go_confidence = max(0, 30 - (no_score * 10))
+        elif go_score >= 3 and no_score == 0:
+            go_no_go = "STRONG GO"
+            go_confidence = min(95, 70 + go_score * 5)
+        elif (go_score >= 2 and go_score > no_score) or screener_grade_override:
+            go_no_go = "GO"
+            go_confidence = min(95, 60 + go_score * 5) if screener_grade_override else min(85, 60 + go_score * 5)
+        elif no_score >= 2:
+            go_no_go = "WAIT"
+            go_confidence = max(30, 60 - no_score * 10)
+        else:
+            go_no_go = "WAIT"
+            go_confidence = 50
 
         rationale = await ask_claude(
             system="Kamu adalah analis saham IDX profesional. Berikan analisis trading yang jelas dan actionable dalam Bahasa Indonesia.",
