@@ -45,6 +45,14 @@ from .rag_monitor import run_rag_monitor
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+def _normalize_trade_mode(mode: str) -> str:
+    normalized = str(mode or "SWING").upper()
+    if normalized == "INTRADAY":
+        return "DAYTRADING"
+    if normalized in ("SWING", "DAYTRADING", "SCALPING"):
+        return normalized
+    return "SWING"
+
 
 # ─────────────────────────────────────────────
 # HELPER — PRICE FEED + ALERT
@@ -75,17 +83,17 @@ def _check_alert(last_price: float, req) -> AlertResult:
         base.triggered     = True
         base.trigger_price = last_price
         base.message       = f"⛔ SL HIT di {last_price} — EXIT ALL"
-    elif last_price >= req.tp3_price:
+    elif req.tp3_price > 0 and last_price >= req.tp3_price:
         base.alert_type    = AlertType.TP3_HIT
         base.triggered     = True
         base.trigger_price = last_price
         base.message       = f"🎯 TP3 HIT di {last_price} — PROFIT MAKSIMAL"
-    elif last_price >= req.tp2_price:
+    elif req.tp2_price > 0 and last_price >= req.tp2_price:
         base.alert_type    = AlertType.TP2_HIT
         base.triggered     = True
         base.trigger_price = last_price
         base.message       = f"🎯 TP2 HIT di {last_price} — pertimbangkan partial exit"
-    elif last_price >= req.tp1_price:
+    elif req.tp1_price > 0 and last_price >= req.tp1_price:
         base.alert_type    = AlertType.TP1_HIT
         base.triggered     = True
         base.trigger_price = last_price
@@ -231,10 +239,11 @@ async def monitoring_enhancement(
     """
     start_time = time.time()
     ticker     = ticker.upper()
+    trade_mode = _normalize_trade_mode(req.trade_mode)
 
     try:
         # ── Step 1: Fetch + normalize data ──
-        data = await fetch_adapted_data(ticker, req.trade_mode)
+        data = await fetch_adapted_data(ticker, trade_mode)
         if data.error and not data.closes:
             raise HTTPException(status_code=503, detail=f"Data fetch failed: {data.error}")
 
@@ -294,7 +303,7 @@ async def monitoring_enhancement(
             avg_volume      = data.avg_volume,
             bandar_phase    = bandarmologi_result.current_phase.value,
             net_foreign_lot = data.net_foreign_lot,
-            swing_lookback  = req.trade_mode == "SWING" and 20 or 15,
+            swing_lookback  = trade_mode == "SWING" and 20 or 15,
         )
 
         # ── Phase 2 dari retest_result ──
@@ -305,7 +314,7 @@ async def monitoring_enhancement(
         # ── Step 7: TP Probability (Engine 7) ──
         tp_result = calculate_tp_probability(
             ticker                 = ticker,
-            trade_mode             = req.trade_mode,
+            trade_mode             = trade_mode,
             entry_price            = req.entry_price,
             sl_price               = req.sl_price,
             tp1_price              = req.tp1_price,
@@ -332,7 +341,7 @@ async def monitoring_enhancement(
         # Update tp_result enrichment verdict
         tp_result = calculate_tp_probability(
             ticker                 = ticker,
-            trade_mode             = req.trade_mode,
+            trade_mode             = trade_mode,
             entry_price            = req.entry_price,
             sl_price               = req.sl_price,
             tp1_price              = req.tp1_price,
@@ -382,7 +391,7 @@ async def monitoring_enhancement(
 
         return MonitoringEnhancementResponse(
             ticker             = ticker,
-            trade_mode         = req.trade_mode,
+            trade_mode         = trade_mode,
             poll_timestamp     = datetime.now().isoformat(),
             price_feed         = price_feed,
             alert              = alert,

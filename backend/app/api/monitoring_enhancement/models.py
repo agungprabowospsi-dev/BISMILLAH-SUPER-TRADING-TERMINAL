@@ -267,7 +267,10 @@ class MonitoringEnhancementResponse(BaseModel):
 
 class MonitoringEnhancementRequest(BaseModel):
     ticker:      str
-    trade_mode:  Literal["SWING", "DAYTRADING", "SCALPING"] = "SWING"
+    trade_mode:  Literal[
+        "SWING", "DAYTRADING", "INTRADAY", "SCALPING",
+        "swing", "daytrading", "intraday", "scalping",
+    ] = "SWING"
     entry_price: float
     sl_price:    float
     tp1_price:   float

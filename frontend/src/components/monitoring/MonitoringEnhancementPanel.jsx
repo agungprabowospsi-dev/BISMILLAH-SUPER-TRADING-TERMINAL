@@ -6,6 +6,13 @@ const BACKEND = 'https://backend-production-daed.up.railway.app'
 // ─── HELPERS ───────────────────────────────────────────────
 const clx = (...c) => c.filter(Boolean).join(' ')
 
+const normalizeTradeMode = (mode) => {
+  const value = String(mode || 'SWING').toUpperCase()
+  if (value === 'INTRADAY') return 'DAYTRADING'
+  if (value === 'DAYTRADING' || value === 'SCALPING' || value === 'SWING') return value
+  return 'SWING'
+}
+
 const actionColor = (action) => ({
   HOLD_TP2:  'text-green-400 bg-green-400/10 border-green-400/30',
   HOLD_TP1:  'text-blue-400 bg-blue-400/10 border-blue-400/30',
@@ -302,7 +309,7 @@ export default function MonitoringEnhancementPanel({ position }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             ticker:      position.ticker,
-            trade_mode:  position.mode || 'SWING',
+            trade_mode:  normalizeTradeMode(position.mode),
             entry_price: parseFloat(position.entry_price) || 0,
             sl_price:    parseFloat(position.stop_loss) || 0,
             tp1_price:   parseFloat(position.take_profit_1) || 0,
@@ -328,9 +335,9 @@ export default function MonitoringEnhancementPanel({ position }) {
   // SWING=5min, INTRADAY=1min, SCALPING=30sec
   useEffect(() => {
     if (!position?.ticker) return
-    const mode = position?.mode || 'SWING'
+    const mode = normalizeTradeMode(position?.mode)
     const intervalMs = mode === 'SCALPING' ? 30 * 1000
-                     : mode === 'INTRADAY' ? 60 * 1000
+                     : mode === 'DAYTRADING' ? 60 * 1000
                      : 5 * 60 * 1000
     fetchData()
     const interval = setInterval(fetchData, intervalMs)
