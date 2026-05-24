@@ -368,33 +368,16 @@ async def analyze(req: AnalyticRequest):
         except Exception as broker_err:
             logger.debug(f"[BROKER] analytic prefetch skip: {broker_err}")
 
-        # ALIGNMENT-FIX: Trust screener Grade A/B to avoid re-computation
-        use_screener_score = False
-        if req.screener_context and req.screener_context.grade.upper() in ("A", "B"):
-            if req.screener_context.score >= 55:
-                # Screener already validated — use its score
-                use_screener_score = True
-                score = float(req.screener_context.score)
-                # Mock engines response untuk consistency
-                all_engines = {
-                    "composite_score": score,
-                    "signal": "BULLISH" if score >= 65 else "BEARISH",
-                    "bullish_count": int(score / 10),
-                    "bearish_count": 3 if score < 65 else 1,
-                    "total_engines": 10,
-                    "engines": [{"engine": "screener_cached", "score": score, "signal": "BULLISH" if score >= 65 else "NEUTRAL"}]
-                }
-                logger.info(f"[ALIGN] Using screener Grade {req.screener_context.grade} score {score:.1f} for {req.ticker}")
-        
-        if not use_screener_score:
-            # Fresh analysis — run all engines
-            all_engines = await run_all_engines(
-                req.ticker,
-                ohlcv,
-                req.mode,
-                broker_summary_raw=broker_data_for_engines,
-            )
-            score = all_engines["composite_score"]
+        # Screener is context, not a replacement for Analytic's 35-engine run.
+        # Keeping the full engine run prevents a Grade B watchlist candidate from
+        # hiding the detailed engine-score breakdown.
+        all_engines = await run_all_engines(
+            req.ticker,
+            ohlcv,
+            req.mode,
+            broker_summary_raw=broker_data_for_engines,
+        )
+        score = all_engines["composite_score"]
 
         current = ohlcv[-1]["close"]
         regime = "SIDEWAYS"

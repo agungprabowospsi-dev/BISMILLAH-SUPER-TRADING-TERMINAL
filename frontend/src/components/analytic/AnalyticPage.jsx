@@ -110,15 +110,16 @@ export default function AnalyticPage() {
   }
 
   const groupEngineKeys = {
-    group1:['price_action','trend','support','volume','relative_vol','multi_time','order_block','break_order','fair_value','liquidity'],
-    group2:['bandarmology','inventory','flow','intraday','foreign'],
-    group3:['quant','orderbook','relative_strength','fibonacci','pattern','sector','macro_market','macro_econ','geopolit','news','insider','probability','trading_setup'],
-    group4:['risk','scorecard','ai_conf','rotation','alert','liquidity_qual'],
+    group1:['priceaction','trend','support','resistance','volumeintelligence','relativevolume','multitime','orderblock','breakorder','fairvalue','liquidity'],
+    group2:['bandarmology','inventory','flowmapping','intradaypositioning','brokerbehavior','foreignflow'],
+    group3:['quant','orderbook','relativestrength','fibonacci','pattern','sector','macromarket','macroeconomics','geopolit','news','insider','probability','tradingsetup'],
+    group4:['risk','scorecard','aiconfidence','smartrotation','realtimealert','liquidityquality'],
   }
 
+  const normalizeEngineName = (name) => String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '')
   const getGroupEngines = (grp) =>
     Object.entries(engines).filter(([k]) =>
-      groupEngineKeys[grp]?.some(gk => k.toLowerCase().includes(gk.substring(0,6))))
+      groupEngineKeys[grp]?.some(gk => normalizeEngineName(k).includes(gk)))
 
   // Hitung group score dari engines
   const calcGroupScore = (grp) => {
@@ -521,7 +522,9 @@ export default function AnalyticPage() {
               ))}
               {getGroupEngines(activeGroup).length===0 && (
                 <div className="col-span-2 py-6 text-center">
-                  <p className="font-mono text-xs text-slate-700">Jalankan analisis untuk melihat engine scores</p>
+                  <p className="font-mono text-xs text-slate-700">
+                    {r ? 'Tidak ada engine yang cocok dengan grup ini' : 'Jalankan analisis untuk melihat engine scores'}
+                  </p>
                 </div>
               )}
             </div>
