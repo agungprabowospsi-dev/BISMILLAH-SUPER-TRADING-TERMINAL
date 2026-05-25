@@ -2041,13 +2041,11 @@ def rank_top(qualified: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]
 
 
 def build_watchlist_fallback(scored: List[Dict[str, Any]], mode: Mode, limit: int) -> List[Dict[str, Any]]:
-    floor = MODE_CONFIG[mode]["min_score"] - 7
+    floor = max(38, MODE_CONFIG[mode]["min_score"] - 20)
     pool: List[Dict[str, Any]] = []
     for item in scored:
         phase = str(item.get("phase", "")).lower()
         if phase in {"distribution", "decline"}:
-            continue
-        if item.get("disqualify_reason") and not str(item.get("disqualify_reason")).startswith("Score below threshold"):
             continue
         if item.get("money_maker", {}).get("verdict") == "FLOW_OUT_AVOID":
             continue
@@ -2058,7 +2056,7 @@ def build_watchlist_fallback(scored: List[Dict[str, Any]], mode: Mode, limit: in
         candidate = dict(item)
         candidate["watchlist_only"] = True
         candidate["disqualify"] = False
-        candidate["fallback_reason"] = "Strict screener kosong; kandidat ini hanya adaptive watchlist, bukan sinyal entry otomatis."
+        candidate["fallback_reason"] = "Strict screener kosong; kandidat ini hanya adaptive watchlist/market radar, bukan sinyal entry otomatis."
         candidate["signal"] = "WATCHLIST" if to_float(candidate.get("final_score")) >= 55 else "NEUTRAL"
         candidate["reason"] = f"{candidate.get('fallback_reason')} {candidate.get('reason', '')}".strip()
         pool.append(candidate)
