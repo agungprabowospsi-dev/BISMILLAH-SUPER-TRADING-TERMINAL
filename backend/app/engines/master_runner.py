@@ -6,6 +6,7 @@ from app.engines.smart_money_engines import (
     IntradayPositioningEngine, ForeignFlowEngine
 )
 from app.engines.broker_behavior_engine import BrokerBehaviorEngine
+from app.engines.money_maker_core_engine import MoneyMakerCoreEngine
 from app.engines.execution_engines import (
     QuantEdgeEngine, OrderbookEngine, RelativeStrengthEngine,
     FibonacciEngine, AIPatternRecognitionEngine, SectorRotationEngine,
@@ -20,7 +21,8 @@ from app.engines.decision_engines import (
 
 # Singleton engines
 _g2 = [BandarmologyEngine(), InventoryEngine(), FlowMappingEngine(),
-       IntradayPositioningEngine(), BrokerBehaviorEngine(), ForeignFlowEngine()]
+       IntradayPositioningEngine(), BrokerBehaviorEngine(), ForeignFlowEngine(),
+       MoneyMakerCoreEngine()]
 
 _g3 = [QuantEdgeEngine(), OrderbookEngine(), RelativeStrengthEngine(),
        FibonacciEngine(), AIPatternRecognitionEngine(), SectorRotationEngine(),
@@ -32,10 +34,10 @@ _g4 = [RiskManagementEngine(), FinalScorecardEngine(), AIConfidenceEngine(),
        SmartRotationEngine(), RealtimeAlertEngine(), LiquidityQualityEngine()]
 
 G2_WEIGHTS = {
-    "swing": [22, 18, 18, 14, 16, 12],
-    "intraday": [24, 18, 18, 18, 14, 8],
-    "daytrading": [24, 18, 18, 18, 14, 8],
-    "scalping": [26, 18, 16, 18, 16, 6],
+    "swing": [18, 15, 15, 12, 15, 10, 15],
+    "intraday": [20, 15, 15, 15, 13, 7, 15],
+    "daytrading": [20, 15, 15, 15, 13, 7, 15],
+    "scalping": [21, 14, 13, 15, 13, 6, 18],
 }
 G3_WEIGHTS = {
     "swing": [10,5,8,10,12,10,8,8,5,8,6,5,5],

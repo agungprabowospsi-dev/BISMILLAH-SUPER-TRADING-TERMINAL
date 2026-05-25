@@ -3,6 +3,7 @@ from fastapi import APIRouter as _R, HTTPException
 from fastapi.responses import JSONResponse
 import json
 import numpy as np
+import os
 from typing import Optional
 from sqlalchemy import text as sql_text
 from app.core.database import AsyncSessionLocal as _AsyncSessionLocal
@@ -12,6 +13,9 @@ from pydantic import BaseModel
 from app.core import invesgo
 from app.engines.master_runner import run_all_engines
 from app.engines.orderbook_microstructure import build_orderbook_execution_overlay
+from app.core.official_enrichment import build_analytic_enrichment, apply_official_enrichment_to_action_plan
+from app.core.money_maker import analyze_money_maker_context, apply_money_maker_to_action_plan
+from app.core.money_maker_store import get_latest_flow_snapshot_cloud, save_money_maker_cloud
 from app.core.claude_client import ask_claude
 from app.knowledge_base import kb_service
 import logging
@@ -1114,12 +1118,48 @@ Top Brokers: {", ".join(top_brokers[:5])}
             go_no_go = action_plan["decision"]
             if go_no_go == "WAIT" and go_confidence < 45:
                 go_confidence = 45
+        official_enrichment = {"available": False}
+        try:
+            official_enrichment = await build_analytic_enrichment(
+                req.ticker,
+                mode=req.mode,
+                broker_summary=broker_data_for_engines if "broker_data_for_engines" in locals() else [],
+            )
+        except Exception as enrichment_err:
+            logger.debug(f"[OFFICIAL_ENRICHMENT] analytic skip: {enrichment_err}")
+            official_enrichment = {"available": False, "reason": str(enrichment_err)[:160]}
+        action_plan = apply_official_enrichment_to_action_plan(action_plan, official_enrichment)
+        money_maker_previous = await get_latest_flow_snapshot_cloud(req.ticker, req.mode)
+        money_maker = analyze_money_maker_context(
+            ticker=req.ticker,
+            mode=req.mode,
+            ohlcv=ohlcv,
+            engine_result=all_engines,
+            broker_summary=broker_data_for_engines if "broker_data_for_engines" in locals() else [],
+            orderbook=orderbook_for_engines if "orderbook_for_engines" in locals() else {},
+            official_enrichment=official_enrichment,
+            bandarmology={
+                "phase": wyckoff_phase,
+                "broker_concentration": broker_conc if "broker_conc" in locals() else {},
+                "value_inflow": value_inflow if "value_inflow" in locals() else {},
+                "price_distribution": price_dist if "price_dist" in locals() else {},
+            },
+            foreign_flow={"score": 80 if foreign_signal == "NET BUY" else 25 if foreign_signal == "NET SELL" else 50},
+            pattern={"score": pat_stats.get("confidence", 50) if "pat_stats" in locals() and isinstance(pat_stats, dict) else 50},
+            previous_snapshot=money_maker_previous,
+        )
+        money_maker_persist = await save_money_maker_cloud(money_maker)
+        money_maker.setdefault("flow_memory", {})["cloud_saved"] = bool(money_maker_persist.get("saved"))
+        money_maker["flow_memory"]["persistent_backend"] = money_maker_persist.get("persistent_backend", "sqlite")
+        action_plan = apply_money_maker_to_action_plan(action_plan, money_maker)
         orderbook_execution = build_orderbook_execution_overlay(
             orderbook_for_engines if "orderbook_for_engines" in locals() else {},
             action_plan=action_plan,
             mode=req.mode,
         )
         action_plan["orderbook_execution"] = orderbook_execution
+        action_plan["official_enrichment"] = official_enrichment
+        action_plan["money_maker"] = money_maker
         setup_type = action_plan.get("setup_type", setup_type)
         entry_method = action_plan.get("order_type", entry_method if 'entry_method' in locals() else "MARKET_ORDER")
         no_long_entry = entry_method == "NO_LONG_ENTRY"
@@ -1146,6 +1186,9 @@ Setup Reason: {setup_reason}
 Action Plan: {action_plan.get('decision')} | {action_plan.get('setup_type')} | {action_plan.get('order_type')}
 Trigger: {action_plan.get('trigger_price')} | Entry Zone: {action_plan.get('entry_zone_low')} - {action_plan.get('entry_zone_high')} | Invalidation: {action_plan.get('invalidation_price')}
 Orderbook Execution Overlay: {orderbook_execution.get('execution_recommendation')} | Bias: {orderbook_execution.get('liquidity_bias')} | Spread: {orderbook_execution.get('spread_health')} | Reason: {orderbook_execution.get('reason')}
+Official Invezgo Enrichment: TimeTable {official_enrichment.get('time_table', {}).get('pressure', 'n/a')} | Momentum {official_enrichment.get('momentum_chart', {}).get('bias', 'n/a')} | BrokerStalker {official_enrichment.get('broker_stalker', {}).get('available_count', 0)} | CorporateAction {official_enrichment.get('corporate_actions', {}).get('count', 0)}
+Money Maker Core: {money_maker.get('verdict')} | Phase {money_maker.get('phase')} | Score {money_maker.get('score')} | BFD {money_maker.get('bfd_score')}/5 | Risk {", ".join(money_maker.get('risk_flags', [])[:4]) or "clear"}
+Money Maker Patterns: {", ".join([p.get('name','') for p in money_maker.get('patterns', [])[:4]]) or "none"} | Execution {money_maker.get('execution_intelligence', {}).get('stance', 'n/a')} | Doctrine {", ".join(money_maker.get('doctrine', {}).get('flags', [])[:3]) or "clear"}
 Engine: {all_engines.get('bullish_count', 0)} bullish, {all_engines.get('bearish_count', 0)} bearish dari 10 engines
 {market_regime_context}
 {foreign_flow_context}
@@ -1192,6 +1235,8 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "setup_reason": setup_reason,
             "action_plan": action_plan,
             "orderbook_execution": orderbook_execution,
+            "official_enrichment": official_enrichment,
+            "money_maker": money_maker,
             "entry_order_type": action_plan.get("order_type"),
             "trigger_price": action_plan.get("trigger_price"),
             "entry_zone_low": action_plan.get("entry_zone_low"),
@@ -1815,26 +1860,28 @@ async def accumulate_ohlcv():
 
     # Cari hari bursa valid — cek hari ini dulu, mundur max 7 hari
     import httpx as _httpx
-    INVESGO_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImNtbnVmb2s2bTAwMDcxa21wM25lODlqanEiLCJlbWFpbCI6ImFndW5ndHJhZGVyY3VhbkBnbWFpbC5jb20iLCJ1c2VybmFtZSI6InNhbWJlcmN1YW4iLCJuYW1lIjoiQUdVTkciLCJyb2xlIjoiUFJJTUUiLCJzY29wZSI6WyJwdWJsaWMiXSwidmVyaWZpZWQiOmZhbHNlLCJkZXZpY2UiOiJBUEkiLCJpYXQiOjE3Nzg2MzI2MjYsImV4cCI6MTc4MTMzNjAzNX0.XgcvzxL_Y-JIxYpH6DxtRnz1N-eWnSVddLfMoUeGmfA"
+    INVESGO_TOKEN = os.environ.get("INVESGO_API_KEY", "")
+    INVESGO_BASE_URL = os.environ.get("INVESGO_BASE_URL", "https://api.invezgo.com").rstrip("/")
     trade_date = None
-    for days_back in range(0, 8):
-        candidate_dt = _dt.now() - _td(days=days_back)
-        candidate = candidate_dt.strftime("%Y-%m-%d")
-        if candidate_dt.weekday() in (5, 6):
-            continue
-        try:
-            async with _httpx.AsyncClient(timeout=10) as _client:
-                _r = await _client.get(
-                    "https://api.invesgo.id/analysis/chart/stock/BBCA",
-                    headers={"Authorization": f"Bearer {INVESGO_TOKEN}"},
-                    params={"from": candidate, "to": candidate}
-                )
-                _data = _r.json()
-                if _data and len(_data) > 0 and float(_data[-1].get("close", 0)) > 0:
-                    trade_date = candidate
-                    break
-        except:
-            continue
+    if INVESGO_TOKEN:
+        for days_back in range(0, 8):
+            candidate_dt = _dt.now() - _td(days=days_back)
+            candidate = candidate_dt.strftime("%Y-%m-%d")
+            if candidate_dt.weekday() in (5, 6):
+                continue
+            try:
+                async with _httpx.AsyncClient(timeout=10) as _client:
+                    _r = await _client.get(
+                        f"{INVESGO_BASE_URL}/analysis/chart/stock/BBCA",
+                        headers={"Authorization": f"Bearer {INVESGO_TOKEN}"},
+                        params={"from": candidate, "to": candidate}
+                    )
+                    _data = _r.json()
+                    if _data and len(_data) > 0 and float(_data[-1].get("close", 0)) > 0:
+                        trade_date = candidate
+                        break
+            except Exception:
+                continue
     if not trade_date:
         trade_date = (_dt.now() - _td(days=4)).strftime("%Y-%m-%d")
 

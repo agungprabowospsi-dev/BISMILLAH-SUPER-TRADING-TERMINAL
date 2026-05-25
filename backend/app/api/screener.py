@@ -37,9 +37,16 @@ logger = logging.getLogger(__name__)
 
 try:
     from app.core import invesgo
+    from app.core.official_enrichment import enrich_screener_results
+    from app.core.money_maker import analyze_money_maker_context
+    from app.core.money_maker_store import get_latest_flow_snapshot_cloud, save_money_maker_cloud
     from app.api.bandar_early_detection import get_bandar_early_score, apply_akumulasi_multiplier
 except Exception:
     invesgo = None
+    enrich_screener_results = None
+    analyze_money_maker_context = None
+    get_latest_flow_snapshot_cloud = None
+    save_money_maker_cloud = None
     get_bandar_early_score = None
     apply_akumulasi_multiplier = None
 
@@ -582,9 +589,29 @@ def calc_prefilter_metrics(ohlcv: List[Dict[str, Any]]) -> Optional[Dict[str, An
     }
 
 
-async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Semaphore, filter_intensity: int = 75) -> Optional[Dict[str, Any]]:
+def _adaptive_gate(mode: Mode, filter_intensity: int, adaptive: bool = False) -> Dict[str, float]:
+    cfg = MODE_CONFIG[mode]
+    if adaptive:
+        return {
+            "rvol_min": {"swing": 0.45, "intraday": 0.45, "scalping": 1.0}.get(mode, 0.5),
+            "change_min": {"swing": -1.5, "intraday": -1.0, "scalping": 0.5}.get(mode, 0.0),
+        }
+    if filter_intensity <= 50:
+        multiplier = 0.55
+    elif filter_intensity <= 75:
+        multiplier = 0.75
+    else:
+        multiplier = 1.0
+    return {
+        "rvol_min": cfg["rvol_min"] * multiplier,
+        "change_min": cfg["change_min"],
+    }
+
+
+async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Semaphore, filter_intensity: int = 75, adaptive: bool = False) -> Optional[Dict[str, Any]]:
     ticker = stock["ticker"]
     cfg = MODE_CONFIG[mode]
+    gate = _adaptive_gate(mode, filter_intensity, adaptive=adaptive)
 
     async with semaphore:
         try:
@@ -632,10 +659,10 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             if change_pct_now <= -24.0:
                 return None  # ARB — potensi suspended/tidak bisa jual
 
-            if metrics["rvol"] < cfg["rvol_min"]:
+            if metrics["rvol"] < gate["rvol_min"]:
                 return None
 
-            if metrics["change_pct"] < cfg["change_min"]:
+            if metrics["change_pct"] < gate["change_min"]:
                 return None
 
             # Anti Climax Distribution Filter (Bandar Flow Secrets hal.26)
@@ -738,6 +765,9 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
                 **stock,
                 **metrics,
                 "ohlcv": ohlcv,
+                "adaptive_prefilter": adaptive,
+                "rvol_gate": round(gate["rvol_min"], 2),
+                "change_gate": round(gate["change_min"], 2),
             }
         except Exception:
             return None
@@ -851,9 +881,9 @@ def calc_bfd_presort_score(candidate, mode="swing"):
     return max(0.0, min(100.0, round(score, 2)))
 
 
-async def ohlcv_prefilter(universe: List[Dict[str, Any]], mode: Mode, filter_intensity: int = 75) -> List[Dict[str, Any]]:
+async def ohlcv_prefilter(universe: List[Dict[str, Any]], mode: Mode, filter_intensity: int = 75, adaptive: bool = False) -> List[Dict[str, Any]]:
     sem = asyncio.Semaphore(10)  # Rate limit Invesgo — max 10 paralel
-    tasks = [prefilter_one(stock, mode, sem, filter_intensity) for stock in universe]
+    tasks = [prefilter_one(stock, mode, sem, filter_intensity, adaptive=adaptive) for stock in universe]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     candidates = [r for r in results if isinstance(r, dict)]
@@ -1889,6 +1919,32 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             rag_boost=to_float(rag.get("boost")),
             akumulasi_score=akumulasi_score,
         )
+        money_maker = {"available": False}
+        if analyze_money_maker_context is not None:
+            money_maker_previous = {}
+            if get_latest_flow_snapshot_cloud is not None:
+                money_maker_previous = await get_latest_flow_snapshot_cloud(ticker, mode)
+            money_maker = analyze_money_maker_context(
+                ticker=ticker,
+                mode=mode,
+                ohlcv=ohlcv,
+                engine_result=engine_raw,
+                bandarmology=bandarm,
+                foreign_flow=foreign,
+                pattern=pattern,
+                screener_item=candidate,
+                previous_snapshot=money_maker_previous,
+            )
+            if save_money_maker_cloud is not None:
+                money_maker_persist = await save_money_maker_cloud(money_maker)
+                money_maker.setdefault("flow_memory", {})["cloud_saved"] = bool(money_maker_persist.get("saved"))
+                money_maker["flow_memory"]["persistent_backend"] = money_maker_persist.get("persistent_backend", "sqlite")
+            mm_score = to_float(money_maker.get("score"), 50)
+            fscore = round(clamp(fscore * 0.85 + mm_score * 0.15), 2)
+            if money_maker.get("verdict") == "FLOW_OUT_AVOID":
+                fscore = round(clamp(fscore - 12), 2)
+            elif money_maker.get("verdict") == "STRONG_FLOW_IN":
+                fscore = round(clamp(fscore + 4), 2)
 
         result = {
             "ticker": ticker,
@@ -1901,6 +1957,10 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             "volume": candidate.get("volume"),
             "final_score": fscore,
             "signal": signal_from_score(fscore),
+            "money_maker": money_maker,
+            "money_maker_score": money_maker.get("score"),
+            "bfd_score": money_maker.get("bfd_score"),
+            "flow_phase": money_maker.get("phase"),
             "engine_score": engine_score,
             "engine_meta": engine_meta,
             "bandarmology_composite": bandarm.get("score"),
@@ -1917,7 +1977,7 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             "patterns": pattern.get("patterns"),
             "rag_boost": rag.get("boost"),
             "rag": rag,
-            "disqualify": bool(bandarm.get("disqualify") or foreign.get("heavy_sell")),
+            "disqualify": bool(bandarm.get("disqualify") or foreign.get("heavy_sell") or money_maker.get("verdict") == "FLOW_OUT_AVOID"),
             "disqualify_reason": None,
             "reason": "",
         }
@@ -1926,6 +1986,8 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             result["disqualify_reason"] = "Bandarmology phase/MACD disqualify"
         elif foreign.get("heavy_sell"):
             result["disqualify_reason"] = "Foreign heavy sell + weak/distribution condition"
+        elif money_maker.get("verdict") == "FLOW_OUT_AVOID":
+            result["disqualify_reason"] = "Money Maker Core flow out/distribution trap"
 
         result["reason"] = build_reason(result)
         return result
@@ -1968,12 +2030,39 @@ def rank_top(qualified: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]
     qualified.sort(
         key=lambda x: (
             to_float(x.get("final_score")),
+            to_float(x.get("money_maker_score")),
+            to_float(x.get("bfd_score")),
             to_float(x.get("bandarmology_composite")),
             to_float(x.get("rvol")),
         ),
         reverse=True,
     )
     return qualified[:limit]
+
+
+def build_watchlist_fallback(scored: List[Dict[str, Any]], mode: Mode, limit: int) -> List[Dict[str, Any]]:
+    floor = MODE_CONFIG[mode]["min_score"] - 7
+    pool: List[Dict[str, Any]] = []
+    for item in scored:
+        phase = str(item.get("phase", "")).lower()
+        if phase in {"distribution", "decline"}:
+            continue
+        if item.get("disqualify_reason") and not str(item.get("disqualify_reason")).startswith("Score below threshold"):
+            continue
+        if item.get("money_maker", {}).get("verdict") == "FLOW_OUT_AVOID":
+            continue
+        if item.get("foreign_flow", {}).get("heavy_sell"):
+            continue
+        if to_float(item.get("final_score")) < floor:
+            continue
+        candidate = dict(item)
+        candidate["watchlist_only"] = True
+        candidate["disqualify"] = False
+        candidate["fallback_reason"] = "Strict screener kosong; kandidat ini hanya adaptive watchlist, bukan sinyal entry otomatis."
+        candidate["signal"] = "WATCHLIST" if to_float(candidate.get("final_score")) >= 55 else "NEUTRAL"
+        candidate["reason"] = f"{candidate.get('fallback_reason')} {candidate.get('reason', '')}".strip()
+        pool.append(candidate)
+    return rank_top(pool, limit)
 
 
 # ===== Optional endpoint testing market endpoints =====
@@ -2042,20 +2131,44 @@ async def run_screener(request: ScreenerRequest) -> Dict[str, Any]:
     try:
         universe = await build_universe(mode)
         candidates = await ohlcv_prefilter(universe, mode, request.filter_intensity)
+        strict_candidate_count = len(candidates)
+        adaptive_used = False
+        if not candidates:
+            candidates = await ohlcv_prefilter(universe, mode, 50, adaptive=True)
+            candidates = candidates[:25]
+            adaptive_used = bool(candidates)
         scored = await score_candidates(candidates, mode)
         qualified = apply_disqualifiers(scored, mode)
+        strict_qualified_count = len(qualified)
+        watchlist_fallback_used = False
+        if not qualified and scored:
+            qualified = build_watchlist_fallback(scored, mode, request.limit)
+            watchlist_fallback_used = bool(qualified)
         top = rank_top(qualified, request.limit)
+        official_enrichment = {"available": False}
+        if enrich_screener_results is not None and top:
+            try:
+                official_enrichment = await enrich_screener_results(top, mode)
+            except Exception as exc:
+                logger.warning("[SCREENER] official enrichment skipped: %s", exc)
+                official_enrichment = {"available": False, "reason": str(exc)[:160]}
 
         response: Dict[str, Any] = {
-            "status": "ok",
+            "status": "watchlist" if watchlist_fallback_used else "ok",
             "mode": mode,
+            "message": "Strict screener kosong; menampilkan adaptive watchlist untuk observasi, bukan entry otomatis." if watchlist_fallback_used else "",
             "duration_sec": round(time.time() - started, 2),
             "universe_count": len(universe),
             "candidate_count": len(candidates),
+            "strict_candidate_count": strict_candidate_count,
             "scored_count": len(scored),
             "qualified_count": len(qualified),
+            "strict_qualified_count": strict_qualified_count,
+            "adaptive_prefilter_used": adaptive_used,
+            "watchlist_fallback_used": watchlist_fallback_used,
             "top_5": top,
             "results": top,
+            "official_enrichment": official_enrichment,
             "config": {
                 "rvol_min": cfg["rvol_min"],
                 "change_min": cfg["change_min"],

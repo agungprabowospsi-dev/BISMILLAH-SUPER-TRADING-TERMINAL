@@ -153,6 +153,8 @@ export default function AnalyticPage() {
   }
   const actionOrderType = String(r?.action_plan?.order_type || r?.entry_order_type || '').toUpperCase()
   const orderbookExecution = r?.orderbook_execution || r?.action_plan?.orderbook_execution || null
+  const officialEnrichment = r?.official_enrichment || r?.action_plan?.official_enrichment || null
+  const moneyMaker = r?.money_maker || r?.action_plan?.money_maker || null
   const noActionableLong = ['NO_LONG_ENTRY', 'NO_MARKET_ENTRY'].includes(actionOrderType)
   const valueOrFallback = (value, fallback) =>
     value !== undefined && value !== null && value !== '' ? value : fallback
@@ -481,6 +483,96 @@ export default function AnalyticPage() {
                 </div>
               )}
 
+              {officialEnrichment?.available && (
+                <div className="w-full rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-3 text-left">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
+                        Official Invezgo Enrichment
+                      </p>
+                      <p className="mt-1 font-mono text-[11px] font-bold uppercase text-slate-900">
+                        Time, momentum, broker, fundamental, corporate action
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-emerald-600">
+                      Cached
+                    </span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    {[
+                      ['Time Table', formatLabel(officialEnrichment.time_table?.pressure || 'n/a')],
+                      ['Momentum', formatLabel(officialEnrichment.momentum_chart?.bias || 'n/a')],
+                      ['Broker Stalker', `${Number(officialEnrichment.broker_stalker?.available_count || 0)} active`],
+                      ['Corp Action', `${Number(officialEnrichment.corporate_actions?.count || 0)} items`],
+                      ['Key Stat', officialEnrichment.key_stat?.available ? `${Number(officialEnrichment.key_stat?.rows || 0)} rows` : '-'],
+                      ['Sankey', officialEnrichment.sankey_available ? 'Available' : '-'],
+                    ].map(([k, v]) => (
+                      <div key={k} className="rounded-lg border border-slate-200 bg-white/70 px-2 py-1.5">
+                        <p className="font-mono text-[9px] uppercase tracking-wider text-slate-500">{k}</p>
+                        <p className="font-mono text-[11px] font-bold text-slate-900">{v}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {officialEnrichment.warnings?.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {officialEnrichment.warnings.slice(0, 3).map((w, i) => (
+                        <p key={i} className="font-mono text-[10px] text-amber-700">- {w.message}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {moneyMaker?.available && (
+                <div className="w-full rounded-xl border border-fuchsia-500/30 bg-fuchsia-500/10 px-3 py-3 text-left">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
+                        Money Maker Core
+                      </p>
+                      <p className="mt-1 font-mono text-[11px] font-bold uppercase text-slate-900">
+                        {formatLabel(moneyMaker.verdict || 'n/a')} | {formatLabel(moneyMaker.phase || 'n/a')}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-fuchsia-600">
+                      BFD {Number(moneyMaker.bfd_score || 0)}/5
+                    </span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    {[
+                      ['Score', Number(moneyMaker.score || 0).toFixed(1)],
+                      ['Broker', Number(moneyMaker.components?.broker || 0).toFixed(0)],
+                      ['Orderbook', Number(moneyMaker.components?.orderbook || 0).toFixed(0)],
+                      ['Official', Number(moneyMaker.components?.official || 0).toFixed(0)],
+                      ['VSR', `${Number(moneyMaker.metrics?.vsr || 0).toFixed(2)}x`],
+                      ['Bandar Avg Dist', `${Number(moneyMaker.metrics?.current_vs_bandar_avg_pct || 0).toFixed(2)}%`],
+                      ['Execution', formatLabel(moneyMaker.execution_intelligence?.stance || 'n/a')],
+                      ['Memory', moneyMaker.flow_memory?.flow_reversal_alert ? 'REVERSAL' : moneyMaker.flow_memory?.memory_available ? `${Number(moneyMaker.flow_memory?.bfd_delta || 0).toFixed(1)} BFD` : '-'],
+                    ].map(([k, v]) => (
+                      <div key={k} className="rounded-lg border border-slate-200 bg-white/70 px-2 py-1.5">
+                        <p className="font-mono text-[9px] uppercase tracking-wider text-slate-500">{k}</p>
+                        <p className="font-mono text-[11px] font-bold text-slate-900">{v}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {moneyMaker.risk_flags?.length > 0 && (
+                    <p className="mt-2 font-mono text-[10px] text-amber-700">
+                      Risk: {moneyMaker.risk_flags.slice(0, 4).join(', ')}
+                    </p>
+                  )}
+                  {moneyMaker.patterns?.length > 0 && (
+                    <p className="mt-2 font-mono text-[10px] text-fuchsia-700">
+                      Patterns: {moneyMaker.patterns.slice(0, 4).map((p) => p.name).join(', ')}
+                    </p>
+                  )}
+                  {moneyMaker.doctrine?.rules?.length > 0 && (
+                    <p className="mt-1 font-mono text-[10px] text-slate-700">
+                      Doctrine: {moneyMaker.doctrine.rules[0]}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {empiricalMemory && (
                 <div className="w-full rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-3 text-left">
                   <div className="flex items-start justify-between gap-3">
@@ -631,6 +723,8 @@ export default function AnalyticPage() {
                   win_probability: r.win_probability || 50,
                   action_plan: r.action_plan || null,
                   orderbook_execution: orderbookExecution || null,
+                  official_enrichment: officialEnrichment || null,
+                  money_maker: moneyMaker || null,
                   empirical_memory: r.empirical_memory || null,
                   setup_type: r.setup_type || '',
                   setup_reason: r.setup_reason || ''

@@ -6,3 +6,4 @@ __pycache__/
 frontend/dist
 .venv
 node_modules
+backend/data/money_maker_flow.sqlite3*

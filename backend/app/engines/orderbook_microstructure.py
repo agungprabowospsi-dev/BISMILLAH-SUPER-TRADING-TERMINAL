@@ -21,13 +21,13 @@ def _extract_level(level: Any, side: str) -> Tuple[float, float, float]:
         return 0.0, 0.0, 0.0
 
     if side == "bid":
-        price_keys = ("bid", "bid_price", "price")
-        lot_keys = ("bid_lot", "lot", "volume", "qty")
-        freq_keys = ("bid_freq", "freq", "frequency")
+        price_keys = ("bid", "bid_price", "bid1price", "price")
+        lot_keys = ("bid_lot", "bid1lot", "lot", "volume", "qty")
+        freq_keys = ("bid_freq", "bid1freq", "freq", "frequency")
     else:
-        price_keys = ("ask", "offer", "ask_price", "offer_price", "price")
-        lot_keys = ("ask_lot", "offer_lot", "lot", "volume", "qty")
-        freq_keys = ("ask_freq", "offer_freq", "freq", "frequency")
+        price_keys = ("ask", "offer", "ask_price", "offer_price", "offer1price", "price")
+        lot_keys = ("ask_lot", "offer_lot", "offer1lot", "lot", "volume", "qty")
+        freq_keys = ("ask_freq", "offer_freq", "offer1freq", "freq", "frequency")
 
     price = next((_to_float(level.get(k)) for k in price_keys if level.get(k) not in (None, "")), 0.0)
     lot = next((_to_float(level.get(k)) for k in lot_keys if level.get(k) not in (None, "")), 0.0)
@@ -66,18 +66,14 @@ def normalize_orderbook(raw: Any) -> Dict[str, Any]:
             if ask_price > 0 and ask_lot > 0:
                 asks.append({"price": ask_price, "lot": ask_lot, "freq": ask_freq})
 
-    if not bids and _to_float(raw.get("bid_price")) > 0:
-        bids.append({
-            "price": _to_float(raw.get("bid_price")),
-            "lot": _to_float(raw.get("bid_lot")),
-            "freq": _to_float(raw.get("bid_freq")),
-        })
-    if not asks and (_to_float(raw.get("offer_price")) > 0 or _to_float(raw.get("ask_price")) > 0):
-        asks.append({
-            "price": _to_float(raw.get("offer_price"), _to_float(raw.get("ask_price"))),
-            "lot": _to_float(raw.get("offer_lot"), _to_float(raw.get("ask_lot"))),
-            "freq": _to_float(raw.get("offer_freq"), _to_float(raw.get("ask_freq"))),
-        })
+    if not bids:
+        bid_price, bid_lot, bid_freq = _extract_level(raw, "bid")
+        if bid_price > 0 and bid_lot > 0:
+            bids.append({"price": bid_price, "lot": bid_lot, "freq": bid_freq})
+    if not asks:
+        ask_price, ask_lot, ask_freq = _extract_level(raw, "ask")
+        if ask_price > 0 and ask_lot > 0:
+            asks.append({"price": ask_price, "lot": ask_lot, "freq": ask_freq})
 
     bids = sorted([x for x in bids if x["price"] > 0 and x["lot"] > 0], key=lambda x: x["price"], reverse=True)
     asks = sorted([x for x in asks if x["price"] > 0 and x["lot"] > 0], key=lambda x: x["price"])
@@ -92,7 +88,7 @@ def normalize_orderbook(raw: Any) -> Dict[str, Any]:
         "best_bid": best_bid,
         "best_ask": best_ask,
         "spread_pct": round(spread_pct, 3),
-        "source": "orderbook" if len(bids) > 1 or len(asks) > 1 else "top_of_book",
+        "source": raw.get("source") or ("orderbook" if len(bids) > 1 or len(asks) > 1 else "top_of_book"),
     }
 
 

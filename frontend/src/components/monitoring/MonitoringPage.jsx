@@ -681,6 +681,30 @@ export default function MonitoringPage() {
                         </p>
                       </div>
                     </div>
+                    {pos.engine_context.official_enrichment?.available && (
+                      <div className="border-t border-border-dim pt-2">
+                        <p className="label-xs mb-2">OFFICIAL INVEZGO WARNING CONTEXT</p>
+                        <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                          <div><p className="text-slate-600">Time Table</p><p className="text-white font-bold uppercase">{String(pos.engine_context.official_enrichment.time_table?.pressure || '-').replace(/_/g,' ')}</p></div>
+                          <div><p className="text-slate-600">Momentum</p><p className="text-white font-bold uppercase">{String(pos.engine_context.official_enrichment.momentum_chart?.bias || '-').replace(/_/g,' ')}</p></div>
+                          <div><p className="text-slate-600">Broker Stalker</p><p className="text-white font-bold">{Number(pos.engine_context.official_enrichment.broker_stalker?.available_count || 0)} active</p></div>
+                          <div><p className="text-slate-600">Corp Action</p><p className="text-white font-bold">{Number(pos.engine_context.official_enrichment.corporate_actions?.count || 0)}</p></div>
+                        </div>
+                      </div>
+                    )}
+                    {pos.engine_context.money_maker?.available && (
+                      <div className="border-t border-border-dim pt-2">
+                        <p className="label-xs mb-2">MONEY MAKER CORE</p>
+                        <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                          <div><p className="text-slate-600">Score</p><p className="text-white font-bold">{Number(pos.engine_context.money_maker.score || 0).toFixed(1)}</p></div>
+                          <div><p className="text-slate-600">BFD</p><p className="text-white font-bold">{Number(pos.engine_context.money_maker.bfd_score || 0)}/5</p></div>
+                          <div><p className="text-slate-600">Phase</p><p className="text-white font-bold uppercase">{String(pos.engine_context.money_maker.phase || '-').replace(/_/g,' ')}</p></div>
+                          <div><p className="text-slate-600">Verdict</p><p className="text-white font-bold uppercase">{String(pos.engine_context.money_maker.verdict || '-').replace(/_/g,' ')}</p></div>
+                          <div><p className="text-slate-600">Pattern</p><p className="text-white font-bold uppercase">{String(pos.engine_context.money_maker.patterns?.[0]?.name || '-').replace(/_/g,' ')}</p></div>
+                          <div><p className="text-slate-600">Memory</p><p className="text-white font-bold uppercase">{pos.engine_context.money_maker.flow_memory?.flow_reversal_alert ? 'REVERSAL' : pos.engine_context.money_maker.flow_memory?.memory_available ? `${Number(pos.engine_context.money_maker.flow_memory?.bfd_delta || 0).toFixed(1)}` : '-'}</p></div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 

@@ -11,6 +11,9 @@ from app.core import invesgo
 from app.engines.master_runner import run_all_engines, run_monitoring_engines
 from app.engines.broker_behavior_engine import summarize_broker_behavior
 from app.engines.orderbook_microstructure import build_orderbook_execution_overlay, normalize_orderbook
+from app.core.official_enrichment import build_monitoring_enrichment
+from app.core.money_maker import analyze_money_maker_context
+from app.core.money_maker_store import get_latest_flow_snapshot_cloud, save_money_maker_cloud
 from app.knowledge_base import kb_service
 import logging
 
@@ -245,6 +248,21 @@ def analytic_alignment_warnings(analytic_context: dict, current: float) -> list:
                 "level": "LOW",
                 "type": "TRIGGER_NOT_CONFIRMED",
                 "message": f"Trigger analytic {trigger} belum terkonfirmasi; jangan tambah posisi sebelum reclaim.",
+            })
+    money_maker = analytic_context.get("money_maker") or (action_plan.get("money_maker") if isinstance(action_plan, dict) else {}) or {}
+    if money_maker:
+        mm_verdict = str(money_maker.get("verdict") or "").upper()
+        if mm_verdict == "FLOW_OUT_AVOID":
+            warnings.append({
+                "level": "HIGH",
+                "type": "ANALYTIC_MONEY_MAKER_FLOW_OUT",
+                "message": "Analytic awal sudah membaca money maker flow out; posisi wajib defensif.",
+            })
+        if (money_maker.get("flow_memory") or {}).get("flow_reversal_alert"):
+            warnings.append({
+                "level": "HIGH",
+                "type": "ANALYTIC_BFD_REVERSAL",
+                "message": "Analytic context membawa BFD reversal; jangan tambah posisi sebelum flow pulih.",
             })
     return warnings
 
@@ -567,6 +585,12 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
             ksei_data_raw = await invesgo.get_ksei_ownership(ticker)
         except Exception as e:
             logger.warning(f"[KSEI] skip for {ticker}: {e}")
+        official_enrichment = {"available": False}
+        try:
+            official_enrichment = await build_monitoring_enrichment(ticker, mode=mode, broker_summary=broker_data_raw)
+        except Exception as e:
+            logger.warning(f"[OFFICIAL_ENRICHMENT] monitoring skip for {ticker}: {e}")
+            official_enrichment = {"available": False, "reason": str(e)[:160]}
 
         # Format orderbook dari Invesgo; fallback ke top-of-book intraday.
         orderbook = normalize_orderbook(orderbook_raw)
@@ -613,7 +637,23 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
             broker_data=broker_data,
             broker_summary_raw=broker_data_raw,
             foreign_data=foreign_data,
+            official_enrichment=official_enrichment,
         )
+        money_maker_previous = await get_latest_flow_snapshot_cloud(ticker, mode)
+        money_maker = analyze_money_maker_context(
+            ticker=ticker,
+            mode=mode,
+            ohlcv=normalized_ohlcv,
+            engine_result=engine_result,
+            broker_summary=broker_data_raw,
+            orderbook=orderbook,
+            official_enrichment=official_enrichment,
+            foreign_flow=foreign_data,
+            previous_snapshot=money_maker_previous,
+        )
+        money_maker_persist = await save_money_maker_cloud(money_maker)
+        money_maker.setdefault("flow_memory", {})["cloud_saved"] = bool(money_maker_persist.get("saved"))
+        money_maker["flow_memory"]["persistent_backend"] = money_maker_persist.get("persistent_backend", "sqlite")
         logger.warning(f"[DEBUG] engine_result keys: {list(engine_result.keys()) if engine_result else None}")
         logger.warning(f"[DEBUG] engines count: {len(engine_result.get('engines', []))}")
 
@@ -654,6 +694,8 @@ async def get_monitoring_engine_context(ticker: str, mode: str = "swing"):
             "broker_behavior_included": "BrokerBehaviorEngine" in engine_names,
             "orderbook_included": "OrderbookEngine" in engine_names,
             "orderbook_execution": orderbook_execution,
+            "official_enrichment": official_enrichment,
+            "money_maker": money_maker,
             "engine_details": engine_details,
             "debug_keys": list(engine_result.keys()),
         }
@@ -812,6 +854,27 @@ def extract_early_warnings(engine_context: dict) -> list:
     warnings = []
     if not engine_context or not engine_context.get("engines_used"):
         return warnings
+
+    official_enrichment = engine_context.get("official_enrichment") or {}
+    for warning in official_enrichment.get("warnings") or []:
+        warnings.append({
+            "level": warning.get("level", "LOW"),
+            "type": warning.get("type", "OFFICIAL_ENRICHMENT"),
+            "message": warning.get("message", "Official Invezgo enrichment warning."),
+        })
+    money_maker = engine_context.get("money_maker") or {}
+    for warning in money_maker.get("warnings") or []:
+        warnings.append({
+            "level": warning.get("level", "MEDIUM"),
+            "type": warning.get("type", "MONEY_MAKER_CORE"),
+            "message": warning.get("message", "Money Maker Core warning."),
+        })
+    if money_maker.get("verdict") == "FLOW_OUT_AVOID":
+        warnings.append({
+            "level": "HIGH",
+            "type": "MONEY_MAKER_FLOW_OUT",
+            "message": "Money Maker Core membaca flow out/distribution trap; kurangi risiko atau exit sesuai plan.",
+        })
 
     engine_details = engine_context.get("engine_details") or {}
 

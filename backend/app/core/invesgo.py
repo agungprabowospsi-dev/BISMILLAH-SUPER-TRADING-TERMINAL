@@ -2,6 +2,7 @@ import os
 import httpx
 import json as _json
 import asyncio
+from datetime import datetime, timedelta
 
 # RC-0: Redis cache layer
 async def _cache_get(key: str):
@@ -129,6 +130,33 @@ async def _get_json_first_success(client: httpx.AsyncClient, candidates: list, f
         raise last_error
     return None
 
+def _params_key(params: dict = None) -> str:
+    if not params:
+        return ""
+    clean = {k: v for k, v in params.items() if v is not None}
+    return _json.dumps(clean, sort_keys=True, separators=(",", ":"))
+
+async def _official_get(path: str, params: dict = None, ttl: int = 300, cache_key: str = None):
+    """Cached GET for official Invezgo endpoints. Keep this as the quota gate."""
+    params = {k: v for k, v in (params or {}).items() if v is not None}
+    key = cache_key or f"official:{path}:{_params_key(params)}"
+
+    async def fetch():
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(f"{INVESGO_BASE_URL}{path}", headers=_headers(), params=params)
+            r.raise_for_status()
+            return r.json()
+
+    return await _cached_request(key, ttl, fetch)
+
+def _today_id() -> str:
+    return datetime.now().strftime("%Y-%m-%d")
+
+def _range_dates(days: int = 30) -> tuple[str, str]:
+    to_date = datetime.now().strftime("%Y-%m-%d")
+    from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    return from_date, to_date
+
 async def get_stock_list() -> list:
     """Ambil semua saham IDX. Cache 24 jam."""
     async def fetch():
@@ -138,6 +166,16 @@ async def get_stock_list() -> list:
             return r.json()
 
     data = await _cached_request("stock_list:all", 86400, fetch)
+    return data if isinstance(data, list) else []
+
+async def get_broker_list() -> list:
+    """Daftar broker/sekuritas BEI. Cache 24 jam."""
+    data = await _official_get("/analysis/list/broker", ttl=86400)
+    return data if isinstance(data, list) else []
+
+async def get_index_list() -> list:
+    """Daftar index IDX yang didukung Invezgo. Cache 24 jam."""
+    data = await _official_get("/analysis/list/index", ttl=86400)
     return data if isinstance(data, list) else []
 
 async def get_ohlcv_from_db(ticker: str, days: int = 90) -> list:
@@ -274,9 +312,22 @@ async def get_ohlcv_intraday(ticker: str, market: str = "RG") -> dict:
         await _cache_set_json(f"intraday:{ticker}", result, 120)
     return result if isinstance(result, dict) else {}
 
-async def get_orderbook(ticker: str) -> dict:
-    """Bid/offer dari intraday-data — /analysis/order-book/ sudah tidak tersedia."""
-    data = await get_ohlcv_intraday(ticker, market="RG")
+async def get_orderbook(ticker: str, market: str = "RG", date: str = None, time: str = None) -> dict:
+    """Official /analysis/order-book/{code}; fallback to intraday top-of-book."""
+    try:
+        data = await _official_get(
+            f"/analysis/order-book/{ticker}",
+            params={"market": market, "date": date, "time": time},
+            ttl=30 if not date else 1800,
+            cache_key=f"orderbook:{ticker}:{market}:{date or 'live'}:{time or ''}",
+        )
+        if isinstance(data, dict) and data:
+            data.setdefault("source", "official_order_book")
+            return data
+    except Exception as exc:
+        logger.debug(f"[INVESGO] official orderbook fallback for {ticker}: {exc}")
+
+    data = await get_ohlcv_intraday(ticker, market=market)
     if isinstance(data, dict):
         return {
             "bid_price":   data.get("bid_price", 0),
@@ -285,6 +336,7 @@ async def get_orderbook(ticker: str) -> dict:
             "offer_price": data.get("offer_price", 0),
             "offer_lot":   data.get("offer_lot", 0),
             "offer_freq":  data.get("offer_freq", 0),
+            "source":      "intraday_top_of_book_fallback",
         }
     return {}
 
@@ -489,6 +541,20 @@ async def get_foreign_net() -> list:
     data = await _cached_request("foreign_net:global", 300, fetch)
     return data if isinstance(data, list) else []
 
+async def get_top_flow(kind: str = "change", date: str = None, **filters) -> dict:
+    """Official top flow endpoints: change, foreign, accumulation, ritel."""
+    kind = (kind or "change").lower()
+    endpoint = {
+        "change": "/analysis/top/change",
+        "foreign": "/analysis/top/foreign",
+        "accumulation": "/analysis/top/accumulation",
+        "ritel": "/analysis/top/ritel",
+        "retail": "/analysis/top/ritel",
+    }.get(kind, "/analysis/top/change")
+    params = {"date": date or _today_id(), **{k: v for k, v in filters.items() if v is not None}}
+    data = await _official_get(endpoint, params=params, ttl=300, cache_key=f"top_flow:{kind}:{_params_key(params)}")
+    return data if isinstance(data, dict) else {}
+
 async def get_market_context(ticker: str) -> dict:
     """Harga realtime + company info dari market-context endpoint"""
     cached = await _cache_get_json(f"market_context:{ticker}")
@@ -525,6 +591,15 @@ async def get_market_context(ticker: str) -> dict:
         pass
     return {}
 
+async def get_multi_timeframe_chart(ticker: str, timeframe: str = "5", from_date: str = None, to_date: str = None) -> list:
+    from_date, to_date = (from_date, to_date) if from_date and to_date else _range_dates(10)
+    data = await _official_get(
+        f"/analysis/chart/multi-time/{ticker}",
+        params={"from": from_date, "to": to_date, "timeframe": timeframe},
+        ttl=900,
+    )
+    return data if isinstance(data, list) else []
+
 async def get_financial_statement(ticker: str) -> dict:
     """Laporan keuangan quarterly - Balance Sheet, Cash Flow, Income Statement"""
     async def fetch():
@@ -536,6 +611,23 @@ async def get_financial_statement(ticker: str) -> dict:
     data = await _cached_request(f"financial:{ticker}", 21600, fetch)
     return data if isinstance(data, dict) else {}
 
+async def get_key_stat(ticker: str, type_period: str = "Q", limit: int = 8) -> dict:
+    data = await _official_get(
+        f"/analysis/keystat/{ticker}",
+        params={"type": type_period, "limit": min(int(limit or 8), 20)},
+        ttl=21600,
+        cache_key=f"keystat:{ticker}:{type_period}:{limit}",
+    )
+    return data if isinstance(data, dict) else {}
+
+async def get_corporate_actions(ticker: str = None, action_type: str = None, page: int = 1, limit: int = 10) -> dict:
+    data = await _official_get(
+        "/analysis/calendar",
+        params={"code": ticker, "type": action_type, "page": page, "limit": limit},
+        ttl=21600,
+    )
+    return data if isinstance(data, dict) else {}
+
 async def get_intraday_index(index: str = "IHSG") -> dict:
     """IHSG & index live - IHSG, LQ45, IDX30, sektoral (15+ indices)"""
     async def fetch():
@@ -545,6 +637,108 @@ async def get_intraday_index(index: str = "IHSG") -> dict:
             return r.json()
 
     data = await _cached_request(f"intraday_index:{index}", 120, fetch)
+    return data if isinstance(data, dict) else {}
+
+async def get_time_table(ticker: str, date: str = None, range_minutes: int = 5) -> list:
+    date = date or _today_id()
+    data = await _official_get(
+        f"/analysis/time-table/{ticker}",
+        params={"date": date, "range": range_minutes},
+        ttl=120,
+        cache_key=f"time_table:{ticker}:{date}:{range_minutes}",
+    )
+    return data if isinstance(data, list) else []
+
+async def get_momentum_chart(ticker: str, date: str = None, range_minutes: int = 5, scope: str = "vol") -> list:
+    date = date or _today_id()
+    data = await _official_get(
+        f"/analysis/momentum-chart/{ticker}",
+        params={"date": date, "range": range_minutes, "scope": scope},
+        ttl=120,
+        cache_key=f"momentum:{ticker}:{date}:{range_minutes}:{scope}",
+    )
+    return data if isinstance(data, list) else []
+
+async def get_intraday_inventory_chart(
+    ticker: str,
+    date: str = None,
+    range_minutes: int = 5,
+    type_: str = "value",
+    total: int = 10,
+    buyer: str = "all",
+    seller: str = "all",
+    market: str = "RG",
+    broker: str = None,
+) -> dict:
+    data = await _official_get(
+        f"/analysis/intraday-inventory-chart/{ticker}",
+        params={
+            "date": date or _today_id(),
+            "range": range_minutes,
+            "type": type_,
+            "total": total,
+            "buyer": buyer,
+            "seller": seller,
+            "market": market,
+            "broker": broker,
+        },
+        ttl=180,
+    )
+    return data if isinstance(data, dict) else {}
+
+async def get_sankey_chart(
+    ticker: str,
+    date: str = None,
+    type_: str = "broker",
+    buyer: str = "all",
+    seller: str = "all",
+    market: str = "RG",
+) -> dict:
+    data = await _official_get(
+        f"/analysis/sankey-chart/{ticker}",
+        params={"date": date or _today_id(), "type": type_, "buyer": buyer, "seller": seller, "market": market},
+        ttl=300,
+    )
+    return data if isinstance(data, dict) else {}
+
+async def get_broker_stalker(
+    broker: str,
+    stock: str,
+    from_date: str = None,
+    to_date: str = None,
+    investor: str = "all",
+    market: str = "RG",
+) -> dict:
+    from_date, to_date = (from_date, to_date) if from_date and to_date else _range_dates(30)
+    data = await _official_get(
+        f"/analysis/stalker/broker/{broker}/{stock}",
+        params={"from": from_date, "to": to_date, "investor": investor, "market": market},
+        ttl=1800,
+    )
+    return data if isinstance(data, dict) else {}
+
+async def get_broker_stalker_list(
+    broker: str,
+    from_date: str = None,
+    to_date: str = None,
+    investor: str = "all",
+    market: str = "RG",
+) -> dict:
+    from_date, to_date = (from_date, to_date) if from_date and to_date else _range_dates(30)
+    data = await _official_get(
+        f"/analysis/stalker/list/{broker}",
+        params={"from": from_date, "to": to_date, "investor": investor, "market": market},
+        ttl=1800,
+    )
+    return data if isinstance(data, dict) else {}
+
+async def get_sector_stalker(from_date: str = None, to_date: str = None, base: str = "COMPOSITE", limit: int = 20) -> dict:
+    from_date, to_date = (from_date, to_date) if from_date and to_date else _range_dates(30)
+    data = await _official_get(
+        "/analysis/stalker/sector",
+        params={"from": from_date, "to": to_date, "base": base, "limit": limit},
+        ttl=1800,
+    )
     return data if isinstance(data, dict) else {}
 
 async def get_top_movers(sort: str = "gainer", limit: int = 20) -> list:
@@ -560,6 +754,23 @@ async def get_top_movers(sort: str = "gainer", limit: int = 20) -> list:
     cached = await _cache_get_json(cache_key)
     if cached is not None:
         return cached if isinstance(cached, list) else []
+
+    try:
+        official_rows = []
+        if sort_key in ("gainer", "loser"):
+            top_change = await get_top_flow("change")
+            official_rows = _unwrap_list(top_change.get("gain" if sort_key == "gainer" else "loss"))
+        elif sort_key == "foreign":
+            top_foreign = await get_top_flow("foreign")
+            official_rows = _unwrap_list(top_foreign.get("accum") or top_foreign.get("dist"))
+        rows = [_normalize_mover(row, source=f"official-top-{sort_key}") for row in official_rows if isinstance(row, dict)]
+        if rows:
+            result = rows[:limit]
+            await _cache_set_json(cache_key, result, 120)
+            return result
+    except Exception as exc:
+        logger.debug(f"[INVESGO] official top movers fallback for {sort_key}: {exc}")
+
     endpoint_by_sort = {
         "gainer": [
             ("/analysis/top-change", {"sort": "gainer", "limit": limit}),

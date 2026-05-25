@@ -87,6 +87,13 @@ export default function ScreenerPage() {
         status: data?.status || "ok",
         message: data?.message || "",
         backend_error: data?.error || "",
+        candidate_count: data?.candidate_count ?? 0,
+        scored_count: data?.scored_count ?? 0,
+        qualified_count: data?.qualified_count ?? 0,
+        strict_candidate_count: data?.strict_candidate_count,
+        strict_qualified_count: data?.strict_qualified_count,
+        adaptive_prefilter_used: Boolean(data?.adaptive_prefilter_used),
+        watchlist_fallback_used: Boolean(data?.watchlist_fallback_used),
         stocks: Array.isArray(stocks)
           ? stocks.map((x) => ({
               ...x,
@@ -162,18 +169,27 @@ export default function ScreenerPage() {
             <span style={S.metaBadge}>Mode: {result.mode.toUpperCase()}</span>
             <span style={S.metaBadge}>Status: {result.status.toUpperCase()}</span>
             <span style={S.metaBadge}>Scanned: {result.total_scanned}</span>
+            <span style={S.metaBadge}>Candidates: {result.candidate_count}</span>
+            <span style={S.metaBadge}>Qualified: {result.qualified_count}</span>
             <span style={S.metaBadge}>Session: {result.session_id}</span>
           </div>
-          {result.status !== "ok" && (
+          {(result.status !== "ok" || result.watchlist_fallback_used) && (
             <div style={S.warningBox}>
-              <strong>DATA WARNING:</strong> {result.message || "Screener berjalan dalam mode aman."}
+              <strong>{result.watchlist_fallback_used ? "WATCHLIST MODE:" : "DATA WARNING:"}</strong> {result.message || "Screener berjalan dalam mode aman."}
               {result.backend_error && <div style={{ marginTop: 6, fontSize: 11 }}>{result.backend_error}</div>}
             </div>
           )}
           {result.stocks.length === 0 ? (
             <div style={S.emptyBox}>
-              <p>{result.status === "ok" ? "Tidak ada saham dengan score lebih dari 70 hari ini." : "Belum ada kandidat karena data upstream belum lengkap."}</p>
-              <p style={{ fontSize: 12, marginTop: 8 }}>Backend returned {result.total_scanned} stocks tapi tidak ada yang masuk filter.</p>
+              <p>{result.candidate_count === 0 ? "Belum ada saham yang lolos prefilter hari ini." : "Belum ada saham yang lolos scoring dan disqualifier hari ini."}</p>
+              <p style={{ fontSize: 12, marginTop: 8 }}>
+                Backend scan {result.total_scanned} saham; candidate {result.candidate_count}, scored {result.scored_count}, qualified {result.qualified_count}.
+              </p>
+              {rawResponse?.debug?.prefilter?.reason_counts && (
+                <p style={{ fontSize: 12, marginTop: 8 }}>
+                  Alasan dominan: {Object.entries(rawResponse.debug.prefilter.reason_counts).map(([k, v]) => `${k} ${v}`).join(", ")}.
+                </p>
+              )}
               {rawResponse && <pre style={S.debugPre}>{JSON.stringify(rawResponse, null, 2)}</pre>}
             </div>
           ) : (
@@ -228,6 +244,30 @@ function StockCard({ stock, rank, onClick }) {
         </div>
         <div style={S.scoreRow}><span style={S.scoreLabel}>Score</span><span style={S.scoreValue}>{Number(stock.final_score || stock.score || 0).toFixed(1)}</span></div>
         <div style={S.priceRow}><span style={S.priceLabel}>Last Price</span><span style={S.priceValue}>Rp {Number(stock.price || stock.last_price || 0).toLocaleString("id-ID")}</span></div>
+        {stock.money_maker?.available && (
+          <div style={S.moneyMakerBox}>
+            <div style={S.moneyMakerTitle}>Money Maker Core</div>
+            <div style={S.officialGrid}>
+              <span>Score: {Number(stock.money_maker.score || 0).toFixed(1)}</span>
+              <span>BFD: {Number(stock.money_maker.bfd_score || 0)}/5</span>
+              <span>Phase: {String(stock.money_maker.phase || "-").replace(/_/g, " ")}</span>
+              <span>Verdict: {String(stock.money_maker.verdict || "-").replace(/_/g, " ")}</span>
+              <span>Pattern: {(stock.money_maker.patterns || [])[0]?.name?.replace(/_/g, " ") || "-"}</span>
+              <span>Exec: {String(stock.money_maker.execution_intelligence?.stance || "-").replace(/_/g, " ")}</span>
+            </div>
+          </div>
+        )}
+        {stock.official_enrichment && (
+          <div style={S.officialBox}>
+            <div style={S.officialTitle}>Official Invezgo</div>
+            <div style={S.officialGrid}>
+              <span>Value: {Number(stock.official_enrichment.liquidity?.value || 0).toLocaleString("id-ID")}</span>
+              <span>Freq: {Number(stock.official_enrichment.liquidity?.freq || 0).toLocaleString("id-ID")}</span>
+              <span>MTF: {stock.official_enrichment.multi_timeframe?.available ? "ON" : "OFF"}</span>
+              <span>Flow: {Object.values(stock.official_enrichment.flow_tags || {}).filter(Boolean).join(", ") || "-"}</span>
+            </div>
+          </div>
+        )}
         <div style={S.barBg}><div style={{ ...S.barFill, width: Math.min(100, stock.final_score || stock.score || 0) + "%", backgroundColor: sc }} /></div>
       </div>
     </div>
@@ -270,6 +310,11 @@ const S = {
   priceRow: { display: "flex", justifyContent: "space-between", marginBottom: 10 },
   priceLabel: { color: "#94a3b8", fontSize: 12 },
   priceValue: { color: "#1e293b", fontSize: 13, fontWeight: "600" },
+  officialBox: { border: "1px solid #bbf7d0", backgroundColor: "#f0fdf4", borderRadius: 6, padding: 8, marginBottom: 10 },
+  officialTitle: { color: "#15803d", fontSize: 10, fontWeight: "bold", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 },
+  moneyMakerBox: { border: "1px solid #f0abfc", backgroundColor: "#fdf4ff", borderRadius: 6, padding: 8, marginBottom: 10 },
+  moneyMakerTitle: { color: "#a21caf", fontSize: 10, fontWeight: "bold", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 },
+  officialGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, color: "#475569", fontSize: 10, fontFamily: "monospace" },
   barBg: { backgroundColor: "#e2e8f0", height: 5, borderRadius: 3, overflow: "hidden" },
   barFill: { height: "100%", borderRadius: 3, transition: "width 0.5s ease" },
   initialBox: { textAlign: "center", padding: 48, border: "1px dashed #cbd5e1", borderRadius: 8, backgroundColor: "#ffffff" },
