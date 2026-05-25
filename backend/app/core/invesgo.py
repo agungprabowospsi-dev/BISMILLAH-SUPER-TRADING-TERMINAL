@@ -573,6 +573,11 @@ async def get_top_flow(kind: str = "change", date: str = None, **filters) -> dic
     }.get(kind, "/analysis/top/change")
     params = {"date": date or _today_id(), **{k: v for k, v in filters.items() if v is not None}}
     data = await _official_get(endpoint, params=params, ttl=300, cache_key=f"top_flow:{kind}:{_params_key(params)}")
+    if isinstance(data, dict) and not _unwrap_first_list(data, ("gain", "loss", "accum", "dist", "data", "results", "items", "rows")):
+        fallback_params = {k: v for k, v in filters.items() if v is not None}
+        data_no_date = await _official_get(endpoint, params=fallback_params, ttl=180, cache_key=f"top_flow:{kind}:live:{_params_key(fallback_params)}")
+        if isinstance(data_no_date, dict) and _unwrap_first_list(data_no_date, ("gain", "loss", "accum", "dist", "data", "results", "items", "rows")):
+            data = data_no_date
     return data if isinstance(data, dict) else {}
 
 async def get_market_context(ticker: str) -> dict:

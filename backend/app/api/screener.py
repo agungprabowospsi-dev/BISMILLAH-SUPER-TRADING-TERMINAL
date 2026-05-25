@@ -2029,12 +2029,12 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             "reason": "",
         }
 
-        if candidate.get("_opportunity_lane") == "top_gainer":
+        if candidate.get("_opportunity_lane") == "top_gainer" or to_float(candidate.get("change_pct")) >= 5:
             chg = to_float(candidate.get("change_pct"))
             hot = chg >= 12
             result["top_gainer_opportunity"] = {
                 "available": True,
-                "lane": "TOP_GAINER_MOMENTUM",
+                "lane": candidate.get("_opportunity_lane") or "PRICE_MOVER_MOMENTUM",
                 "rank": candidate.get("_mover_rank"),
                 "change_pct": chg,
                 "execution_bias": "NO_CHASE_WAIT_PULLBACK" if hot else "MOMENTUM_CONFIRMATION",
