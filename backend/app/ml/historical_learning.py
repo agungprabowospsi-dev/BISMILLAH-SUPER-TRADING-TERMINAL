@@ -114,6 +114,12 @@ def _candle_date(row: Dict[str, Any]) -> Optional[str]:
     return str(raw)[:10]
 
 
+def _date_param(value: Any) -> date:
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])
+
+
 def normalize_candle(row: Dict[str, Any], fallback_date: str = "") -> Optional[Dict[str, Any]]:
     d = _candle_date(row) or fallback_date
     close = _num(row, "close", "c")
@@ -152,7 +158,7 @@ async def save_ohlcv(ticker: str, candles: List[Dict[str, Any]]) -> int:
                     value=EXCLUDED.value,
                     freq=EXCLUDED.freq,
                     source='invesgo'
-            """), {"ticker": ticker, **r})
+            """), {"ticker": ticker, **{**r, "date": _date_param(r["date"])}})
         await db.commit()
     return len(rows)
 
@@ -321,7 +327,7 @@ async def build_ticker_memory(ticker: str, mode: str = "swing", years: int = 15)
                     feature_json=EXCLUDED.feature_json
             """), {
                 "ticker": t,
-                "date": d,
+                "date": _date_param(d),
                 "mode": m,
                 "pattern_key": pattern_key,
                 "feature_json": json.dumps(features),
@@ -342,7 +348,7 @@ async def build_ticker_memory(ticker: str, mode: str = "swing", years: int = 15)
                     exit_reason=EXCLUDED.exit_reason
             """), {
                 "ticker": t,
-                "date": d,
+                "date": _date_param(d),
                 "mode": m,
                 "horizon": int(out["horizon"]),
                 "tp_pct": float(out["tp_pct"]),
