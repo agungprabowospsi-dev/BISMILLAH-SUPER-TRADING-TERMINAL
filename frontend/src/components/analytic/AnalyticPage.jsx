@@ -63,6 +63,14 @@ export default function AnalyticPage() {
           akumulasi_score: s.akumulasi_score || 50.0,
           foreign_signal: s.foreign_flow?.signal || '',
           bandarmology_score: s.bandarmology_composite || s.bandarmology?.score || 0,
+          signal: s.signal || '',
+          rvol: s.rvol || s.volume_ratio || 0,
+          change_pct: s.change_pct || 0,
+          watchlist_only: Boolean(s.watchlist_only),
+          adaptive_prefilter_used: Boolean(s.adaptive_prefilter_used),
+          watchlist_fallback_used: Boolean(s.watchlist_fallback_used),
+          opportunity_lane: s._opportunity_lane || s.opportunity_lane || '',
+          top_gainer_opportunity: s.top_gainer_opportunity || {},
         }
       }
       const res = await analyzeStock(analyticTicker.toUpperCase().trim(), analyticMode, screenerCtx)
@@ -155,6 +163,7 @@ export default function AnalyticPage() {
   const orderbookExecution = r?.orderbook_execution || r?.action_plan?.orderbook_execution || null
   const officialEnrichment = r?.official_enrichment || r?.action_plan?.official_enrichment || null
   const moneyMaker = r?.money_maker || r?.action_plan?.money_maker || null
+  const opportunityExecution = r?.opportunity_execution || r?.action_plan?.opportunity_execution || null
   const noActionableLong = ['NO_LONG_ENTRY', 'NO_MARKET_ENTRY'].includes(actionOrderType)
   const valueOrFallback = (value, fallback) =>
     value !== undefined && value !== null && value !== '' ? value : fallback
@@ -678,6 +687,17 @@ export default function AnalyticPage() {
                   Belum ada long entry aktif. Gunakan trigger dan confirmation needed sebagai syarat sebelum target profit dianggap valid.
                 </div>
               )}
+              {opportunityExecution?.active && (
+                <div className="rounded-lg border border-sky-400/40 bg-sky-400/10 px-3 py-2 font-mono text-xs leading-relaxed text-sky-700">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold uppercase">Top Gainer Opportunity Mode</span>
+                    <span className="font-bold">{Number(opportunityExecution.change_pct || 0).toFixed(2)}%</span>
+                  </div>
+                  <p className="mt-1">
+                    {String(opportunityExecution.execution_bias || '').replace(/_/g, ' ')}. Eksekusi hanya setelah trigger, base/VWAP, orderbook, dan flow mengonfirmasi.
+                  </p>
+                </div>
+              )}
               {/* Dynamic SL/TP — hidden, sudah digabung ke Trade Setup primary */}
               {false && r.dynamic_sltp && r.dynamic_sltp.method !== 'error' && (
                 <div className="mt-2 rounded-lg border border-accent-blue/30 bg-accent-blue/5 p-3">
@@ -725,6 +745,7 @@ export default function AnalyticPage() {
                   orderbook_execution: orderbookExecution || null,
                   official_enrichment: officialEnrichment || null,
                   money_maker: moneyMaker || null,
+                  opportunity_execution: opportunityExecution || null,
                   empirical_memory: r.empirical_memory || null,
                   setup_type: r.setup_type || '',
                   setup_reason: r.setup_reason || ''

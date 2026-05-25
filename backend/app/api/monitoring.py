@@ -237,6 +237,32 @@ def analytic_alignment_warnings(analytic_context: dict, current: float) -> list:
         invalidation = float(action_plan.get("invalidation_price") or 0)
         trigger = float(action_plan.get("trigger_price") or 0)
         order_type = str(action_plan.get("order_type") or "").upper()
+        opportunity_execution = (
+            action_plan.get("opportunity_execution")
+            or analytic_context.get("opportunity_execution")
+            or {}
+        )
+        if opportunity_execution.get("active"):
+            warnings.append({
+                "level": "MEDIUM",
+                "type": "OPPORTUNITY_WATCH_ACTIVE",
+                "message": (
+                    "Top gainer opportunity mode aktif; ini bukan entry normal. "
+                    "Pantau trigger, base/VWAP, orderbook bid refill, dan Money Maker flow."
+                ),
+            })
+            if trigger > 0 and current < trigger:
+                warnings.append({
+                    "level": "LOW",
+                    "type": "OPPORTUNITY_TRIGGER_PENDING",
+                    "message": f"Trigger opportunity {trigger} belum ditembus; jangan chase sebelum konfirmasi.",
+                })
+            elif trigger > 0 and current >= trigger:
+                warnings.append({
+                    "level": "MEDIUM",
+                    "type": "OPPORTUNITY_TRIGGER_TOUCHED",
+                    "message": "Trigger opportunity tersentuh; validasi time table, momentum chart, dan broker flow sebelum eksekusi/tambah posisi.",
+                })
         if invalidation > 0 and current <= invalidation:
             warnings.append({
                 "level": "HIGH",

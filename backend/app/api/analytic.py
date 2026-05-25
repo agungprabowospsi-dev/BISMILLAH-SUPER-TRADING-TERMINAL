@@ -4,12 +4,12 @@ from fastapi.responses import JSONResponse
 import json
 import numpy as np
 import os
-from typing import Optional
+from typing import Any, Optional
 from sqlalchemy import text as sql_text
 from app.core.database import AsyncSessionLocal as _AsyncSessionLocal
 from app.ml.signal_quality import predict_win_probability, get_model_status
 from app.ml.dynamic_sltp import calculate_dynamic_sltp
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from app.core import invesgo
 from app.engines.master_runner import run_all_engines
 from app.engines.orderbook_microstructure import build_orderbook_execution_overlay
@@ -74,6 +74,8 @@ async def debug():
     return {"all_ok": True, "results": results}
 
 class ScreenerContext(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     grade: str = ""
     score: float = 0.0
     wyckoff_phase: str = ""
@@ -83,6 +85,14 @@ class ScreenerContext(BaseModel):
     akumulasi_score: float = 50.0
     foreign_signal: str = ""
     bandarmology_score: float = 0.0
+    signal: str = ""
+    rvol: float = 0.0
+    change_pct: float = 0.0
+    watchlist_only: bool = False
+    adaptive_prefilter_used: bool = False
+    watchlist_fallback_used: bool = False
+    opportunity_lane: str = ""
+    top_gainer_opportunity: dict = Field(default_factory=dict)
 
 class AnalyticRequest(BaseModel):
     ticker: str
@@ -96,6 +106,165 @@ def _round_price(value, fallback=0.0):
     except Exception:
         value = float(fallback or 0)
     return float(round(value, 0))
+
+
+def _idx_tick_size(price: float) -> int:
+    price = float(price or 0)
+    if price < 200:
+        return 1
+    if price < 500:
+        return 2
+    if price < 2000:
+        return 5
+    if price < 5000:
+        return 10
+    return 25
+
+
+def _context_dict(ctx: Any) -> dict:
+    if not ctx:
+        return {}
+    if isinstance(ctx, dict):
+        return dict(ctx)
+    if hasattr(ctx, "model_dump"):
+        return ctx.model_dump()
+    if hasattr(ctx, "dict"):
+        return ctx.dict()
+    return {}
+
+
+def apply_screener_opportunity_alignment(
+    action_plan: dict,
+    *,
+    screener_context: Any,
+    mode: str,
+    current: float,
+    atr: float,
+    rvol: float,
+    change_pct: float,
+    range_high_20: float,
+    range_low_20: float,
+    ma20: float,
+    money_maker: dict,
+    official_enrichment: dict,
+) -> dict:
+    """Align Analytical with Screener's bad-market opportunity lane without forcing blind entries."""
+    action = dict(action_plan or {})
+    sc = _context_dict(screener_context)
+    top_opp = sc.get("top_gainer_opportunity") if isinstance(sc.get("top_gainer_opportunity"), dict) else {}
+    ctx_change = float(sc.get("change_pct") or top_opp.get("change_pct") or change_pct or 0)
+    mode_l = str(mode or "").lower()
+    opportunity_source = ""
+    if top_opp.get("available"):
+        opportunity_source = str(top_opp.get("lane") or "TOP_GAINER_MOMENTUM")
+    elif sc.get("watchlist_only") and ctx_change >= 5:
+        opportunity_source = "WATCHLIST_PRICE_MOVER"
+    elif sc.get("opportunity_lane") in ("top_gainer", "price_mover"):
+        opportunity_source = str(sc.get("opportunity_lane")).upper()
+    elif mode_l in ("intraday", "scalping") and ctx_change >= 5 and str(action.get("decision", "")).upper() in ("WAIT", "NO GO"):
+        opportunity_source = "LIVE_PRICE_MOVER"
+
+    if not opportunity_source:
+        return action
+
+    mm = money_maker or {}
+    official = official_enrichment or {}
+    risk_flags = set(mm.get("risk_flags") or [])
+    risk_flags.update(((action.get("official_decision_context") or {}).get("risk_flags") or []))
+    fatal_flags = {
+        "RETAIL_EXIT_LIQUIDITY",
+        "CLIMAX_DISTRIBUTION_RISK",
+        "BFD_FLOW_REVERSAL",
+    }
+    blocked = (
+        str(mm.get("verdict") or "").upper() == "FLOW_OUT_AVOID"
+        or str(action.get("decision_modifier") or "").upper() == "MONEY_MAKER_FLOW_OUT"
+        or bool(risk_flags.intersection(fatal_flags))
+    )
+
+    tick = _idx_tick_size(current)
+    trigger = max(
+        float(action.get("trigger_price") or 0),
+        float(range_high_20 or 0) + tick,
+        float(current or 0) + tick,
+    )
+    trigger = _round_price(trigger)
+    atr_value = max(float(atr or 0), float(current or 0) * 0.012, tick * 2)
+    pullback_low = max(float(ma20 or 0), float(current or 0) - max(atr_value * 0.8, float(current or 0) * 0.025))
+    invalidation = max(float(range_low_20 or 0), float(current or 0) - max(atr_value * 1.15, float(current or 0) * 0.04))
+    invalidation = min(invalidation, float(current or 0) - tick)
+    invalidation = _round_price(invalidation)
+    risk = max(trigger - invalidation, atr_value)
+    hot_move = ctx_change >= 12
+    bias = str(top_opp.get("execution_bias") or ("NO_CHASE_WAIT_PULLBACK" if hot_move else "MOMENTUM_CONFIRMATION"))
+
+    opportunity_execution = {
+        "active": not blocked,
+        "blocked": blocked,
+        "source": opportunity_source,
+        "mode": "BAD_MARKET_TOP_GAINER_RADAR",
+        "change_pct": round(ctx_change, 2),
+        "rvol": round(float(rvol or sc.get("rvol") or 0), 2),
+        "execution_bias": bias,
+        "policy": "conditional_only_no_market_chase",
+        "preferred_entry": top_opp.get("preferred_entry") or "Wait 5m base/VWAP reclaim, then buy-stop above mini range high.",
+        "trigger_price": trigger,
+        "entry_zone_low": _round_price(pullback_low),
+        "entry_zone_high": trigger,
+        "invalidation_price": invalidation,
+        "risk_rule": top_opp.get("risk_rule") or "Size kecil; batal jika gagal reclaim/VWAP atau money maker berubah flow out.",
+        "exit_rule": top_opp.get("exit_rule") or "Partial exit saat momentum melemah atau time table berubah sell pressure.",
+    }
+
+    if blocked:
+        action["opportunity_execution"] = opportunity_execution
+        action["next_action"] = (
+            "Screener membaca top gainer, tetapi Money Maker/flow risk berat aktif; tetap NO LONG ENTRY sampai flow out batal."
+        )
+        return action
+
+    confirmations = list(action.get("confirmation_needed") or [])
+    invalidations = list(action.get("invalidation_rules") or [])
+    confirmations = [
+        f"Top gainer move {ctx_change:.2f}% tidak langsung fade setelah opening/momentum burst.",
+        "Bentuk 5m base atau VWAP reclaim; jangan buy market saat spike.",
+        "Orderbook menunjukkan bid refill dan spread tetap sehat.",
+        "Money Maker Core tidak berubah menjadi FLOW_OUT_AVOID.",
+    ] + confirmations
+    if float(rvol or 0) < 1.0:
+        confirmations.insert(1, "Karena RVOL masih rendah, wajib tunggu frequency/value ikut hidup sebelum entry.")
+    invalidations = [
+        f"Gagal tembus trigger {trigger} lalu breakdown di bawah pullback/VWAP area.",
+        "Official Time Table atau Momentum Chart berubah sell pressure saat harga gagal lanjut.",
+        "Broker kuat distribusi dan retail menampung.",
+    ] + invalidations
+
+    action.update({
+        "decision": "WAIT",
+        "setup_type": "TOP_GAINER_CONDITIONAL_EXECUTION",
+        "order_type": "CONDITIONAL_BUY_STOP",
+        "decision_modifier": "SCREENER_OPPORTUNITY_ALIGNMENT",
+        "entry_price": trigger,
+        "trigger_price": trigger,
+        "entry_zone_low": _round_price(pullback_low),
+        "entry_zone_high": trigger,
+        "stop_loss": invalidation,
+        "invalidation_price": invalidation,
+        "take_profit_1": _round_price(trigger + risk * (0.8 if mode_l == "scalping" else 1.0)),
+        "take_profit_2": _round_price(trigger + risk * (1.4 if mode_l == "scalping" else 1.8)),
+        "take_profit_3": _round_price(trigger + risk * (2.0 if mode_l == "scalping" else 2.6)),
+        "next_action": (
+            "Screener masuk bad-market opportunity lane; Analytical mengikuti sebagai entry kondisional. "
+            "Eksekusi hanya buy-stop setelah trigger, base/VWAP, orderbook, dan flow mengonfirmasi."
+        ),
+        "confirmation_needed": list(dict.fromkeys(confirmations)),
+        "invalidation_rules": list(dict.fromkeys(invalidations)),
+        "aggressive_plan": f"Buy-stop kecil di {trigger} hanya saat 5m base/VWAP reclaim valid.",
+        "conservative_plan": f"Tunggu pullback sehat ke {_round_price(pullback_low)} lalu reclaim ulang sebelum entry.",
+        "watchlist_only": True,
+        "opportunity_execution": opportunity_execution,
+    })
+    return _finalize_action_plan_levels(action, atr, mode_l)
 
 
 def _finalize_action_plan_levels(action: dict, atr: float, mode: str) -> dict:
@@ -1152,6 +1321,20 @@ Top Brokers: {", ".join(top_brokers[:5])}
         money_maker.setdefault("flow_memory", {})["cloud_saved"] = bool(money_maker_persist.get("saved"))
         money_maker["flow_memory"]["persistent_backend"] = money_maker_persist.get("persistent_backend", "sqlite")
         action_plan = apply_money_maker_to_action_plan(action_plan, money_maker)
+        action_plan = apply_screener_opportunity_alignment(
+            action_plan,
+            screener_context=req.screener_context,
+            mode=req.mode,
+            current=current,
+            atr=atr,
+            rvol=rvol,
+            change_pct=((current - ohlcv[-2]["close"]) / ohlcv[-2]["close"] * 100) if len(ohlcv) >= 2 and ohlcv[-2]["close"] else 0,
+            range_high_20=range_high_20,
+            range_low_20=range_low_20,
+            ma20=ma20,
+            money_maker=money_maker,
+            official_enrichment=official_enrichment,
+        )
         orderbook_execution = build_orderbook_execution_overlay(
             orderbook_for_engines if "orderbook_for_engines" in locals() else {},
             action_plan=action_plan,
@@ -1160,6 +1343,12 @@ Top Brokers: {", ".join(top_brokers[:5])}
         action_plan["orderbook_execution"] = orderbook_execution
         action_plan["official_enrichment"] = official_enrichment
         action_plan["money_maker"] = money_maker
+        opportunity_execution = action_plan.get("opportunity_execution") or {"active": False}
+        if opportunity_execution.get("active"):
+            go_no_go = "WAIT"
+            go_confidence = max(float(go_confidence or 0), 55)
+        elif opportunity_execution.get("blocked"):
+            go_no_go = "NO GO"
         setup_type = action_plan.get("setup_type", setup_type)
         entry_method = action_plan.get("order_type", entry_method if 'entry_method' in locals() else "MARKET_ORDER")
         no_long_entry = entry_method == "NO_LONG_ENTRY"
@@ -1189,6 +1378,7 @@ Orderbook Execution Overlay: {orderbook_execution.get('execution_recommendation'
 Official Invezgo Enrichment: TimeTable {official_enrichment.get('time_table', {}).get('pressure', 'n/a')} | Momentum {official_enrichment.get('momentum_chart', {}).get('bias', 'n/a')} | BrokerStalker {official_enrichment.get('broker_stalker', {}).get('available_count', 0)} | CorporateAction {official_enrichment.get('corporate_actions', {}).get('count', 0)}
 Money Maker Core: {money_maker.get('verdict')} | Phase {money_maker.get('phase')} | Score {money_maker.get('score')} | BFD {money_maker.get('bfd_score')}/5 | Risk {", ".join(money_maker.get('risk_flags', [])[:4]) or "clear"}
 Money Maker Patterns: {", ".join([p.get('name','') for p in money_maker.get('patterns', [])[:4]]) or "none"} | Execution {money_maker.get('execution_intelligence', {}).get('stance', 'n/a')} | Doctrine {", ".join(money_maker.get('doctrine', {}).get('flags', [])[:3]) or "clear"}
+Screener Opportunity Alignment: {opportunity_execution.get('mode', 'normal')} | Active {opportunity_execution.get('active', False)} | Bias {opportunity_execution.get('execution_bias', 'n/a')} | Policy {opportunity_execution.get('policy', 'n/a')}
 Engine: {all_engines.get('bullish_count', 0)} bullish, {all_engines.get('bearish_count', 0)} bearish dari 10 engines
 {market_regime_context}
 {foreign_flow_context}
@@ -1237,6 +1427,7 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "orderbook_execution": orderbook_execution,
             "official_enrichment": official_enrichment,
             "money_maker": money_maker,
+            "opportunity_execution": opportunity_execution,
             "entry_order_type": action_plan.get("order_type"),
             "trigger_price": action_plan.get("trigger_price"),
             "entry_zone_low": action_plan.get("entry_zone_low"),

@@ -570,32 +570,50 @@ export default function MonitoringPage() {
                       </div>
                     </div>
                     {pos.analytic_context.action_plan && (
-                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border-dim text-xs font-mono">
-                        <div>
-                          <p className="text-slate-600">Setup</p>
-                          <p className="text-white font-bold uppercase">
-                            {String(pos.analytic_context.action_plan.setup_type || pos.analytic_context.setup_type || '-').replace(/_/g, ' ')}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-slate-600">Order</p>
-                          <p className="text-accent-blue font-bold uppercase">
-                            {String(pos.analytic_context.action_plan.order_type || '-').replace(/_/g, ' ')}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-slate-600">Trigger</p>
-                          <p className="text-accent-gold font-bold">
-                            Rp {Number(pos.analytic_context.action_plan.trigger_price || 0).toLocaleString('id-ID')}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-slate-600">Invalidation</p>
-                          <p className="text-accent-red font-bold">
-                            Rp {Number(pos.analytic_context.action_plan.invalidation_price || 0).toLocaleString('id-ID')}
-                          </p>
-                        </div>
-                      </div>
+                      (() => {
+                        const opp = pos.analytic_context.action_plan.opportunity_execution || pos.analytic_context.opportunity_execution || null
+                        return (
+                          <div className="space-y-2 pt-2 border-t border-border-dim text-xs font-mono">
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <p className="text-slate-600">Setup</p>
+                                <p className="text-white font-bold uppercase">
+                                  {String(pos.analytic_context.action_plan.setup_type || pos.analytic_context.setup_type || '-').replace(/_/g, ' ')}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-slate-600">Order</p>
+                                <p className="text-accent-blue font-bold uppercase">
+                                  {String(pos.analytic_context.action_plan.order_type || '-').replace(/_/g, ' ')}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-slate-600">Trigger</p>
+                                <p className="text-accent-gold font-bold">
+                                  Rp {Number(pos.analytic_context.action_plan.trigger_price || 0).toLocaleString('id-ID')}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-slate-600">Invalidation</p>
+                                <p className="text-accent-red font-bold">
+                                  Rp {Number(pos.analytic_context.action_plan.invalidation_price || 0).toLocaleString('id-ID')}
+                                </p>
+                              </div>
+                            </div>
+                            {opp?.active && (
+                              <div className="rounded border border-sky-400/30 bg-sky-400/10 p-2 text-sky-300">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-bold uppercase">Opportunity Watch</span>
+                                  <span className="font-bold">{Number(opp.change_pct || 0).toFixed(2)}%</span>
+                                </div>
+                                <p className="mt-1 text-sky-200/90">
+                                  {String(opp.execution_bias || '').replace(/_/g, ' ')}. Monitoring fokus pada trigger, VWAP/base, orderbook, dan flow reversal.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()
                     )}
                     {(pos.analytic_context.orderbook_execution || pos.analytic_context.action_plan?.orderbook_execution) && (
                       (() => {
