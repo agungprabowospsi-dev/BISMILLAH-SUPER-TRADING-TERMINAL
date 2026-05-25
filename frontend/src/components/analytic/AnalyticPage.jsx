@@ -164,6 +164,7 @@ export default function AnalyticPage() {
   const officialEnrichment = r?.official_enrichment || r?.action_plan?.official_enrichment || null
   const moneyMaker = r?.money_maker || r?.action_plan?.money_maker || null
   const opportunityExecution = r?.opportunity_execution || r?.action_plan?.opportunity_execution || null
+  const watchlistAlignment = r?.watchlist_alignment || r?.action_plan?.watchlist_alignment || null
   const noActionableLong = ['NO_LONG_ENTRY', 'NO_MARKET_ENTRY'].includes(actionOrderType)
   const valueOrFallback = (value, fallback) =>
     value !== undefined && value !== null && value !== '' ? value : fallback
@@ -180,7 +181,8 @@ export default function AnalyticPage() {
   const tradeTp3 = noActionableLong && actionOrderType === 'NO_LONG_ENTRY'
     ? null
     : valueOrFallback(r?.action_plan?.take_profit_3, valueOrFallback(r?.dynamic_sltp?.tp3, r?.tp3))
-  const canSendToMonitoring = Boolean(tradeEntry && tradeStop && tradeTp1 && !noActionableLong)
+  const watchlistOnlyNoExecution = Boolean(watchlistAlignment?.active && !opportunityExecution?.active)
+  const canSendToMonitoring = Boolean(tradeEntry && tradeStop && tradeTp1 && !noActionableLong && !watchlistOnlyNoExecution)
 
   const groupEngineKeys = {
     group1:['priceaction','trend','support','resistance','volumeintelligence','relativevolume','multitime','orderblock','breakorder','fairvalue','liquidity'],
@@ -698,6 +700,17 @@ export default function AnalyticPage() {
                   </p>
                 </div>
               )}
+              {watchlistAlignment?.active && !opportunityExecution?.active && (
+                <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 font-mono text-xs leading-relaxed text-amber-700">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold uppercase">Watchlist Radar</span>
+                    <span className="font-bold">{Number(watchlistAlignment.change_pct || 0).toFixed(2)}%</span>
+                  </div>
+                  <p className="mt-1">
+                    {watchlistAlignment.reason || 'Saham masih radar observasi, belum execution lane.'} Upgrade jika move 5% atau lebih, RVOL/frequency/value hidup, dan trigger terkonfirmasi.
+                  </p>
+                </div>
+              )}
               {/* Dynamic SL/TP — hidden, sudah digabung ke Trade Setup primary */}
               {false && r.dynamic_sltp && r.dynamic_sltp.method !== 'error' && (
                 <div className="mt-2 rounded-lg border border-accent-blue/30 bg-accent-blue/5 p-3">
@@ -746,6 +759,7 @@ export default function AnalyticPage() {
                   official_enrichment: officialEnrichment || null,
                   money_maker: moneyMaker || null,
                   opportunity_execution: opportunityExecution || null,
+                  watchlist_alignment: watchlistAlignment || null,
                   empirical_memory: r.empirical_memory || null,
                   setup_type: r.setup_type || '',
                   setup_reason: r.setup_reason || ''

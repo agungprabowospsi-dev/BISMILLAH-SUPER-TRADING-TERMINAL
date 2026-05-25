@@ -242,6 +242,11 @@ def analytic_alignment_warnings(analytic_context: dict, current: float) -> list:
             or analytic_context.get("opportunity_execution")
             or {}
         )
+        watchlist_alignment = (
+            action_plan.get("watchlist_alignment")
+            or analytic_context.get("watchlist_alignment")
+            or {}
+        )
         if opportunity_execution.get("active"):
             warnings.append({
                 "level": "MEDIUM",
@@ -263,6 +268,15 @@ def analytic_alignment_warnings(analytic_context: dict, current: float) -> list:
                     "type": "OPPORTUNITY_TRIGGER_TOUCHED",
                     "message": "Trigger opportunity tersentuh; validasi time table, momentum chart, dan broker flow sebelum eksekusi/tambah posisi.",
                 })
+        elif watchlist_alignment.get("active"):
+            warnings.append({
+                "level": "LOW",
+                "type": "WATCHLIST_RADAR_OBSERVATION",
+                "message": (
+                    "Adaptive watchlist radar aktif, tetapi belum execution lane. "
+                    "Upgrade hanya jika move >=5%, RVOL/frequency/value hidup, dan trigger terkonfirmasi."
+                ),
+            })
         if invalidation > 0 and current <= invalidation:
             warnings.append({
                 "level": "HIGH",

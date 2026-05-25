@@ -572,6 +572,7 @@ export default function MonitoringPage() {
                     {pos.analytic_context.action_plan && (
                       (() => {
                         const opp = pos.analytic_context.action_plan.opportunity_execution || pos.analytic_context.opportunity_execution || null
+                        const radar = pos.analytic_context.action_plan.watchlist_alignment || pos.analytic_context.watchlist_alignment || null
                         return (
                           <div className="space-y-2 pt-2 border-t border-border-dim text-xs font-mono">
                             <div className="grid grid-cols-2 gap-2">
@@ -608,6 +609,17 @@ export default function MonitoringPage() {
                                 </div>
                                 <p className="mt-1 text-sky-200/90">
                                   {String(opp.execution_bias || '').replace(/_/g, ' ')}. Monitoring fokus pada trigger, VWAP/base, orderbook, dan flow reversal.
+                                </p>
+                              </div>
+                            )}
+                            {radar?.active && !opp?.active && (
+                              <div className="rounded border border-amber-400/30 bg-amber-400/10 p-2 text-amber-300">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-bold uppercase">Watchlist Radar</span>
+                                  <span className="font-bold">{Number(radar.change_pct || 0).toFixed(2)}%</span>
+                                </div>
+                                <p className="mt-1 text-amber-200/90">
+                                  Belum execution lane. Upgrade jika move 5% atau lebih, RVOL/frequency/value hidup, dan trigger terkonfirmasi.
                                 </p>
                               </div>
                             )}

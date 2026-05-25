@@ -165,6 +165,52 @@ def apply_screener_opportunity_alignment(
         opportunity_source = "LIVE_PRICE_MOVER"
 
     if not opportunity_source:
+        if sc.get("watchlist_only") or sc.get("adaptive_prefilter_used") or sc.get("watchlist_fallback_used"):
+            current_f = float(current or action.get("current_price") or 0)
+            tick = _idx_tick_size(current_f)
+            trigger = max(float(action.get("trigger_price") or 0), current_f + tick)
+            trigger = _round_price(trigger)
+            atr_value = max(float(atr or 0), current_f * 0.012, tick * 2)
+            invalidation = _round_price(min(float(action.get("invalidation_price") or current_f - atr_value), current_f - tick))
+            confirmations = [
+                "Upgrade ke opportunity mode hanya jika move >= 5% atau masuk top gainer resmi/price mover.",
+                "RVOL/frequency/value ikut hidup; bukan hanya naik tipis di volume kering.",
+                "Harga reclaim trigger dengan base/VWAP sehat dan orderbook bid refill.",
+            ] + list(action.get("confirmation_needed") or [])
+            invalidations = [
+                "Tetap di bawah trigger saat market lemah.",
+                "Struktur downtrend berlanjut atau broker kuat distribusi.",
+            ] + list(action.get("invalidation_rules") or [])
+            action.update({
+                "decision": "WAIT",
+                "setup_type": "WATCHLIST_RADAR_OBSERVATION",
+                "order_type": "WATCHLIST_RADAR",
+                "decision_modifier": "SCREENER_WATCHLIST_ALIGNMENT",
+                "entry_price": trigger,
+                "trigger_price": trigger,
+                "entry_zone_low": _round_price(max(float(ma20 or 0), current_f - atr_value * 0.7)),
+                "entry_zone_high": trigger,
+                "stop_loss": invalidation,
+                "invalidation_price": invalidation,
+                "watchlist_only": True,
+                "watchlist_alignment": {
+                    "active": True,
+                    "mode": "BAD_MARKET_WATCHLIST_RADAR",
+                    "change_pct": round(ctx_change, 2),
+                    "rvol": round(float(rvol or sc.get("rvol") or 0), 2),
+                    "reason": "Saham berasal dari adaptive watchlist, tetapi belum menjadi top gainer/price mover eksekusi.",
+                    "upgrade_rule": "Naik >=5%, RVOL/frequency/value hidup, lalu trigger/base/VWAP terkonfirmasi.",
+                },
+                "next_action": (
+                    "Screener hanya memberi radar observasi. Belum entry; tunggu upgrade menjadi top gainer/price mover "
+                    "atau trigger teknikal didukung volume, orderbook, dan money maker flow."
+                ),
+                "confirmation_needed": list(dict.fromkeys(confirmations)),
+                "invalidation_rules": list(dict.fromkeys(invalidations)),
+                "aggressive_plan": "Tidak disarankan sebelum upgrade rule terpenuhi.",
+                "conservative_plan": "Tetap watchlist; hanya pindah ke execution lane jika momentum dan flow ikut hidup.",
+            })
+            return _finalize_action_plan_levels(action, atr, mode_l)
         return action
 
     mm = money_maker or {}
@@ -1344,11 +1390,15 @@ Top Brokers: {", ".join(top_brokers[:5])}
         action_plan["official_enrichment"] = official_enrichment
         action_plan["money_maker"] = money_maker
         opportunity_execution = action_plan.get("opportunity_execution") or {"active": False}
+        watchlist_alignment = action_plan.get("watchlist_alignment") or {"active": False}
         if opportunity_execution.get("active"):
             go_no_go = "WAIT"
             go_confidence = max(float(go_confidence or 0), 55)
         elif opportunity_execution.get("blocked"):
             go_no_go = "NO GO"
+        elif watchlist_alignment.get("active"):
+            go_no_go = "WAIT"
+            go_confidence = max(float(go_confidence or 0), 45)
         setup_type = action_plan.get("setup_type", setup_type)
         entry_method = action_plan.get("order_type", entry_method if 'entry_method' in locals() else "MARKET_ORDER")
         no_long_entry = entry_method == "NO_LONG_ENTRY"
@@ -1378,7 +1428,7 @@ Orderbook Execution Overlay: {orderbook_execution.get('execution_recommendation'
 Official Invezgo Enrichment: TimeTable {official_enrichment.get('time_table', {}).get('pressure', 'n/a')} | Momentum {official_enrichment.get('momentum_chart', {}).get('bias', 'n/a')} | BrokerStalker {official_enrichment.get('broker_stalker', {}).get('available_count', 0)} | CorporateAction {official_enrichment.get('corporate_actions', {}).get('count', 0)}
 Money Maker Core: {money_maker.get('verdict')} | Phase {money_maker.get('phase')} | Score {money_maker.get('score')} | BFD {money_maker.get('bfd_score')}/5 | Risk {", ".join(money_maker.get('risk_flags', [])[:4]) or "clear"}
 Money Maker Patterns: {", ".join([p.get('name','') for p in money_maker.get('patterns', [])[:4]]) or "none"} | Execution {money_maker.get('execution_intelligence', {}).get('stance', 'n/a')} | Doctrine {", ".join(money_maker.get('doctrine', {}).get('flags', [])[:3]) or "clear"}
-Screener Opportunity Alignment: {opportunity_execution.get('mode', 'normal')} | Active {opportunity_execution.get('active', False)} | Bias {opportunity_execution.get('execution_bias', 'n/a')} | Policy {opportunity_execution.get('policy', 'n/a')}
+Screener Opportunity Alignment: {opportunity_execution.get('mode', watchlist_alignment.get('mode', 'normal'))} | Active {opportunity_execution.get('active', watchlist_alignment.get('active', False))} | Bias {opportunity_execution.get('execution_bias', 'watchlist_radar')} | Policy {opportunity_execution.get('policy', 'observation_only')}
 Engine: {all_engines.get('bullish_count', 0)} bullish, {all_engines.get('bearish_count', 0)} bearish dari 10 engines
 {market_regime_context}
 {foreign_flow_context}
@@ -1428,6 +1478,7 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "official_enrichment": official_enrichment,
             "money_maker": money_maker,
             "opportunity_execution": opportunity_execution,
+            "watchlist_alignment": watchlist_alignment,
             "entry_order_type": action_plan.get("order_type"),
             "trigger_price": action_plan.get("trigger_price"),
             "entry_zone_low": action_plan.get("entry_zone_low"),
