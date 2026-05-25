@@ -2051,10 +2051,18 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
                 "upgrade_rule": "Only 5%-10% movers can enter execution lane; above 10% is no-chase radar unless it resets cleanly.",
             }
             result["watchlist_only"] = True
+            if not executable:
+                result["no_chase_radar"] = True
+                result["disqualify"] = True
+                result["disqualify_reason"] = (
+                    f"Top gainer {chg:.2f}% di luar sweet spot 5%-10%; no-chase radar only."
+                )
             if extreme:
                 result["top_gainer_opportunity"]["preferred_entry"] = "No chase; extreme/ARA-risk extension. Observe distribution risk and wait next-cycle setup."
 
-        if bandarm.get("disqualify"):
+        if result.get("no_chase_radar"):
+            pass
+        elif bandarm.get("disqualify"):
             result["disqualify_reason"] = "Bandarmology phase/MACD disqualify"
         elif foreign.get("heavy_sell"):
             result["disqualify_reason"] = "Foreign heavy sell + weak/distribution condition"
@@ -2079,6 +2087,11 @@ def apply_disqualifiers(scored: List[Dict[str, Any]], mode: Mode) -> List[Dict[s
     qualified: List[Dict[str, Any]] = []
 
     for item in scored:
+        if item.get("no_chase_radar") or (item.get("top_gainer_opportunity") or {}).get("radar_only"):
+            item["disqualify"] = True
+            item["disqualify_reason"] = item.get("disqualify_reason") or "Top gainer outside 5%-10% sweet spot; no-chase radar only."
+            continue
+
         phase = str(item.get("phase", "")).lower()
         if phase in {"distribution", "decline"}:
             item["disqualify"] = True
@@ -2116,6 +2129,9 @@ def build_watchlist_fallback(scored: List[Dict[str, Any]], mode: Mode, limit: in
     floor = max(38, MODE_CONFIG[mode]["min_score"] - 20)
     pool: List[Dict[str, Any]] = []
     for item in scored:
+        if item.get("no_chase_radar") or (item.get("top_gainer_opportunity") or {}).get("radar_only"):
+            continue
+
         phase = str(item.get("phase", "")).lower()
         if phase in {"distribution", "decline"}:
             continue
