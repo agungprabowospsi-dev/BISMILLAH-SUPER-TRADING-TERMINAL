@@ -619,7 +619,7 @@ export default function MonitoringPage() {
                                   <span className="font-bold">{Number(radar.change_pct || 0).toFixed(2)}%</span>
                                 </div>
                                 <p className="mt-1 text-amber-200/90">
-                                  Belum execution lane. Upgrade jika move 5% atau lebih, RVOL/frequency/value hidup, dan trigger terkonfirmasi.
+                                  Belum execution lane. Hanya mover awal 5%-10% yang boleh masuk review eksekusi; di atas itu tunggu reset/base.
                                 </p>
                               </div>
                             )}

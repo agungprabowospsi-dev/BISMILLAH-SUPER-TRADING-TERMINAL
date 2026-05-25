@@ -155,25 +155,42 @@ def apply_screener_opportunity_alignment(
     ctx_change = float(sc.get("change_pct") or top_opp.get("change_pct") or change_pct or 0)
     mode_l = str(mode or "").lower()
     opportunity_source = ""
-    if top_opp.get("available"):
+    executable_sweet_spot = 5 <= ctx_change < 10 and top_opp.get("radar_only") is not True
+    if top_opp.get("available") and executable_sweet_spot:
         opportunity_source = str(top_opp.get("lane") or "TOP_GAINER_MOMENTUM")
-    elif sc.get("watchlist_only") and ctx_change >= 5:
+    elif sc.get("watchlist_only") and executable_sweet_spot:
         opportunity_source = "WATCHLIST_PRICE_MOVER"
     elif sc.get("opportunity_lane") in ("top_gainer", "price_mover"):
-        opportunity_source = str(sc.get("opportunity_lane")).upper()
-    elif mode_l in ("intraday", "scalping") and ctx_change >= 5 and str(action.get("decision", "")).upper() in ("WAIT", "NO GO"):
+        opportunity_source = str(sc.get("opportunity_lane")).upper() if executable_sweet_spot else ""
+    elif mode_l in ("intraday", "scalping") and executable_sweet_spot and str(action.get("decision", "")).upper() in ("WAIT", "NO GO"):
         opportunity_source = "LIVE_PRICE_MOVER"
 
     if not opportunity_source:
-        if sc.get("watchlist_only") or sc.get("adaptive_prefilter_used") or sc.get("watchlist_fallback_used"):
+        if sc.get("watchlist_only") or sc.get("adaptive_prefilter_used") or sc.get("watchlist_fallback_used") or ctx_change >= 5:
             current_f = float(current or action.get("current_price") or 0)
             tick = _idx_tick_size(current_f)
             trigger = max(float(action.get("trigger_price") or 0), current_f + tick)
             trigger = _round_price(trigger)
             atr_value = max(float(atr or 0), current_f * 0.012, tick * 2)
             invalidation = _round_price(min(float(action.get("invalidation_price") or current_f - atr_value), current_f - tick))
+            if ctx_change >= 20:
+                radar_mode = "EXTREME_TOP_GAINER_NO_CHASE"
+                radar_reason = "Top gainer sudah ekstrem di atas 20%; radar distribusi/ARA risk, bukan execution lane."
+                upgrade_rule = "Tunggu next-cycle base/pullback besar; jangan chase market order."
+            elif ctx_change >= 10:
+                radar_mode = "EXTENDED_TOP_GAINER_NO_CHASE"
+                radar_reason = "Top gainer sudah di atas 10%; opportunity awal terlewat, tunggu reset/base baru."
+                upgrade_rule = "Masuk review lagi hanya setelah pullback sehat atau base intraday terbentuk ulang."
+            elif ctx_change >= 5:
+                radar_mode = "TOP_GAINER_DATA_CHECK"
+                radar_reason = "Mover 5%-10% terdeteksi tetapi belum lolos execution guardrail dari Screener."
+                upgrade_rule = "RVOL/frequency/value hidup, lalu trigger/base/VWAP terkonfirmasi."
+            else:
+                radar_mode = "BAD_MARKET_WATCHLIST_RADAR"
+                radar_reason = "Saham berasal dari adaptive watchlist, tetapi belum menjadi top gainer/price mover eksekusi."
+                upgrade_rule = "Naik 5%-10%, RVOL/frequency/value hidup, lalu trigger/base/VWAP terkonfirmasi."
             confirmations = [
-                "Upgrade ke opportunity mode hanya jika move >= 5% atau masuk top gainer resmi/price mover.",
+                "Execution lane hanya untuk mover awal 5%-10%; di atas 10% dianggap no-chase radar.",
                 "RVOL/frequency/value ikut hidup; bukan hanya naik tipis di volume kering.",
                 "Harga reclaim trigger dengan base/VWAP sehat dan orderbook bid refill.",
             ] + list(action.get("confirmation_needed") or [])
@@ -195,15 +212,15 @@ def apply_screener_opportunity_alignment(
                 "watchlist_only": True,
                 "watchlist_alignment": {
                     "active": True,
-                    "mode": "BAD_MARKET_WATCHLIST_RADAR",
+                    "mode": radar_mode,
                     "change_pct": round(ctx_change, 2),
                     "rvol": round(float(rvol or sc.get("rvol") or 0), 2),
-                    "reason": "Saham berasal dari adaptive watchlist, tetapi belum menjadi top gainer/price mover eksekusi.",
-                    "upgrade_rule": "Naik >=5%, RVOL/frequency/value hidup, lalu trigger/base/VWAP terkonfirmasi.",
+                    "reason": radar_reason,
+                    "upgrade_rule": upgrade_rule,
                 },
                 "next_action": (
-                    "Screener hanya memberi radar observasi. Belum entry; tunggu upgrade menjadi top gainer/price mover "
-                    "atau trigger teknikal didukung volume, orderbook, dan money maker flow."
+                    "Screener hanya memberi radar observasi. Belum entry; execution lane hanya untuk mover awal 5%-10% "
+                    "yang didukung volume, orderbook, dan money maker flow."
                 ),
                 "confirmation_needed": list(dict.fromkeys(confirmations)),
                 "invalidation_rules": list(dict.fromkeys(invalidations)),
@@ -242,13 +259,14 @@ def apply_screener_opportunity_alignment(
     invalidation = _round_price(invalidation)
     risk = max(trigger - invalidation, atr_value)
     hot_move = ctx_change >= 12
-    bias = str(top_opp.get("execution_bias") or ("NO_CHASE_WAIT_PULLBACK" if hot_move else "MOMENTUM_CONFIRMATION"))
+    bias = str(top_opp.get("execution_bias") or ("MOMENTUM_CONFIRMATION_5_10" if not hot_move else "NO_CHASE_WAIT_PULLBACK"))
 
     opportunity_execution = {
         "active": not blocked,
         "blocked": blocked,
         "source": opportunity_source,
         "mode": "BAD_MARKET_TOP_GAINER_RADAR",
+        "opportunity_tier": "SWEET_SPOT_5_10",
         "change_pct": round(ctx_change, 2),
         "rvol": round(float(rvol or sc.get("rvol") or 0), 2),
         "execution_bias": bias,

@@ -274,7 +274,7 @@ def analytic_alignment_warnings(analytic_context: dict, current: float) -> list:
                 "type": "WATCHLIST_RADAR_OBSERVATION",
                 "message": (
                     "Adaptive watchlist radar aktif, tetapi belum execution lane. "
-                    "Upgrade hanya jika move >=5%, RVOL/frequency/value hidup, dan trigger terkonfirmasi."
+                    "Execution lane hanya untuk mover awal 5%-10%; di atas itu tunggu reset/base."
                 ),
             })
         if invalidation > 0 and current <= invalidation:

@@ -2031,21 +2031,28 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
 
         if candidate.get("_opportunity_lane") == "top_gainer" or to_float(candidate.get("change_pct")) >= 5:
             chg = to_float(candidate.get("change_pct"))
-            hot = chg >= 12
+            sweet_spot = 5 <= chg < 10
+            extended = 10 <= chg < 20
+            extreme = chg >= 20
+            tier = "SWEET_SPOT_5_10" if sweet_spot else "EXTENDED_10_20" if extended else "EXTREME_20_PLUS"
+            executable = sweet_spot
             result["top_gainer_opportunity"] = {
-                "available": True,
+                "available": executable,
                 "lane": candidate.get("_opportunity_lane") or "PRICE_MOVER_MOMENTUM",
                 "rank": candidate.get("_mover_rank"),
                 "change_pct": chg,
-                "execution_bias": "NO_CHASE_WAIT_PULLBACK" if hot else "MOMENTUM_CONFIRMATION",
-                "preferred_entry": "Wait 5m base/VWAP reclaim, then buy-stop above mini range high." if hot else "Breakout continuation or VWAP pullback with bid refill.",
+                "opportunity_tier": tier,
+                "executable": executable,
+                "radar_only": not executable,
+                "execution_bias": "MOMENTUM_CONFIRMATION_5_10" if executable else "EXTENDED_NO_CHASE" if extended else "EXTREME_EXTENSION_RISK",
+                "preferred_entry": "Breakout continuation or VWAP pullback with bid refill; no market chase." if executable else "Radar only; wait deeper reset/base before any execution review.",
                 "risk_rule": "Avoid market chase; invalid below 5m base low/VWAP loss. Size tiny until broker/orderbook confirms.",
                 "exit_rule": "Scale out into extension; trail under higher-low or VWAP for intraday/scalping.",
+                "upgrade_rule": "Only 5%-10% movers can enter execution lane; above 10% is no-chase radar unless it resets cleanly.",
             }
             result["watchlist_only"] = True
-            if chg >= 20:
-                result["top_gainer_opportunity"]["execution_bias"] = "ARA_EXTENSION_RISK"
-                result["top_gainer_opportunity"]["preferred_entry"] = "No chase; only consider if reopen/retest holds with strong value and buyer refill."
+            if extreme:
+                result["top_gainer_opportunity"]["preferred_entry"] = "No chase; extreme/ARA-risk extension. Observe distribution risk and wait next-cycle setup."
 
         if bandarm.get("disqualify"):
             result["disqualify_reason"] = "Bandarmology phase/MACD disqualify"

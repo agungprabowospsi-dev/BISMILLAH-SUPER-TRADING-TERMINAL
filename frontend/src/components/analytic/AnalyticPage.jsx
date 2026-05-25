@@ -707,7 +707,7 @@ export default function AnalyticPage() {
                     <span className="font-bold">{Number(watchlistAlignment.change_pct || 0).toFixed(2)}%</span>
                   </div>
                   <p className="mt-1">
-                    {watchlistAlignment.reason || 'Saham masih radar observasi, belum execution lane.'} Upgrade jika move 5% atau lebih, RVOL/frequency/value hidup, dan trigger terkonfirmasi.
+                    {watchlistAlignment.reason || 'Saham masih radar observasi, belum execution lane.'} Execution lane hanya untuk mover awal 5%-10%; di atas itu tunggu reset/base.
                   </p>
                 </div>
               )}

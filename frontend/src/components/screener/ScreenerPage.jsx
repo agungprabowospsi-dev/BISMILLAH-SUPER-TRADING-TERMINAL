@@ -246,12 +246,24 @@ function StockCard({ stock, rank, onClick }) {
         <div style={S.priceRow}><span style={S.priceLabel}>Last Price</span><span style={S.priceValue}>Rp {Number(stock.price || stock.last_price || 0).toLocaleString("id-ID")}</span></div>
         {stock.top_gainer_opportunity?.available && (
           <div style={S.moverBox}>
-            <div style={S.moverTitle}>Top Gainer Opportunity</div>
+            <div style={S.moverTitle}>Top Gainer Sweet Spot</div>
             <div style={S.officialGrid}>
               <span>Rank: #{stock.top_gainer_opportunity.rank || "-"}</span>
               <span>Move: {Number(stock.top_gainer_opportunity.change_pct || stock.change_pct || 0).toFixed(2)}%</span>
+              <span>Tier: {String(stock.top_gainer_opportunity.opportunity_tier || "-").replace(/_/g, " ")}</span>
               <span>Bias: {String(stock.top_gainer_opportunity.execution_bias || "-").replace(/_/g, " ")}</span>
               <span>Entry: {stock.top_gainer_opportunity.preferred_entry || "-"}</span>
+            </div>
+          </div>
+        )}
+        {stock.top_gainer_opportunity?.radar_only && (
+          <div style={S.noChaseBox}>
+            <div style={S.noChaseTitle}>No-Chase Top Gainer Radar</div>
+            <div style={S.officialGrid}>
+              <span>Move: {Number(stock.top_gainer_opportunity.change_pct || stock.change_pct || 0).toFixed(2)}%</span>
+              <span>Tier: {String(stock.top_gainer_opportunity.opportunity_tier || "-").replace(/_/g, " ")}</span>
+              <span>Bias: {String(stock.top_gainer_opportunity.execution_bias || "-").replace(/_/g, " ")}</span>
+              <span>Rule: wait reset/base</span>
             </div>
           </div>
         )}
@@ -327,6 +339,8 @@ const S = {
   moneyMakerTitle: { color: "#a21caf", fontSize: 10, fontWeight: "bold", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 },
   moverBox: { border: "1px solid #fdba74", backgroundColor: "#fff7ed", borderRadius: 6, padding: 8, marginBottom: 10 },
   moverTitle: { color: "#c2410c", fontSize: 10, fontWeight: "bold", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 },
+  noChaseBox: { border: "1px solid #f59e0b", backgroundColor: "#fffbeb", borderRadius: 6, padding: 8, marginBottom: 10 },
+  noChaseTitle: { color: "#b45309", fontSize: 10, fontWeight: "bold", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 },
   officialGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, color: "#475569", fontSize: 10, fontFamily: "monospace" },
   barBg: { backgroundColor: "#e2e8f0", height: 5, borderRadius: 3, overflow: "hidden" },
   barFill: { height: "100%", borderRadius: 3, transition: "width 0.5s ease" },
