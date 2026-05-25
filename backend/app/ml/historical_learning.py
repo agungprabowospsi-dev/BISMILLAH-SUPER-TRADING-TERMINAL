@@ -158,7 +158,8 @@ async def save_ohlcv(ticker: str, candles: List[Dict[str, Any]]) -> int:
 
 
 async def load_ohlcv(ticker: str, years: int = 15) -> List[Dict[str, Any]]:
-    from_date = (datetime.now() - timedelta(days=years * 366)).strftime("%Y-%m-%d")
+    # asyncpg expects a real date object for DATE comparisons, not a string.
+    from_date = (datetime.now() - timedelta(days=years * 366)).date()
     async with AsyncSessionLocal() as db:
         result = await db.execute(text("""
             SELECT date, open, high, low, close, volume, value, freq
