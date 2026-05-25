@@ -80,6 +80,23 @@ def _unwrap_list(data) -> list:
                 return value
     return []
 
+def _unwrap_first_list(data, keys: tuple = ()) -> list:
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        return []
+    for key in keys:
+        value = data.get(key)
+        rows = _unwrap_first_list(value, ())
+        if rows:
+            return rows
+    for key in ("data", "result", "results", "items", "stocks", "rows"):
+        value = data.get(key)
+        rows = _unwrap_first_list(value, keys)
+        if rows:
+            return rows
+    return []
+
 def _normalize_mover(row: dict, source: str = "") -> dict:
     code = row.get("code") or row.get("ticker") or row.get("symbol") or row.get("stock_code")
     close = _to_float(row.get("close") or row.get("last") or row.get("last_price") or row.get("price"))
@@ -96,6 +113,9 @@ def _normalize_mover(row: dict, source: str = "") -> dict:
     )
     if change_pct is None and close and prev:
         change_pct = (close - prev) / prev * 100
+    if change_pct is None and change and not prev:
+        # Invezgo top-change responses use "change" as percentage in SDK docs.
+        change_pct = change
 
     return {
         **row,
@@ -759,10 +779,13 @@ async def get_top_movers(sort: str = "gainer", limit: int = 20) -> list:
         official_rows = []
         if sort_key in ("gainer", "loser"):
             top_change = await get_top_flow("change")
-            official_rows = _unwrap_list(top_change.get("gain" if sort_key == "gainer" else "loss"))
+            if sort_key == "gainer":
+                official_rows = _unwrap_first_list(top_change, ("gain", "gainer", "gainers", "top_gainer", "top_gainers", "topGain", "topGainers", "up"))
+            else:
+                official_rows = _unwrap_first_list(top_change, ("loss", "loser", "losers", "top_loser", "top_losers", "topLoss", "topLosers", "down"))
         elif sort_key == "foreign":
             top_foreign = await get_top_flow("foreign")
-            official_rows = _unwrap_list(top_foreign.get("accum") or top_foreign.get("dist"))
+            official_rows = _unwrap_first_list(top_foreign, ("accum", "dist", "accumulation", "distribution"))
         rows = [_normalize_mover(row, source=f"official-top-{sort_key}") for row in official_rows if isinstance(row, dict)]
         if rows:
             result = rows[:limit]

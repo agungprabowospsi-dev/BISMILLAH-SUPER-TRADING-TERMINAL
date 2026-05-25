@@ -244,6 +244,17 @@ function StockCard({ stock, rank, onClick }) {
         </div>
         <div style={S.scoreRow}><span style={S.scoreLabel}>Score</span><span style={S.scoreValue}>{Number(stock.final_score || stock.score || 0).toFixed(1)}</span></div>
         <div style={S.priceRow}><span style={S.priceLabel}>Last Price</span><span style={S.priceValue}>Rp {Number(stock.price || stock.last_price || 0).toLocaleString("id-ID")}</span></div>
+        {stock.top_gainer_opportunity?.available && (
+          <div style={S.moverBox}>
+            <div style={S.moverTitle}>Top Gainer Opportunity</div>
+            <div style={S.officialGrid}>
+              <span>Rank: #{stock.top_gainer_opportunity.rank || "-"}</span>
+              <span>Move: {Number(stock.top_gainer_opportunity.change_pct || stock.change_pct || 0).toFixed(2)}%</span>
+              <span>Bias: {String(stock.top_gainer_opportunity.execution_bias || "-").replace(/_/g, " ")}</span>
+              <span>Entry: {stock.top_gainer_opportunity.preferred_entry || "-"}</span>
+            </div>
+          </div>
+        )}
         {stock.money_maker?.available && (
           <div style={S.moneyMakerBox}>
             <div style={S.moneyMakerTitle}>Money Maker Core</div>
@@ -314,6 +325,8 @@ const S = {
   officialTitle: { color: "#15803d", fontSize: 10, fontWeight: "bold", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 },
   moneyMakerBox: { border: "1px solid #f0abfc", backgroundColor: "#fdf4ff", borderRadius: 6, padding: 8, marginBottom: 10 },
   moneyMakerTitle: { color: "#a21caf", fontSize: 10, fontWeight: "bold", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 },
+  moverBox: { border: "1px solid #fdba74", backgroundColor: "#fff7ed", borderRadius: 6, padding: 8, marginBottom: 10 },
+  moverTitle: { color: "#c2410c", fontSize: 10, fontWeight: "bold", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 },
   officialGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, color: "#475569", fontSize: 10, fontFamily: "monospace" },
   barBg: { backgroundColor: "#e2e8f0", height: 5, borderRadius: 3, overflow: "hidden" },
   barFill: { height: "100%", borderRadius: 3, transition: "width 0.5s ease" },

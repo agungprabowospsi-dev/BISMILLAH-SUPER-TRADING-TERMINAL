@@ -398,6 +398,39 @@ async def build_universe(mode: str) -> list:
     if not stocks:
         stocks = fallback_stock_universe()
 
+    mover_map: Dict[str, Dict[str, Any]] = {}
+    try:
+        top_gainers = await invesgo_call("get_top_gainer") or []
+        for idx, row in enumerate(top_gainers[:30], start=1):
+            if not isinstance(row, dict):
+                continue
+            code = str(row.get("ticker") or row.get("code") or "").upper()
+            change_pct = to_float(row.get("change_pct") or row.get("change"))
+            if not code or change_pct < 5:
+                continue
+            mover_map[code] = {
+                "rank": idx,
+                "change_pct": change_pct,
+                "source": row.get("source") or "top_gainer",
+                "name": row.get("name") or code,
+                "price": row.get("close") or row.get("price") or row.get("last_price"),
+            }
+    except Exception as exc:
+        logger.debug("[UNIVERSE] top gainer lane unavailable: %s", exc)
+
+    if mover_map:
+        by_code = {str(s.get("ticker") or s.get("code") or "").upper(): s for s in stocks}
+        for code, meta in mover_map.items():
+            stock = by_code.get(code)
+            if stock is None:
+                stock = {"ticker": code, "code": code, "name": meta.get("name"), "sector": "", "raw": {"source": "top_gainer_lane"}}
+                stocks.append(stock)
+                by_code[code] = stock
+            stock["_opportunity_lane"] = "top_gainer"
+            stock["_mover_rank"] = meta.get("rank")
+            stock["_mover_change_pct"] = meta.get("change_pct")
+            stock["_mover_source"] = meta.get("source")
+
     # Gate 1: drop suspended/delisted
     stocks = [s for s in stocks if s.get("active", True) is not False]
 
@@ -424,7 +457,9 @@ async def build_universe(mode: str) -> list:
     tier0 = [s for s in stocks if s["_idx_tier"] == 0]
     tier1 = [s for s in stocks if s["_idx_tier"] == 1]
     tier2 = [s for s in stocks if s["_idx_tier"] == 2][:150]
-    to_score = tier0 + tier1 + tier2
+    movers = [s for s in stocks if s.get("_opportunity_lane") == "top_gainer"]
+    to_score_map = {s.get("ticker"): s for s in (tier0 + tier1 + tier2 + movers)}
+    to_score = list(to_score_map.values())
 
     async def score_liquidity(stock):
         ticker = stock.get("ticker","")
@@ -472,6 +507,10 @@ async def build_universe(mode: str) -> list:
         freq   = s.get("_liq_freq", 0)
         ticker = s.get("ticker", "")
 
+        if value == 0 and freq == 0 and s.get("_opportunity_lane") == "top_gainer":
+            s["_liquidity_fallback"] = True
+            soft.append(s)
+            continue
         if value == 0 and freq == 0:
             dropped_tickers.add(ticker)
             continue
@@ -621,7 +660,9 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
                 return None
 
             price = metrics["price"]
-            if price < cfg["price_min"] or price > cfg["price_max"]:
+            is_top_gainer_lane = stock.get("_opportunity_lane") == "top_gainer"
+            price_min = 50 if is_top_gainer_lane and mode in ("intraday", "scalping") else cfg["price_min"]
+            if price < price_min or price > cfg["price_max"]:
                 return None
 
             # Filter saham suspended — dari field Invesgo + OHLCV check
@@ -659,10 +700,13 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             if change_pct_now <= -24.0:
                 return None  # ARB — potensi suspended/tidak bisa jual
 
-            if metrics["rvol"] < gate["rvol_min"]:
+            effective_rvol_gate = min(gate["rvol_min"], 0.25) if is_top_gainer_lane and metrics.get("change_pct", 0) >= 5 else gate["rvol_min"]
+            effective_change_gate = min(gate["change_min"], 5.0) if is_top_gainer_lane else gate["change_min"]
+
+            if metrics["rvol"] < effective_rvol_gate:
                 return None
 
-            if metrics["change_pct"] < gate["change_min"]:
+            if metrics["change_pct"] < effective_change_gate:
                 return None
 
             # Anti Climax Distribution Filter (Bandar Flow Secrets hal.26)
@@ -766,8 +810,8 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
                 **metrics,
                 "ohlcv": ohlcv,
                 "adaptive_prefilter": adaptive,
-                "rvol_gate": round(gate["rvol_min"], 2),
-                "change_gate": round(gate["change_min"], 2),
+                "rvol_gate": round(effective_rvol_gate, 2),
+                "change_gate": round(effective_change_gate, 2),
             }
         except Exception:
             return None
@@ -1955,6 +1999,9 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             "change_pct": candidate.get("change_pct"),
             "rvol": candidate.get("rvol"),
             "volume": candidate.get("volume"),
+            "opportunity_lane": candidate.get("_opportunity_lane"),
+            "mover_rank": candidate.get("_mover_rank"),
+            "mover_source": candidate.get("_mover_source"),
             "final_score": fscore,
             "signal": signal_from_score(fscore),
             "money_maker": money_maker,
@@ -1981,6 +2028,24 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             "disqualify_reason": None,
             "reason": "",
         }
+
+        if candidate.get("_opportunity_lane") == "top_gainer":
+            chg = to_float(candidate.get("change_pct"))
+            hot = chg >= 12
+            result["top_gainer_opportunity"] = {
+                "available": True,
+                "lane": "TOP_GAINER_MOMENTUM",
+                "rank": candidate.get("_mover_rank"),
+                "change_pct": chg,
+                "execution_bias": "NO_CHASE_WAIT_PULLBACK" if hot else "MOMENTUM_CONFIRMATION",
+                "preferred_entry": "Wait 5m base/VWAP reclaim, then buy-stop above mini range high." if hot else "Breakout continuation or VWAP pullback with bid refill.",
+                "risk_rule": "Avoid market chase; invalid below 5m base low/VWAP loss. Size tiny until broker/orderbook confirms.",
+                "exit_rule": "Scale out into extension; trail under higher-low or VWAP for intraday/scalping.",
+            }
+            result["watchlist_only"] = True
+            if chg >= 20:
+                result["top_gainer_opportunity"]["execution_bias"] = "ARA_EXTENSION_RISK"
+                result["top_gainer_opportunity"]["preferred_entry"] = "No chase; only consider if reopen/retest holds with strong value and buyer refill."
 
         if bandarm.get("disqualify"):
             result["disqualify_reason"] = "Bandarmology phase/MACD disqualify"
