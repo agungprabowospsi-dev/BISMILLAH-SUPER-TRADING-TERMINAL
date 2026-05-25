@@ -247,6 +247,11 @@ def analytic_alignment_warnings(analytic_context: dict, current: float) -> list:
             or analytic_context.get("watchlist_alignment")
             or {}
         )
+        screener_alignment = (
+            action_plan.get("screener_alignment")
+            or analytic_context.get("screener_alignment")
+            or {}
+        )
         if opportunity_execution.get("active"):
             warnings.append({
                 "level": "MEDIUM",
@@ -275,6 +280,14 @@ def analytic_alignment_warnings(analytic_context: dict, current: float) -> list:
                 "message": (
                     "Adaptive watchlist radar aktif, tetapi belum execution lane. "
                     "Execution lane hanya untuk mover awal 5%-10%; di atas itu tunggu reset/base."
+                ),
+            })
+        elif screener_alignment.get("active"):
+            warnings.append({
+                "level": "LOW",
+                "type": "SCREENER_QUALIFIED_ANALYTIC_WAIT",
+                "message": (
+                    "Screener qualified tetapi Analytic masih WAIT confirmation; monitor trigger dan flow, bukan entry otomatis."
                 ),
             })
         if invalidation > 0 and current <= invalidation:

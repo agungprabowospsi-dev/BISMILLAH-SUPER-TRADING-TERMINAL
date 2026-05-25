@@ -573,6 +573,7 @@ export default function MonitoringPage() {
                       (() => {
                         const opp = pos.analytic_context.action_plan.opportunity_execution || pos.analytic_context.opportunity_execution || null
                         const radar = pos.analytic_context.action_plan.watchlist_alignment || pos.analytic_context.watchlist_alignment || null
+                        const align = pos.analytic_context.action_plan.screener_alignment || pos.analytic_context.screener_alignment || null
                         return (
                           <div className="space-y-2 pt-2 border-t border-border-dim text-xs font-mono">
                             <div className="grid grid-cols-2 gap-2">
@@ -620,6 +621,17 @@ export default function MonitoringPage() {
                                 </div>
                                 <p className="mt-1 text-amber-200/90">
                                   Belum execution lane. Hanya mover awal 5%-10% yang boleh masuk review eksekusi; di atas itu tunggu reset/base.
+                                </p>
+                              </div>
+                            )}
+                            {align?.active && !opp?.active && !radar?.active && (
+                              <div className="rounded border border-emerald-400/30 bg-emerald-400/10 p-2 text-emerald-300">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-bold uppercase">Screener Qualified</span>
+                                  <span className="font-bold">Grade {align.grade || '-'}</span>
+                                </div>
+                                <p className="mt-1 text-emerald-200/90">
+                                  Analytic WAIT confirmation; pantau trigger dan money maker flow, bukan entry otomatis.
                                 </p>
                               </div>
                             )}

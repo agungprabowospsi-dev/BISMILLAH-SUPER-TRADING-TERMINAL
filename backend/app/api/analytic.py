@@ -331,6 +331,100 @@ def apply_screener_opportunity_alignment(
     return _finalize_action_plan_levels(action, atr, mode_l)
 
 
+def apply_screener_candidate_alignment(
+    action_plan: dict,
+    *,
+    screener_context: Any,
+    mode: str,
+    current: float,
+    atr: float,
+    range_high_20: float,
+    range_low_20: float,
+    ma20: float,
+    money_maker: dict,
+) -> dict:
+    """Keep qualified Screener candidates as conditional radar unless fatal flow risk rejects them."""
+    action = dict(action_plan or {})
+    sc = _context_dict(screener_context)
+    if not sc:
+        return action
+
+    grade = str(sc.get("grade") or "").upper()
+    score = float(sc.get("score") or 0)
+    top_opp = sc.get("top_gainer_opportunity") if isinstance(sc.get("top_gainer_opportunity"), dict) else {}
+    if top_opp.get("radar_only") or sc.get("watchlist_only") or sc.get("watchlist_fallback_used"):
+        return action
+    if grade not in ("A", "B") or score < 55:
+        return action
+    if str(action.get("order_type") or "").upper() != "NO_LONG_ENTRY":
+        return action
+
+    mm = money_maker or {}
+    risk_flags = set(mm.get("risk_flags") or [])
+    fatal_flags = {"RETAIL_EXIT_LIQUIDITY", "CLIMAX_DISTRIBUTION_RISK", "BFD_FLOW_REVERSAL"}
+    fatal = (
+        str(mm.get("verdict") or "").upper() == "FLOW_OUT_AVOID"
+        or str(action.get("decision_modifier") or "").upper() == "MONEY_MAKER_FLOW_OUT"
+        or bool(risk_flags.intersection(fatal_flags))
+    )
+    if fatal:
+        action["screener_alignment"] = {
+            "active": True,
+            "status": "ANALYTIC_REJECTED_FATAL_FLOW",
+            "reason": "Screener qualified, tetapi Money Maker/flow risk fatal menolak long entry.",
+        }
+        return action
+
+    mode_l = str(mode or "swing").lower()
+    tick = _idx_tick_size(current)
+    trigger = max(float(action.get("trigger_price") or 0), float(range_high_20 or 0) + tick, float(current or 0) + tick)
+    trigger = _round_price(trigger)
+    atr_value = max(float(atr or 0), float(current or 0) * 0.012, tick * 2)
+    support = float(range_low_20 or 0) or float(current or 0) - atr_value
+    stop = _round_price(min(float(current or 0) - tick, max(support, float(current or 0) - atr_value * 1.2)))
+    risk = max(trigger - stop, atr_value)
+    confirmations = [
+        "Screener Grade B/A tetap valid sebagai radar; Analytic menunggu konfirmasi, bukan entry market.",
+        f"Break/reclaim trigger {trigger} dengan candle close dan RVOL/frequency/value mendukung.",
+        "Broker flow tidak tersebar lemah; minimal ada buyer dominan atau BFD membaik.",
+        "Weinstein Stage 4/downtrend harus batal lewat reclaim struktur pendek.",
+    ] + list(action.get("confirmation_needed") or [])
+    invalidations = [
+        "Money Maker berubah FLOW_OUT_AVOID atau muncul retail exit liquidity.",
+        f"Gagal reclaim trigger lalu breakdown di bawah {stop}.",
+    ] + list(action.get("invalidation_rules") or [])
+
+    action.update({
+        "decision": "WAIT",
+        "setup_type": "SCREENER_QUALIFIED_WAIT_CONFIRMATION",
+        "order_type": "WAIT_CLOSE_CONFIRMATION",
+        "decision_modifier": "SCREENER_ANALYTIC_ALIGNMENT",
+        "entry_price": trigger,
+        "trigger_price": trigger,
+        "entry_zone_low": _round_price(max(float(ma20 or 0), float(current or 0) - atr_value * 0.6)),
+        "entry_zone_high": trigger,
+        "stop_loss": stop,
+        "invalidation_price": stop,
+        "take_profit_1": _round_price(trigger + risk * (1.0 if mode_l in ("intraday", "scalping") else 1.3)),
+        "take_profit_2": _round_price(trigger + risk * (1.8 if mode_l in ("intraday", "scalping") else 2.3)),
+        "take_profit_3": _round_price(trigger + risk * (2.6 if mode_l in ("intraday", "scalping") else 3.5)),
+        "next_action": (
+            "Screener sudah qualified, tetapi Analytic membaca struktur belum cukup bersih. "
+            "Status diselaraskan menjadi WAIT confirmation; eksekusi hanya jika trigger, flow, dan struktur pendek membaik."
+        ),
+        "confirmation_needed": list(dict.fromkeys(confirmations)),
+        "invalidation_rules": list(dict.fromkeys(invalidations)),
+        "screener_alignment": {
+            "active": True,
+            "status": "SCREENER_QUALIFIED_ANALYTIC_WAIT",
+            "grade": grade,
+            "score": round(score, 2),
+            "policy": "qualified_candidate_not_auto_go",
+        },
+    })
+    return _finalize_action_plan_levels(action, atr, mode_l)
+
+
 def _finalize_action_plan_levels(action: dict, atr: float, mode: str) -> dict:
     """Keep long-entry levels internally consistent for UI and monitoring."""
     order_type = str(action.get("order_type") or "").upper()
@@ -1385,6 +1479,17 @@ Top Brokers: {", ".join(top_brokers[:5])}
         money_maker.setdefault("flow_memory", {})["cloud_saved"] = bool(money_maker_persist.get("saved"))
         money_maker["flow_memory"]["persistent_backend"] = money_maker_persist.get("persistent_backend", "sqlite")
         action_plan = apply_money_maker_to_action_plan(action_plan, money_maker)
+        action_plan = apply_screener_candidate_alignment(
+            action_plan,
+            screener_context=req.screener_context,
+            mode=req.mode,
+            current=current,
+            atr=atr,
+            range_high_20=range_high_20,
+            range_low_20=range_low_20,
+            ma20=ma20,
+            money_maker=money_maker,
+        )
         action_plan = apply_screener_opportunity_alignment(
             action_plan,
             screener_context=req.screener_context,
@@ -1409,6 +1514,7 @@ Top Brokers: {", ".join(top_brokers[:5])}
         action_plan["money_maker"] = money_maker
         opportunity_execution = action_plan.get("opportunity_execution") or {"active": False}
         watchlist_alignment = action_plan.get("watchlist_alignment") or {"active": False}
+        screener_alignment = action_plan.get("screener_alignment") or {"active": False}
         if opportunity_execution.get("active"):
             go_no_go = "WAIT"
             go_confidence = max(float(go_confidence or 0), 55)
@@ -1417,6 +1523,9 @@ Top Brokers: {", ".join(top_brokers[:5])}
         elif watchlist_alignment.get("active"):
             go_no_go = "WAIT"
             go_confidence = max(float(go_confidence or 0), 45)
+        elif screener_alignment.get("active") and screener_alignment.get("status") == "SCREENER_QUALIFIED_ANALYTIC_WAIT":
+            go_no_go = "WAIT"
+            go_confidence = max(float(go_confidence or 0), 50)
         setup_type = action_plan.get("setup_type", setup_type)
         entry_method = action_plan.get("order_type", entry_method if 'entry_method' in locals() else "MARKET_ORDER")
         no_long_entry = entry_method == "NO_LONG_ENTRY"
@@ -1447,6 +1556,7 @@ Official Invezgo Enrichment: TimeTable {official_enrichment.get('time_table', {}
 Money Maker Core: {money_maker.get('verdict')} | Phase {money_maker.get('phase')} | Score {money_maker.get('score')} | BFD {money_maker.get('bfd_score')}/5 | Risk {", ".join(money_maker.get('risk_flags', [])[:4]) or "clear"}
 Money Maker Patterns: {", ".join([p.get('name','') for p in money_maker.get('patterns', [])[:4]]) or "none"} | Execution {money_maker.get('execution_intelligence', {}).get('stance', 'n/a')} | Doctrine {", ".join(money_maker.get('doctrine', {}).get('flags', [])[:3]) or "clear"}
 Screener Opportunity Alignment: {opportunity_execution.get('mode', watchlist_alignment.get('mode', 'normal'))} | Active {opportunity_execution.get('active', watchlist_alignment.get('active', False))} | Bias {opportunity_execution.get('execution_bias', 'watchlist_radar')} | Policy {opportunity_execution.get('policy', 'observation_only')}
+Screener Candidate Alignment: {screener_alignment.get('status', 'normal')} | Grade {screener_alignment.get('grade', 'n/a')} | Score {screener_alignment.get('score', 'n/a')}
 Engine: {all_engines.get('bullish_count', 0)} bullish, {all_engines.get('bearish_count', 0)} bearish dari 10 engines
 {market_regime_context}
 {foreign_flow_context}
@@ -1497,6 +1607,7 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "money_maker": money_maker,
             "opportunity_execution": opportunity_execution,
             "watchlist_alignment": watchlist_alignment,
+            "screener_alignment": screener_alignment,
             "entry_order_type": action_plan.get("order_type"),
             "trigger_price": action_plan.get("trigger_price"),
             "entry_zone_low": action_plan.get("entry_zone_low"),

@@ -165,6 +165,7 @@ export default function AnalyticPage() {
   const moneyMaker = r?.money_maker || r?.action_plan?.money_maker || null
   const opportunityExecution = r?.opportunity_execution || r?.action_plan?.opportunity_execution || null
   const watchlistAlignment = r?.watchlist_alignment || r?.action_plan?.watchlist_alignment || null
+  const screenerAlignment = r?.screener_alignment || r?.action_plan?.screener_alignment || null
   const noActionableLong = ['NO_LONG_ENTRY', 'NO_MARKET_ENTRY'].includes(actionOrderType)
   const valueOrFallback = (value, fallback) =>
     value !== undefined && value !== null && value !== '' ? value : fallback
@@ -711,6 +712,17 @@ export default function AnalyticPage() {
                   </p>
                 </div>
               )}
+              {screenerAlignment?.active && screenerAlignment.status === 'SCREENER_QUALIFIED_ANALYTIC_WAIT' && (
+                <div className="rounded-lg border border-emerald-400/40 bg-emerald-400/10 px-3 py-2 font-mono text-xs leading-relaxed text-emerald-700">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold uppercase">Screener Qualified</span>
+                    <span className="font-bold">Grade {screenerAlignment.grade || '-'}</span>
+                  </div>
+                  <p className="mt-1">
+                    Analytical selaras sebagai WAIT confirmation. Belum market entry; eksekusi hanya jika trigger, flow, dan struktur pendek membaik.
+                  </p>
+                </div>
+              )}
               {/* Dynamic SL/TP — hidden, sudah digabung ke Trade Setup primary */}
               {false && r.dynamic_sltp && r.dynamic_sltp.method !== 'error' && (
                 <div className="mt-2 rounded-lg border border-accent-blue/30 bg-accent-blue/5 p-3">
@@ -760,6 +772,7 @@ export default function AnalyticPage() {
                   money_maker: moneyMaker || null,
                   opportunity_execution: opportunityExecution || null,
                   watchlist_alignment: watchlistAlignment || null,
+                  screener_alignment: screenerAlignment || null,
                   empirical_memory: r.empirical_memory || null,
                   setup_type: r.setup_type || '',
                   setup_reason: r.setup_reason || ''
