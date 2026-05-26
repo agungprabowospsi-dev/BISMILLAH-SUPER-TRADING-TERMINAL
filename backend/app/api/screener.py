@@ -751,6 +751,32 @@ def _adaptive_gate(mode: Mode, filter_intensity: int, adaptive: bool = False) ->
     }
 
 
+def _allow_live_metrics_with_stale_date(metrics: Dict[str, Any], gate: Dict[str, float]) -> bool:
+    """
+    Invezgo opening feed can update price/volume while leaving the OHLCV date
+    on the previous trading day. Keep the row only when live-like metrics are
+    already moving, then let the normal rvol/change gates decide.
+    """
+    volume = to_float(metrics.get("volume"))
+    avg_volume = to_float(metrics.get("avg_volume_20"))
+    rvol = to_float(metrics.get("rvol"))
+    change_pct = to_float(metrics.get("change_pct"))
+    price = to_float(metrics.get("price"))
+    high = to_float(metrics.get("high"))
+    low = to_float(metrics.get("low"))
+    min_change = max(0.5, min(to_float(gate.get("change_min")), 1.0))
+    min_rvol = max(0.25, min(to_float(gate.get("rvol_min")), 0.75))
+    has_active_range = high > 0 and low > 0 and high != low
+    return (
+        price > 0
+        and volume > 0
+        and avg_volume > 0
+        and rvol >= min_rvol
+        and change_pct >= min_change
+        and has_active_range
+    )
+
+
 async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Semaphore, filter_intensity: int = 75, adaptive: bool = False) -> Optional[Dict[str, Any]]:
     ticker = stock["ticker"]
     cfg = MODE_CONFIG[mode]
@@ -795,6 +821,12 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
                         metrics["data_warning"] = (
                             "Daily OHLCV belum update hari ini; top gainer dipertahankan sebagai radar opening, "
                             "bukan entry otomatis."
+                        )
+                    elif _allow_live_metrics_with_stale_date(metrics, gate):
+                        metrics["date_status"] = "LIVE_PRICE_STALE_DATE"
+                        metrics["data_warning"] = (
+                            "Harga/volume sudah bergerak, tetapi tanggal OHLCV Invezgo masih hari bursa sebelumnya. "
+                            "Sinyal boleh direview, entry tetap tunggu konfirmasi analytical."
                         )
                     else:
                         return None
@@ -1077,6 +1109,7 @@ async def debug_prefilter_rejections(universe: List[Dict[str, Any]], mode: Mode,
     from datetime import datetime
 
     cfg = MODE_CONFIG[mode]
+    gate = _adaptive_gate(mode, filter_intensity, adaptive=False)
     today_str = datetime.now().strftime("%Y-%m-%d")
     sem = asyncio.Semaphore(10)
 
@@ -1098,13 +1131,15 @@ async def debug_prefilter_rejections(universe: List[Dict[str, Any]], mode: Mode,
                 )
 
                 last_date_raw = str(metrics.get("date") or "")[:10]
+                stale_fast_mode = mode in ("intraday", "scalping") and last_date_raw and last_date_raw != today_str
+                stale_live_allowed = stale_fast_mode and _allow_live_metrics_with_stale_date(metrics, gate)
 
-                reason = "PASS_PREFILTER"
+                reason = "PASS_LIVE_PRICE_STALE_DATE" if stale_live_allowed else "PASS_PREFILTER"
                 if metrics["price"] < cfg["price_min"] or metrics["price"] > cfg["price_max"]:
                     reason = "PRICE_RANGE"
                 elif int(suspend_value or 0) > 0:
                     reason = "SUSPENDED_FIELD"
-                elif mode in ("intraday", "scalping") and last_date_raw and last_date_raw != today_str:
+                elif stale_fast_mode and not stale_live_allowed:
                     reason = "STALE_OHLCV_DATE"
                 elif metrics["volume"] <= 0:
                     reason = "ZERO_VOLUME"
