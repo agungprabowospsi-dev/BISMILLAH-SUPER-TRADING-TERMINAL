@@ -237,16 +237,19 @@ def apply_screener_opportunity_alignment(
     official = official_enrichment or {}
     risk_flags = set(mm.get("risk_flags") or [])
     risk_flags.update(((action.get("official_decision_context") or {}).get("risk_flags") or []))
-    fatal_flags = {
-        "RETAIL_EXIT_LIQUIDITY",
+    hard_block_flags = {
         "CLIMAX_DISTRIBUTION_RISK",
         "BFD_FLOW_REVERSAL",
+        "ARA_RISK",
+        "ARB_RISK",
     }
-    blocked = (
+    hard_blocked = bool(risk_flags.intersection(hard_block_flags))
+    flow_guarded = (
         str(mm.get("verdict") or "").upper() == "FLOW_OUT_AVOID"
         or str(action.get("decision_modifier") or "").upper() == "MONEY_MAKER_FLOW_OUT"
-        or bool(risk_flags.intersection(fatal_flags))
+        or "RETAIL_EXIT_LIQUIDITY" in risk_flags
     )
+    blocked = hard_blocked
 
     tick = _idx_tick_size(current)
     trigger = max(
@@ -267,8 +270,10 @@ def apply_screener_opportunity_alignment(
     opportunity_execution = {
         "active": not blocked,
         "blocked": blocked,
+        "flow_guarded": flow_guarded,
+        "review_only": flow_guarded and not blocked,
         "source": opportunity_source,
-        "mode": "BAD_MARKET_TOP_GAINER_RADAR",
+        "mode": "BAD_MARKET_SWEET_SPOT_CONDITIONAL_REVIEW" if flow_guarded and not blocked else "BAD_MARKET_TOP_GAINER_RADAR",
         "opportunity_tier": "SWEET_SPOT_5_10",
         "change_pct": round(ctx_change, 2),
         "rvol": round(float(rvol or sc.get("rvol") or 0), 2),
@@ -296,7 +301,7 @@ def apply_screener_opportunity_alignment(
         f"Top gainer move {ctx_change:.2f}% tidak langsung fade setelah opening/momentum burst.",
         "Bentuk 5m base atau VWAP reclaim; jangan buy market saat spike.",
         "Orderbook menunjukkan bid refill dan spread tetap sehat.",
-        "Money Maker Core tidak berubah menjadi FLOW_OUT_AVOID.",
+        "Money Maker/flow risk membaik dari FLOW_OUT_AVOID atau minimal tidak makin distribusi saat trigger disentuh.",
     ] + confirmations
     if float(rvol or 0) < 1.0:
         confirmations.insert(1, "Karena RVOL masih rendah, wajib tunggu frequency/value ikut hidup sebelum entry.")
@@ -308,9 +313,9 @@ def apply_screener_opportunity_alignment(
 
     action.update({
         "decision": "WAIT",
-        "setup_type": "TOP_GAINER_CONDITIONAL_EXECUTION",
+        "setup_type": "BAD_MARKET_TOP_GAINER_CONDITIONAL_REVIEW" if flow_guarded else "TOP_GAINER_CONDITIONAL_EXECUTION",
         "order_type": "CONDITIONAL_BUY_STOP",
-        "decision_modifier": "SCREENER_OPPORTUNITY_ALIGNMENT",
+        "decision_modifier": "BAD_MARKET_SWEET_SPOT_CONDITIONAL_REVIEW" if flow_guarded else "SCREENER_OPPORTUNITY_ALIGNMENT",
         "entry_price": trigger,
         "trigger_price": trigger,
         "entry_zone_low": _round_price(pullback_low),
@@ -321,12 +326,15 @@ def apply_screener_opportunity_alignment(
         "take_profit_2": _round_price(trigger + risk * (1.4 if mode_l == "scalping" else 1.8)),
         "take_profit_3": _round_price(trigger + risk * (2.0 if mode_l == "scalping" else 2.6)),
         "next_action": (
+            "Market merah + top gainer sweet spot: Analytical tidak membatalkan total, tetapi menurunkan menjadi review kondisional. "
+            "Eksekusi hanya buy-stop setelah trigger, base/VWAP, orderbook, dan flow membaik."
+            if flow_guarded else
             "Screener masuk bad-market opportunity lane; Analytical mengikuti sebagai entry kondisional. "
             "Eksekusi hanya buy-stop setelah trigger, base/VWAP, orderbook, dan flow mengonfirmasi."
         ),
         "confirmation_needed": list(dict.fromkeys(confirmations)),
         "invalidation_rules": list(dict.fromkeys(invalidations)),
-        "aggressive_plan": f"Buy-stop kecil di {trigger} hanya saat 5m base/VWAP reclaim valid.",
+        "aggressive_plan": f"Buy-stop kecil di {trigger} hanya saat 5m base/VWAP reclaim valid dan flow tidak makin distribusi.",
         "conservative_plan": f"Tunggu pullback sehat ke {_round_price(pullback_low)} lalu reclaim ulang sebelum entry.",
         "watchlist_only": True,
         "opportunity_execution": opportunity_execution,
@@ -503,7 +511,11 @@ def classify_analytic_setup_family(
     mm_verdict = str((money_maker or {}).get("verdict") or "").upper()
     phase = str((money_maker or {}).get("phase") or "").upper()
 
-    if mm_verdict == "FLOW_OUT_AVOID" or action.get("decision_modifier") == "MONEY_MAKER_FLOW_OUT":
+    if opportunity_execution.get("review_only") or action.get("decision_modifier") == "BAD_MARKET_SWEET_SPOT_CONDITIONAL_REVIEW":
+        key = "BAD_MARKET_SWEET_SPOT_REVIEW"
+        label = "Bad Market Sweet Spot Review"
+        desc = "Market merah + mover 5%-10%; bukan market buy, tetapi valid sebagai conditional trigger review."
+    elif mm_verdict == "FLOW_OUT_AVOID" or action.get("decision_modifier") == "MONEY_MAKER_FLOW_OUT":
         key = "DEFENSIVE_FLOW_AVOID"
         label = "Defensive Flow Avoid"
         desc = "Setup beli dibatalkan karena Money Maker/flow risk fatal."
@@ -565,6 +577,10 @@ def build_execution_router(
     action = action_plan or {}
     order_type = str(action.get("order_type") or "").upper()
     decision = str(action.get("decision") or go_no_go or "WAIT").upper()
+    opportunity_review = bool(
+        opportunity_execution.get("review_only")
+        or str(action.get("decision_modifier") or "").upper() == "BAD_MARKET_SWEET_SPOT_CONDITIONAL_REVIEW"
+    )
     fatal_flow = (
         str((money_maker or {}).get("verdict") or "").upper() == "FLOW_OUT_AVOID"
         or str(action.get("decision_modifier") or "").upper() == "MONEY_MAKER_FLOW_OUT"
@@ -584,7 +600,13 @@ def build_execution_router(
     }
     conditional_orders = {"CONDITIONAL_BUY_STOP", "WAIT_CLOSE_CONFIRMATION"}
 
-    if fatal_flow or order_type == "NO_LONG_ENTRY":
+    if opportunity_review:
+        status = "CONDITIONAL"
+        user_position = "WAIT TRIGGER"
+        monitoring = "LOCKED"
+        allowed = False
+        reason = "Market merah + top gainer sweet spot menjadi review kondisional; entry hanya jika trigger, base/VWAP, orderbook, dan flow membaik."
+    elif fatal_flow or order_type == "NO_LONG_ENTRY":
         status = "REJECTED"
         user_position = "NO ENTRY"
         monitoring = "LOCKED"
