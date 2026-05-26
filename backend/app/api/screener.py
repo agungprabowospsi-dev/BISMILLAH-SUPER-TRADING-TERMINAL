@@ -747,6 +747,7 @@ def calc_prefilter_metrics(ohlcv: List[Dict[str, Any]]) -> Optional[Dict[str, An
 
     # Candle body size %
     candle_body_pct = abs(close - last_open) / last_open * 100 if last_open > 0 else 0
+    vpa = analyze_vpa_variables(ohlcv, rvol, change_pct)
 
     return {
         "date": last.get("date"),
@@ -764,7 +765,158 @@ def calc_prefilter_metrics(ohlcv: List[Dict[str, Any]]) -> Optional[Dict[str, An
         "value": value,
         "candle_bullish": candle_bullish,
         "candle_body_pct": round(candle_body_pct, 2),
+        "vpa": vpa,
+        "vpa_score": vpa["score"],
+        "vpa_state": vpa["state"],
+        "vpa_signals": vpa["signals"],
+        "vpa_distribution_risk": vpa["distribution_risk"],
         "downtrend_heavy": downtrend_heavy,
+    }
+
+
+def analyze_vpa_variables(ohlcv: List[Dict[str, Any]], rvol: float, change_pct: float) -> Dict[str, Any]:
+    """
+    Internal Volume Price Analysis variables.
+    This is not a separate Screener gate; it enriches scoring, disqualifier,
+    lane explanation, and Analytical context.
+    """
+    if len(ohlcv) < 21:
+        return {
+            "score": 50.0,
+            "state": "VPA_NEUTRAL",
+            "signals": [],
+            "distribution_risk": False,
+            "confirmation": False,
+        }
+
+    last = ohlcv[-1]
+    prev = ohlcv[-2]
+    open_f = to_float(last.get("open"))
+    high = to_float(last.get("high"))
+    low = to_float(last.get("low"))
+    close = to_float(last.get("close"))
+    prev_close = to_float(prev.get("close"))
+    prev_high = to_float(prev.get("high"))
+    if min(open_f, high, low, close, prev_close) <= 0 or high <= low:
+        return {
+            "score": 50.0,
+            "state": "VPA_NEUTRAL",
+            "signals": [],
+            "distribution_risk": False,
+            "confirmation": False,
+        }
+
+    ranges = [
+        max(0.0, to_float(c.get("high")) - to_float(c.get("low")))
+        for c in ohlcv[-21:-1]
+        if to_float(c.get("high")) > to_float(c.get("low"))
+    ]
+    avg_range = sum(ranges) / len(ranges) if ranges else (high - low)
+    candle_range = high - low
+    body = abs(close - open_f)
+    upper_wick = max(0.0, high - max(open_f, close))
+    lower_wick = max(0.0, min(open_f, close) - low)
+
+    close_position = (close - low) / candle_range
+    body_ratio = body / candle_range
+    upper_wick_pct = upper_wick / candle_range
+    lower_wick_pct = lower_wick / candle_range
+    spread_ratio = candle_range / avg_range if avg_range > 0 else 1.0
+    price_up = close > prev_close
+    candle_bullish = close > open_f
+
+    signals: List[str] = []
+    score = 50.0
+
+    bullish_effort = (
+        price_up
+        and candle_bullish
+        and rvol >= 1.2
+        and close_position >= 0.65
+        and body_ratio >= 0.35
+        and upper_wick_pct <= 0.35
+    )
+    healthy_advance = (
+        price_up
+        and close_position >= 0.55
+        and 0.75 <= rvol <= 1.8
+        and upper_wick_pct <= 0.35
+    )
+    absorption = rvol >= 1.5 and lower_wick_pct >= 0.35 and close_position >= 0.55
+    stopping_volume = (not price_up) and rvol >= 2.0 and lower_wick_pct >= 0.35 and close_position >= 0.45
+    no_demand = price_up and rvol < 0.7 and spread_ratio <= 0.95 and upper_wick_pct >= 0.20
+    upthrust = high > prev_high and close_position <= 0.45 and upper_wick_pct >= 0.35 and rvol >= 1.3
+    effort_no_result = rvol >= 1.8 and body_ratio <= 0.35 and 0.30 <= close_position <= 0.70
+    climax_extension = change_pct > 15 and rvol > 2.0 and (close_position < 0.65 or upper_wick_pct >= 0.30)
+
+    if bullish_effort:
+        signals.append("BULLISH_EFFORT_CONFIRMED")
+        score += 18
+    elif healthy_advance:
+        signals.append("HEALTHY_ADVANCE")
+        score += 8
+
+    if absorption:
+        signals.append("ABSORPTION")
+        score += 12
+    if stopping_volume:
+        signals.append("STOPPING_VOLUME")
+        score += 8
+    if close_position >= 0.70:
+        score += 8
+    elif close_position <= 0.35:
+        score -= 10
+    if spread_ratio >= 1.25 and close_position >= 0.60:
+        score += 6
+    elif spread_ratio >= 1.6 and close_position <= 0.45:
+        score -= 8
+    if upper_wick_pct >= 0.45:
+        signals.append("UPPER_WICK_REJECTION")
+        score -= 12
+    if rvol >= 1.5 and not price_up:
+        signals.append("HIGH_VOLUME_PRICE_DOWN")
+        score -= 15
+    if no_demand:
+        signals.append("NO_DEMAND")
+        score -= 12
+    if effort_no_result:
+        signals.append("EFFORT_NO_RESULT")
+        score -= 12
+    if upthrust:
+        signals.append("UPTHRUST")
+        score -= 25
+    if climax_extension:
+        signals.append("CLIMAX_EXTENSION_RISK")
+        score -= 30
+
+    distribution_risk = any(
+        sig in signals
+        for sig in ("UPTHRUST", "CLIMAX_EXTENSION_RISK", "HIGH_VOLUME_PRICE_DOWN")
+    ) or sum(sig in signals for sig in ("NO_DEMAND", "EFFORT_NO_RESULT", "UPPER_WICK_REJECTION")) >= 2
+    confirmation = any(sig in signals for sig in ("BULLISH_EFFORT_CONFIRMED", "HEALTHY_ADVANCE", "ABSORPTION", "STOPPING_VOLUME"))
+    score = round(clamp(score), 2)
+    if distribution_risk:
+        state = "VPA_DISTRIBUTION_RISK"
+    elif score >= 68:
+        state = "VPA_CONFIRMED"
+    elif score <= 42:
+        state = "VPA_WARNING"
+    else:
+        state = "VPA_NEUTRAL"
+
+    return {
+        "score": score,
+        "state": state,
+        "signals": list(dict.fromkeys(signals)),
+        "distribution_risk": bool(distribution_risk),
+        "confirmation": bool(confirmation),
+        "close_position": round(close_position, 2),
+        "body_ratio": round(body_ratio, 2),
+        "upper_wick_pct": round(upper_wick_pct, 2),
+        "lower_wick_pct": round(lower_wick_pct, 2),
+        "spread_ratio": round(spread_ratio, 2),
+        "rvol": round(float(rvol or 0), 2),
+        "change_pct": round(float(change_pct or 0), 2),
     }
 
 
@@ -1019,6 +1171,10 @@ def calc_bfd_presort_score(candidate, mode="swing"):
     ma5           = to_float(candidate.get("ma5", price))
     candle_bullish = candidate.get("candle_bullish", False)
     candle_body   = to_float(candidate.get("candle_body_pct", 0))
+    vpa = candidate.get("vpa") if isinstance(candidate.get("vpa"), dict) else {}
+    vpa_score = to_float(vpa.get("score") or candidate.get("vpa_score"), 50)
+    vpa_signals = set(vpa.get("signals") or candidate.get("vpa_signals") or [])
+    vpa_distribution_risk = bool(vpa.get("distribution_risk") or candidate.get("vpa_distribution_risk"))
     liq_value = to_float(candidate.get("_liq_value", 0))
     liq_freq  = to_float(candidate.get("_liq_freq", 0))
     idx_tier  = int(candidate.get("_idx_tier", 2))
@@ -1029,6 +1185,20 @@ def calc_bfd_presort_score(candidate, mode="swing"):
     if change_pct > 10 and rvol > 1.8:
         score -= 30
     elif change_pct > 7 and rvol > 1.5:
+        score -= 15
+
+    # Volume Price Analysis variables stay embedded in scoring, not as a
+    # separate user-facing filter.
+    score += max(-22.0, min(20.0, (vpa_score - 50.0) * 0.45))
+    if vpa_distribution_risk:
+        score -= 18
+    if "BULLISH_EFFORT_CONFIRMED" in vpa_signals:
+        score += 8
+    if "ABSORPTION" in vpa_signals or "STOPPING_VOLUME" in vpa_signals:
+        score += 5
+    if "NO_DEMAND" in vpa_signals:
+        score -= 8
+    if "UPTHRUST" in vpa_signals or "CLIMAX_EXTENSION_RISK" in vpa_signals:
         score -= 15
 
     if mode == "swing":
@@ -2058,6 +2228,7 @@ def signal_from_score(score: float) -> str:
 
 def build_reason(item: Dict[str, Any]) -> str:
     patterns = [p["name"] for p in item.get("patterns", [])]
+    vpa = item.get("vpa") if isinstance(item.get("vpa"), dict) else {}
     bits = [
         f"Score {item['final_score']}",
         f"RVOL {item.get('rvol')}",
@@ -2068,6 +2239,11 @@ def build_reason(item: Dict[str, Any]) -> str:
     ]
     if patterns:
         bits.append("pattern " + ", ".join(patterns[:3]))
+    if vpa:
+        bits.append(f"VPA {vpa.get('state')} {vpa.get('score')}")
+        signals = vpa.get("signals") or []
+        if signals:
+            bits.append("VPA signals " + "/".join(str(s) for s in signals[:3]))
     return "; ".join(bits)
 
 
@@ -2157,6 +2333,14 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             rag_boost=to_float(rag.get("boost")),
             akumulasi_score=akumulasi_score,
         )
+        vpa = candidate.get("vpa") if isinstance(candidate.get("vpa"), dict) else {}
+        vpa_score = to_float(vpa.get("score"), 50)
+        fscore = round(clamp(fscore * 0.90 + vpa_score * 0.10), 2)
+        if vpa.get("distribution_risk"):
+            fscore = round(clamp(fscore - 8), 2)
+        elif vpa.get("confirmation"):
+            fscore = round(clamp(fscore + 3), 2)
+
         money_maker = {"available": False}
         if analyze_money_maker_context is not None:
             money_maker_previous = {}
@@ -2193,6 +2377,11 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             "change_pct": candidate.get("change_pct"),
             "rvol": candidate.get("rvol"),
             "volume": candidate.get("volume"),
+            "vpa": vpa,
+            "vpa_score": vpa.get("score"),
+            "vpa_state": vpa.get("state"),
+            "vpa_signals": vpa.get("signals") or [],
+            "vpa_distribution_risk": bool(vpa.get("distribution_risk")),
             "data_status": candidate.get("date_status"),
             "data_warning": candidate.get("data_warning"),
             "opportunity_lane": candidate.get("_opportunity_lane"),
@@ -2220,7 +2409,12 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             "patterns": pattern.get("patterns"),
             "rag_boost": rag.get("boost"),
             "rag": rag,
-            "disqualify": bool(bandarm.get("disqualify") or foreign.get("heavy_sell") or money_maker.get("verdict") == "FLOW_OUT_AVOID"),
+            "disqualify": bool(
+                bandarm.get("disqualify")
+                or foreign.get("heavy_sell")
+                or money_maker.get("verdict") == "FLOW_OUT_AVOID"
+                or vpa.get("distribution_risk")
+            ),
             "disqualify_reason": None,
             "reason": "",
         }
@@ -2231,7 +2425,7 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             extended = 10 <= chg < 20
             extreme = chg >= 20
             tier = "SWEET_SPOT_5_10" if sweet_spot else "EXTENDED_10_20" if extended else "EXTREME_20_PLUS"
-            executable = sweet_spot
+            executable = sweet_spot and not vpa.get("distribution_risk")
             result["top_gainer_opportunity"] = {
                 "available": executable,
                 "lane": candidate.get("_opportunity_lane") or "PRICE_MOVER_MOMENTUM",
@@ -2240,11 +2434,14 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
                 "opportunity_tier": tier,
                 "executable": executable,
                 "radar_only": not executable,
-                "execution_bias": "MOMENTUM_CONFIRMATION_5_10" if executable else "EXTENDED_NO_CHASE" if extended else "EXTREME_EXTENSION_RISK",
-                "preferred_entry": "Breakout continuation or VWAP pullback with bid refill; no market chase." if executable else "Radar only; wait deeper reset/base before any execution review.",
+                "execution_bias": "MOMENTUM_CONFIRMATION_5_10" if executable else "VPA_DISTRIBUTION_RISK_RADAR" if vpa.get("distribution_risk") else "EXTENDED_NO_CHASE" if extended else "EXTREME_EXTENSION_RISK",
+                "preferred_entry": "Breakout continuation or VWAP pullback with bid refill; no market chase." if executable else "Radar only; wait reset/base and VPA improvement before any execution review.",
                 "risk_rule": "Avoid market chase; invalid below 5m base low/VWAP loss. Size tiny until broker/orderbook confirms.",
                 "exit_rule": "Scale out into extension; trail under higher-low or VWAP for intraday/scalping.",
                 "upgrade_rule": "Only 5%-10% movers can enter execution lane; above 10% is no-chase radar unless it resets cleanly.",
+                "vpa_state": vpa.get("state"),
+                "vpa_score": vpa.get("score"),
+                "vpa_signals": vpa.get("signals") or [],
             }
             result["watchlist_only"] = True
             if result.get("data_status") == "STALE_DAILY_TOP_GAINER_FALLBACK":
@@ -2258,13 +2455,17 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
                 result["no_chase_radar"] = True
                 result["disqualify"] = True
                 result["disqualify_reason"] = (
-                    f"Top gainer {chg:.2f}% di luar sweet spot 5%-10%; no-chase radar only."
+                    "VPA distribution risk; top gainer diturunkan menjadi no-chase radar."
+                    if vpa.get("distribution_risk")
+                    else f"Top gainer {chg:.2f}% di luar sweet spot 5%-10%; no-chase radar only."
                 )
             if extreme:
                 result["top_gainer_opportunity"]["preferred_entry"] = "No chase; extreme/ARA-risk extension. Observe distribution risk and wait next-cycle setup."
 
         if result.get("no_chase_radar"):
             pass
+        elif vpa.get("distribution_risk"):
+            result["disqualify_reason"] = "VPA distribution risk: " + "/".join(vpa.get("signals") or [])
         elif bandarm.get("disqualify"):
             result["disqualify_reason"] = "Bandarmology phase/MACD disqualify"
         elif foreign.get("heavy_sell"):
@@ -2301,7 +2502,8 @@ async def build_opening_seed_radar(scored: List[Dict[str, Any]], mode: Mode) -> 
             price = to_float(metrics.get("price"))
             if chg < 5 or chg >= 24 or price < MODE_CONFIG[mode]["price_min"] or price > MODE_CONFIG[mode]["price_max"]:
                 continue
-            sweet_spot = 5 <= chg < 10
+            vpa = metrics.get("vpa") if isinstance(metrics.get("vpa"), dict) else {}
+            sweet_spot = 5 <= chg < 10 and not vpa.get("distribution_risk")
             tier = "SWEET_SPOT_5_10" if sweet_spot else "EXTENDED_10_20" if chg < 20 else "EXTREME_20_PLUS"
             radar.append({
                 "ticker": code,
@@ -2312,13 +2514,22 @@ async def build_opening_seed_radar(scored: List[Dict[str, Any]], mode: Mode) -> 
                 "change_pct": round(chg, 2),
                 "rvol": metrics.get("rvol"),
                 "volume": metrics.get("volume"),
+                "vpa": vpa,
+                "vpa_score": vpa.get("score"),
+                "vpa_state": vpa.get("state"),
+                "vpa_signals": vpa.get("signals") or [],
+                "vpa_distribution_risk": bool(vpa.get("distribution_risk")),
                 "data_status": metrics.get("date_status") or "OPENING_SEED_RADAR",
                 "data_warning": metrics.get("data_warning") or "Opening radar dari baseline ticker; gunakan Analytical untuk validasi eksekusi.",
                 "final_score": 0,
                 "signal": "RADAR" if not sweet_spot else "WATCHLIST",
                 "watchlist_only": True,
                 "disqualify": not sweet_spot,
-                "disqualify_reason": None if sweet_spot else f"Top gainer {chg:.2f}% di luar sweet spot 5%-10%; no-chase radar only.",
+                "disqualify_reason": None if sweet_spot else (
+                    "VPA distribution risk; opening mover no-chase radar only."
+                    if vpa.get("distribution_risk")
+                    else f"Top gainer {chg:.2f}% di luar sweet spot 5%-10%; no-chase radar only."
+                ),
                 "reason": "Opening momentum radar; bukan sinyal beli otomatis.",
                 "top_gainer_opportunity": {
                     "available": sweet_spot,
@@ -2328,11 +2539,14 @@ async def build_opening_seed_radar(scored: List[Dict[str, Any]], mode: Mode) -> 
                     "opportunity_tier": tier,
                     "executable": sweet_spot,
                     "radar_only": not sweet_spot,
-                    "execution_bias": "MOMENTUM_CONFIRMATION_5_10" if sweet_spot else "EXTENDED_NO_CHASE" if chg < 20 else "EXTREME_EXTENSION_RISK",
-                    "preferred_entry": "Breakout continuation or VWAP pullback with bid refill; no market chase." if sweet_spot else "Radar only; wait deeper reset/base before any execution review.",
+                    "execution_bias": "MOMENTUM_CONFIRMATION_5_10" if sweet_spot else "VPA_DISTRIBUTION_RISK_RADAR" if vpa.get("distribution_risk") else "EXTENDED_NO_CHASE" if chg < 20 else "EXTREME_EXTENSION_RISK",
+                    "preferred_entry": "Breakout continuation or VWAP pullback with bid refill; no market chase." if sweet_spot else "Radar only; wait reset/base and VPA improvement before any execution review.",
                     "risk_rule": "Avoid market chase; validate with Analytical, orderbook, and broker flow.",
                     "exit_rule": "Scale out into extension; trail under higher-low or VWAP for intraday/scalping.",
                     "upgrade_rule": "Only 5%-10% movers can enter execution lane; above 10% is no-chase radar unless it resets cleanly.",
+                    "vpa_state": vpa.get("state"),
+                    "vpa_score": vpa.get("score"),
+                    "vpa_signals": vpa.get("signals") or [],
                 },
                 "no_chase_radar": not sweet_spot,
             })
@@ -2395,6 +2609,8 @@ def build_watchlist_fallback(scored: List[Dict[str, Any]], mode: Mode, limit: in
 
         phase = str(item.get("phase", "")).lower()
         if phase in {"distribution", "decline"}:
+            continue
+        if item.get("vpa_distribution_risk") or (item.get("vpa") or {}).get("distribution_risk"):
             continue
         if item.get("money_maker", {}).get("verdict") == "FLOW_OUT_AVOID":
             continue
