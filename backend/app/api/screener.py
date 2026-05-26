@@ -632,8 +632,15 @@ async def build_universe(mode: str) -> list:
         value  = s.get("_liq_value", 0)
         freq   = s.get("_liq_freq", 0)
         ticker = s.get("ticker", "")
+        raw_source = ""
+        if isinstance(s.get("raw"), dict):
+            raw_source = str(s["raw"].get("source") or "")
 
         if value == 0 and freq == 0 and s.get("_opportunity_lane") == "top_gainer":
+            s["_liquidity_fallback"] = True
+            soft.append(s)
+            continue
+        if value == 0 and freq == 0 and raw_source == "default_universe_seed":
             s["_liquidity_fallback"] = True
             soft.append(s)
             continue
