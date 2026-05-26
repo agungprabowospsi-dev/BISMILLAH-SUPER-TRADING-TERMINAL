@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 import json
 import numpy as np
 import os
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 from sqlalchemy import text as sql_text
 from app.core.database import AsyncSessionLocal as _AsyncSessionLocal
 from app.ml.signal_quality import predict_win_probability, get_model_status
@@ -96,6 +96,11 @@ class ScreenerContext(BaseModel):
     market_execution_regime: str = ""
     screener_lane: str = ""
     analytic_expectation: str = ""
+    vpa: dict = Field(default_factory=dict)
+    vpa_score: float = 0.0
+    vpa_state: str = ""
+    vpa_signals: list = Field(default_factory=list)
+    vpa_distribution_risk: bool = False
 
 class AnalyticRequest(BaseModel):
     ticker: str
@@ -485,6 +490,301 @@ def _finalize_action_plan_levels(action: dict, atr: float, mode: str) -> dict:
         "take_profit_2": fixed[1],
         "take_profit_3": fixed[2],
     })
+    return action
+
+
+def _risk_reward_profile(action: dict, mode: str) -> dict:
+    entry = float((action or {}).get("entry_price") or (action or {}).get("trigger_price") or 0)
+    stop = float((action or {}).get("stop_loss") or (action or {}).get("invalidation_price") or 0)
+    risk = entry - stop if entry > 0 and stop > 0 and stop < entry else 0
+    risk_pct = (risk / entry * 100) if entry > 0 and risk > 0 else 0
+    rr = {}
+    for key, label in (("take_profit_1", "tp1"), ("take_profit_2", "tp2"), ("take_profit_3", "tp3")):
+        tp = float((action or {}).get(key) or 0)
+        rr[label] = round((tp - entry) / risk, 2) if risk > 0 and tp > entry else 0
+    return {
+        "entry": entry,
+        "stop_loss": stop,
+        "risk": round(risk, 2),
+        "risk_pct": round(risk_pct, 2),
+        "tp_rr": rr,
+        "rr_ladder": [rr.get("tp1", 0), rr.get("tp2", 0), rr.get("tp3", 0)],
+        "mode": mode,
+    }
+
+
+def build_analytic_validation_matrix(
+    *,
+    market_execution_regime: str,
+    screener_context: Any,
+    action_plan: dict,
+    all_engines: dict,
+    enrichment_verdict: str,
+    phase2_verdict: str,
+    wyckoff_phase: str,
+    weinstein_stage: int,
+    vsa_signal: str,
+    money_maker: dict,
+    orderbook_execution: dict,
+    ohlcv: List[Dict[str, Any]],
+    rvol: float,
+    change_pct: float,
+    mode: str,
+) -> Dict[str, Any]:
+    """Market-regime-first validation matrix for Analytic execution."""
+    sc = _context_dict(screener_context)
+    regime = str(market_execution_regime or "MIXED_MARKET").upper()
+    lane = str(sc.get("screener_lane") or sc.get("opportunity_lane") or "DIRECT_ANALYTIC").upper()
+    top_opp = sc.get("top_gainer_opportunity") if isinstance(sc.get("top_gainer_opportunity"), dict) else {}
+    mode_l = str(mode or "swing").lower()
+
+    def row(name: str, status: str, summary: str, **data: Any) -> Dict[str, Any]:
+        return {"name": name, "status": status, "summary": summary, "data": data}
+
+    engine_score = float((all_engines or {}).get("composite_score") or (all_engines or {}).get("score") or 0)
+    engine_total = int((all_engines or {}).get("total_engines") or len((all_engines or {}).get("engines") or []) or 35)
+    engine_bull = int((all_engines or {}).get("bullish_count") or 0)
+    engine_bear = int((all_engines or {}).get("bearish_count") or 0)
+    if engine_score >= 65 and engine_bull >= engine_bear:
+        engine_status = "PASS"
+    elif engine_score < 50 or engine_bear > engine_bull + 2:
+        engine_status = "WAIT"
+    else:
+        engine_status = "CAUTION"
+    engine_row = row(
+        "34/35 Engines Baseline",
+        engine_status,
+        f"{engine_total} engines score {engine_score:.1f}; bullish {engine_bull}, bearish {engine_bear}.",
+        score=round(engine_score, 2),
+        total_engines=engine_total,
+        bullish_count=engine_bull,
+        bearish_count=engine_bear,
+        signal=(all_engines or {}).get("signal"),
+    )
+
+    enh_status = "PASS"
+    enh_reasons: List[str] = []
+    if str(enrichment_verdict).upper() == "SKIP":
+        enh_status = "BLOCK"
+        enh_reasons.append("Enhancement SKIP")
+    elif str(phase2_verdict).upper() in ("SELL", "STRONG_SELL"):
+        enh_status = "WAIT"
+        enh_reasons.append(f"Phase2 {phase2_verdict}")
+    elif str(wyckoff_phase).upper() in ("DISTRIBUTION", "MARKDOWN") or int(weinstein_stage or 0) == 4:
+        enh_status = "WAIT"
+        enh_reasons.append(f"Structure {wyckoff_phase}/Stage {weinstein_stage}")
+    elif str(vsa_signal).upper() in ("UP_THRUST", "NO_DEMAND"):
+        enh_status = "WAIT"
+        enh_reasons.append(f"VSA {vsa_signal}")
+    if not enh_reasons:
+        enh_reasons.append(f"Enhancement {enrichment_verdict}; Phase2 {phase2_verdict}")
+    enhancement_row = row(
+        "Enhancement / Phase 2",
+        enh_status,
+        "; ".join(enh_reasons),
+        enrichment_verdict=enrichment_verdict,
+        phase2_verdict=phase2_verdict,
+        wyckoff_phase=wyckoff_phase,
+        weinstein_stage=weinstein_stage,
+        vsa_signal=vsa_signal,
+    )
+
+    risk_flags = set((money_maker or {}).get("risk_flags") or [])
+    hard_flow_flags = {"RETAIL_EXIT_LIQUIDITY", "CLIMAX_DISTRIBUTION_RISK", "BFD_FLOW_REVERSAL", "ARA_RISK", "ARB_RISK"}
+    mm_verdict = str((money_maker or {}).get("verdict") or "").upper()
+    bfd_score = int((money_maker or {}).get("bfd_score") or 0)
+    if mm_verdict == "FLOW_OUT_AVOID" or risk_flags.intersection(hard_flow_flags):
+        bandarmology_status = "BLOCK"
+    elif mm_verdict == "STRONG_FLOW_IN" or bfd_score >= 4:
+        bandarmology_status = "PASS"
+    elif mm_verdict in ("EARLY_FLOW", "WATCH_FLOW") or bfd_score >= 3:
+        bandarmology_status = "CONDITIONAL"
+    else:
+        bandarmology_status = "WAIT"
+    bandarmology_row = row(
+        "Bandarmology / Money Maker",
+        bandarmology_status,
+        f"{mm_verdict or 'NO_CLEAR_FLOW'}; BFD {bfd_score}/5; risk {', '.join(sorted(risk_flags)) or 'clear'}.",
+        verdict=mm_verdict,
+        phase=(money_maker or {}).get("phase"),
+        score=(money_maker or {}).get("score"),
+        bfd_score=bfd_score,
+        risk_flags=sorted(risk_flags),
+        execution_intelligence=(money_maker or {}).get("execution_intelligence", {}),
+    )
+
+    ob_available = bool((orderbook_execution or {}).get("available"))
+    ob_reco = str((orderbook_execution or {}).get("execution_recommendation") or "").upper()
+    ob_bias = str((orderbook_execution or {}).get("liquidity_bias") or "").lower()
+    ob_spread = str((orderbook_execution or {}).get("spread_health") or "").lower()
+    if not ob_available:
+        orderbook_status = "CONDITIONAL"
+        orderbook_summary = "Orderbook belum tersedia; entry butuh konfirmasi tambahan."
+    elif (orderbook_execution or {}).get("fake_bid_wall") or ob_spread == "wide":
+        orderbook_status = "WAIT"
+        orderbook_summary = "Orderbook belum layak: spread wide/fake bid wall."
+    elif ob_bias == "ask_dominant" or ob_reco == "WAIT_ASK_ABSORPTION":
+        orderbook_status = "WAIT"
+        orderbook_summary = "Ask dominan; tunggu absorption atau ask ditembus."
+    elif ob_spread == "healthy" and ob_bias in ("bid_dominant", "balanced"):
+        orderbook_status = "PASS"
+        orderbook_summary = f"Orderbook {ob_bias}; spread sehat."
+    else:
+        orderbook_status = "CAUTION"
+        orderbook_summary = (orderbook_execution or {}).get("reason") or "Orderbook netral."
+    orderbook_row = row(
+        "Orderbook Microstructure",
+        orderbook_status,
+        orderbook_summary,
+        recommendation=ob_reco,
+        liquidity_bias=ob_bias,
+        spread_health=ob_spread,
+        bid_ask_ratio=(orderbook_execution or {}).get("bid_ask_ratio"),
+        fake_bid_wall=bool((orderbook_execution or {}).get("fake_bid_wall")),
+        fake_ask_wall=bool((orderbook_execution or {}).get("fake_ask_wall")),
+    )
+
+    vpa = sc.get("vpa") if isinstance(sc.get("vpa"), dict) else {}
+    if not vpa:
+        try:
+            from app.api.screener import analyze_vpa_variables
+            vpa = analyze_vpa_variables(ohlcv, rvol=float(rvol or 0), change_pct=float(change_pct or 0))
+            vpa["source"] = "analytic_ohlcv"
+        except Exception as exc:
+            vpa = {"score": 50, "state": "VPA_NEUTRAL", "signals": [], "distribution_risk": False, "source": f"fallback:{type(exc).__name__}"}
+    vpa_distribution = bool(vpa.get("distribution_risk") or sc.get("vpa_distribution_risk"))
+    vpa_state = str(vpa.get("state") or sc.get("vpa_state") or "VPA_NEUTRAL")
+    vpa_score = float(vpa.get("score") or sc.get("vpa_score") or 50)
+    if vpa_distribution:
+        vpa_status = "BLOCK"
+    elif vpa_state == "VPA_CONFIRMED" or vpa_score >= 68:
+        vpa_status = "PASS"
+    elif vpa_state == "VPA_WARNING" or vpa_score <= 42:
+        vpa_status = "WAIT"
+    else:
+        vpa_status = "CAUTION"
+    vpa_row = row(
+        "VPA / Candle Power Volume",
+        vpa_status,
+        f"{vpa_state} score {vpa_score:.1f}; signals {', '.join(vpa.get('signals') or []) or 'none'}.",
+        **vpa,
+    )
+
+    risk = _risk_reward_profile(action_plan or {}, mode_l)
+    entry = float(risk.get("entry") or 0)
+    stop = float(risk.get("stop_loss") or 0)
+    risk_pct = float(risk.get("risk_pct") or 0)
+    tp1_rr = float((risk.get("tp_rr") or {}).get("tp1") or 0)
+    max_risk = {"scalping": 2.0, "intraday": 4.0, "swing": 8.0}.get(mode_l, 5.0)
+    if entry <= 0 or stop <= 0 or stop >= entry:
+        risk_status = "WAIT"
+        risk_summary = "Entry/SL belum valid untuk kontrak long."
+    elif risk_pct > max_risk * 1.75:
+        risk_status = "BLOCK"
+        risk_summary = f"Risk {risk_pct:.2f}% terlalu lebar untuk {mode_l}."
+    elif risk_pct > max_risk or tp1_rr < 1.0:
+        risk_status = "WAIT"
+        risk_summary = f"Risk/RR belum ideal: risk {risk_pct:.2f}%, TP1 RR {tp1_rr:.2f}."
+    else:
+        risk_status = "PASS"
+        risk_summary = f"Risk contract valid: risk {risk_pct:.2f}%, TP1 RR {tp1_rr:.2f}."
+    risk_row = row(
+        "Volatility / Risk Contract",
+        risk_status,
+        risk_summary,
+        **risk,
+        max_risk_pct=max_risk,
+    )
+
+    rows = [engine_row, enhancement_row, bandarmology_row, orderbook_row, vpa_row, risk_row]
+    hard_blocks = [r for r in rows if r["status"] == "BLOCK"]
+    waits = [r for r in rows if r["status"] == "WAIT"]
+    conditional = [r for r in rows if r["status"] == "CONDITIONAL"]
+    top_gainer_available = bool(top_opp.get("available"))
+    no_chase = bool(top_opp.get("radar_only") or lane == "NO_CHASE_RADAR" or sc.get("no_chase_radar"))
+
+    if hard_blocks:
+        final_status = "REJECTED"
+        user_position = "NO LONG ENTRY"
+    elif no_chase:
+        final_status = "RADAR"
+        user_position = "RADAR ONLY"
+    elif regime == "BAD_MARKET_OPPORTUNITY_ONLY" and top_gainer_available:
+        final_status = "CONDITIONAL"
+        user_position = "WAIT TRIGGER"
+    elif regime == "DEFENSIVE_NO_CHASE":
+        if bandarmology_status == "PASS" and vpa_status == "PASS" and orderbook_status == "PASS" and risk_status == "PASS":
+            final_status = "CONDITIONAL"
+            user_position = "CONDITIONAL BUY"
+        else:
+            final_status = "WAIT"
+            user_position = "WAIT CONFIRMATION"
+    elif waits or conditional:
+        final_status = "CONDITIONAL" if str((action_plan or {}).get("order_type") or "").upper() in ("CONDITIONAL_BUY_STOP", "WAIT_CLOSE_CONFIRMATION", "BUY_STOP_BREAKOUT") else "WAIT"
+        user_position = "CONDITIONAL BUY" if final_status == "CONDITIONAL" else "WAIT CONFIRMATION"
+    else:
+        final_status = "EXECUTABLE"
+        user_position = "EXECUTABLE BUY"
+
+    required_confirmations = [item["summary"] for item in waits + conditional]
+    if regime in ("BAD_MARKET_OPPORTUNITY_ONLY", "DEFENSIVE_NO_CHASE"):
+        required_confirmations.append("Regime defensif: entry hanya setelah trigger, VPA, Bandarmology, dan Orderbook sinkron.")
+
+    return {
+        "market_execution_regime": regime,
+        "screener_lane": lane or "DIRECT_ANALYTIC",
+        "analytic_expectation": sc.get("analytic_expectation") or "",
+        "final_status": final_status,
+        "user_position": user_position,
+        "hard_blocks": [r["name"] for r in hard_blocks],
+        "wait_layers": [r["name"] for r in waits],
+        "conditional_layers": [r["name"] for r in conditional],
+        "required_confirmations": list(dict.fromkeys(required_confirmations)),
+        "matrix": rows,
+        "vpa": vpa,
+        "policy": "market_regime_first_then_engines_enhancement_bandarmology_orderbook_vpa_risk",
+    }
+
+
+def apply_analytic_validation_to_action_plan(action_plan: dict, validation: Dict[str, Any]) -> dict:
+    """Apply validation matrix to final action plan without deleting setup details."""
+    action = dict(action_plan or {})
+    status = str((validation or {}).get("final_status") or "").upper()
+    confirmations = list(action.get("confirmation_needed") or [])
+    invalidations = list(action.get("invalidation_rules") or [])
+    confirmations.extend((validation or {}).get("required_confirmations") or [])
+    action["setup_validation"] = validation
+    action["confirmation_needed"] = list(dict.fromkeys(confirmations))
+
+    if status == "REJECTED":
+        hard_blocks = ", ".join((validation or {}).get("hard_blocks") or [])
+        action.update({
+            "decision": "NO GO",
+            "setup_type": "NO_LONG_ENTRY",
+            "order_type": "NO_LONG_ENTRY",
+            "entry_zone_low": 0,
+            "entry_zone_high": 0,
+            "next_action": f"Setup long dibatalkan oleh validation matrix: {hard_blocks or 'hard block aktif'}.",
+            "decision_modifier": "ANALYTIC_VALIDATION_HARD_BLOCK",
+        })
+        invalidations.append("Hard block validation matrix tetap aktif.")
+    elif status == "RADAR":
+        action.update({
+            "decision": "WAIT",
+            "setup_type": action.get("setup_type") or "RADAR_ONLY",
+            "order_type": "WATCHLIST_RADAR",
+            "watchlist_only": True,
+            "next_action": "Radar only; tunggu reset/base dan validation matrix membaik.",
+            "decision_modifier": "ANALYTIC_VALIDATION_RADAR_ONLY",
+        })
+    elif status in ("WAIT", "CONDITIONAL"):
+        if str(action.get("order_type") or "").upper() in ("MARKET_ORDER", "MARKET_MOMENTUM"):
+            action["order_type"] = "WAIT_CLOSE_CONFIRMATION"
+        action["decision"] = "WAIT"
+        action["decision_modifier"] = action.get("decision_modifier") or "ANALYTIC_VALIDATION_CONFIRMATION_REQUIRED"
+        action["next_action"] = action.get("next_action") or "Tunggu confirmation validation matrix sebelum entry."
+
+    action["invalidation_rules"] = list(dict.fromkeys(invalidations))
     return action
 
 
@@ -1729,6 +2029,34 @@ Top Brokers: {", ".join(top_brokers[:5])}
                 market_execution_regime = "NORMAL_GREEN_MARKET"
             else:
                 market_execution_regime = "MIXED_MARKET"
+
+        analytic_change_pct = (
+            live_context_change_pct
+            if live_context_change_pct is not None
+            else ((current - ohlcv[-2]["close"]) / ohlcv[-2]["close"] * 100) if len(ohlcv) >= 2 and ohlcv[-2]["close"] else 0
+        )
+        setup_validation = build_analytic_validation_matrix(
+            market_execution_regime=market_execution_regime,
+            screener_context=req.screener_context,
+            action_plan=action_plan,
+            all_engines=all_engines,
+            enrichment_verdict=enrichment_verdict,
+            phase2_verdict=phase2_verdict,
+            wyckoff_phase=wyckoff_phase,
+            weinstein_stage=weinstein_stage,
+            vsa_signal=vsa_signal,
+            money_maker=money_maker,
+            orderbook_execution=orderbook_execution,
+            ohlcv=ohlcv,
+            rvol=rvol,
+            change_pct=analytic_change_pct,
+            mode=req.mode,
+        )
+        action_plan = apply_analytic_validation_to_action_plan(action_plan, setup_validation)
+        opportunity_execution = action_plan.get("opportunity_execution") or opportunity_execution
+        watchlist_alignment = action_plan.get("watchlist_alignment") or watchlist_alignment
+        screener_alignment = action_plan.get("screener_alignment") or screener_alignment
+
         setup_family = classify_analytic_setup_family(
             action_plan=action_plan,
             setup_type=setup_type,
@@ -1754,7 +2082,8 @@ Top Brokers: {", ".join(top_brokers[:5])}
         action_plan["setup_family"] = setup_family
         action_plan["execution_router"] = execution_router
         action_plan["market_execution_regime"] = market_execution_regime
-        no_long_entry = entry_method == "NO_LONG_ENTRY"
+        action_plan["setup_validation"] = setup_validation
+        no_long_entry = str(action_plan.get("order_type") or entry_method) == "NO_LONG_ENTRY"
         response_entry = 0.0 if no_long_entry else float(action_plan.get("entry_price") or entry or 0)
         response_sl = float(action_plan.get("stop_loss") or sl or 0)
         response_tp1 = float(action_plan.get("take_profit_1") or 0)
@@ -1784,6 +2113,7 @@ Money Maker Patterns: {", ".join([p.get('name','') for p in money_maker.get('pat
 Screener Opportunity Alignment: {opportunity_execution.get('mode', watchlist_alignment.get('mode', 'normal'))} | Active {opportunity_execution.get('active', watchlist_alignment.get('active', False))} | Bias {opportunity_execution.get('execution_bias', 'watchlist_radar')} | Policy {opportunity_execution.get('policy', 'observation_only')}
 Screener Candidate Alignment: {screener_alignment.get('status', 'normal')} | Grade {screener_alignment.get('grade', 'n/a')} | Score {screener_alignment.get('score', 'n/a')}
 Engine: {all_engines.get('bullish_count', 0)} bullish, {all_engines.get('bearish_count', 0)} bearish dari 10 engines
+Analytic Validation Matrix: {setup_validation.get('final_status')} | User Position {setup_validation.get('user_position')} | Hard Blocks {", ".join(setup_validation.get('hard_blocks', [])) or "none"} | Wait Layers {", ".join(setup_validation.get('wait_layers', [])) or "none"}
 {market_regime_context}
 {foreign_flow_context}
 {price_dist_context}
@@ -1828,6 +2158,9 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "market_execution_regime": market_execution_regime,
             "setup_type": setup_type,
             "setup_family": setup_family,
+            "setup_validation": setup_validation,
+            "validation_matrix": setup_validation.get("matrix", []),
+            "validation_status": setup_validation.get("final_status"),
             "execution_router": execution_router,
             "execution_status": execution_router.get("status"),
             "user_position": execution_router.get("user_position"),
