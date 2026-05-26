@@ -392,6 +392,8 @@ DEFAULT_UNIVERSE_TICKERS = [
     "KLBF", "MIKA", "HEAL", "SILO", "TSPC",
     # Popular liquid second liners
     "ARTO", "EMTK", "SCMA", "ERAA", "MDIY", "RAJA", "CUAN", "BREN", "PTRO", "TOBA",
+    # Opening momentum/top-gainer radar names often outside IDX80 coverage
+    "TPIA", "NZIA", "SIPD", "FILM", "BUMI", "BIPI", "BUVA", "BRPT", "MBMA", "NCKL",
 ]
 
 def fallback_stock_universe() -> List[Dict[str, Any]]:
@@ -406,6 +408,24 @@ def fallback_stock_universe() -> List[Dict[str, Any]]:
         }
         for ticker in DEFAULT_UNIVERSE_TICKERS
     ]
+
+
+def merge_default_universe(stocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    by_code = {str(s.get("ticker") or s.get("code") or "").upper(): s for s in stocks}
+    for seed in DEFAULT_UNIVERSE_TICKERS:
+        code = seed.upper()
+        if code in by_code:
+            continue
+        stocks.append({
+            "ticker": code,
+            "code": code,
+            "name": code,
+            "sector": "",
+            "logo": None,
+            "raw": {"source": "default_universe_seed"},
+        })
+    return stocks
+
 
 async def get_stock_list_safe() -> List[Dict[str, Any]]:
     raw = await invesgo_call("get_stock_list")
@@ -478,6 +498,8 @@ async def build_universe(mode: str) -> list:
     stocks = await get_stock_list_safe()
     if not stocks:
         stocks = fallback_stock_universe()
+    else:
+        stocks = merge_default_universe(stocks)
 
     mover_map: Dict[str, Dict[str, Any]] = {}
     try:
@@ -866,13 +888,21 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
                 # Intraday: semi-ketat — change > 20% + rvol > 3 = SKIP
                 # change 15-20% masih bisa valid untuk intraday momentum
                 if change_pct_now > 20 and metrics["rvol"] > 3.0:
-                    return None
+                    metrics["date_status"] = metrics.get("date_status") or "NO_CHASE_ANTI_CLIMAX_RADAR"
+                    metrics["data_warning"] = (
+                        "Kena anti-climax intraday: kenaikan >20% dengan RVOL tinggi. "
+                        "Ditampilkan sebagai no-chase radar, bukan kandidat entry."
+                    )
             elif mode == "scalping":
                 # Scalping: longgar — hanya filter ARA murni (>= 24% sudah difilter)
                 # TAPI filter saham dengan rvol sangat ekstrem + change tinggi
                 # yang kemungkinan besar sudah di puncak distribusi
                 if change_pct_now > 22 and metrics["rvol"] > 5.0:
-                    return None
+                    metrics["date_status"] = metrics.get("date_status") or "NO_CHASE_ANTI_CLIMAX_RADAR"
+                    metrics["data_warning"] = (
+                        "Kena anti-climax scalping: extension terlalu tinggi dengan RVOL ekstrem. "
+                        "Ditampilkan sebagai no-chase radar."
+                    )
 
             if mode == "scalping" and metrics["downtrend_heavy"]:
                 return None
