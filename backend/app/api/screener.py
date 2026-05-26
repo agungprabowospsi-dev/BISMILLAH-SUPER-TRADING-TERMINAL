@@ -291,6 +291,87 @@ async def invesgo_call(method_name: str, *args: Any, **kwargs: Any) -> Any:
         return None
 
 
+def _pct_change(close: Any, prev: Any) -> float:
+    close_f = to_float(close)
+    prev_f = to_float(prev)
+    if close_f <= 0 or prev_f <= 0:
+        return 0.0
+    return ((close_f - prev_f) / prev_f) * 100
+
+
+async def build_market_execution_regime() -> Dict[str, Any]:
+    """Classify whether Screener should run normal execution or bad-market opportunity lanes."""
+    data = await invesgo_call("get_market_regime") or {}
+    ihsg = data.get("IHSG", {}) if isinstance(data, dict) else {}
+    lq45 = data.get("LQ45", {}) if isinstance(data, dict) else {}
+    top_gainer = data.get("top_gainer", []) if isinstance(data, dict) else []
+    top_loser = data.get("top_loser", []) if isinstance(data, dict) else []
+    ihsg_change = _pct_change(ihsg.get("close"), ihsg.get("prev"))
+    lq45_change = _pct_change(lq45.get("close"), lq45.get("prev"))
+    total_movers = len(top_gainer or []) + len(top_loser or [])
+    breadth = round((len(top_gainer or []) / total_movers) * 100, 1) if total_movers else 50.0
+    has_top_gainer = bool(top_gainer)
+
+    if ihsg_change <= -0.75 or lq45_change <= -0.75 or breadth < 40:
+        key = "BAD_MARKET_OPPORTUNITY_ONLY" if has_top_gainer else "DEFENSIVE_NO_CHASE"
+        label = "Bad Market Opportunity Only" if has_top_gainer else "Defensive No-Chase"
+        policy = "Full screener tetap dihitung, tetapi execution lane diprioritaskan hanya untuk mover kuat yang lolos guardrail."
+    elif ihsg_change >= 0.35 and lq45_change >= 0 and breadth >= 50:
+        key = "NORMAL_GREEN_MARKET"
+        label = "Normal Green Market"
+        policy = "Full-variable screener boleh menjadi execution candidate setelah Analytical validasi."
+    else:
+        key = "MIXED_MARKET"
+        label = "Mixed Market"
+        policy = "Full-variable screener berjalan, tetapi entry tetap butuh konfirmasi struktur dan flow."
+
+    return {
+        "key": key,
+        "label": label,
+        "policy": policy,
+        "ihsg_change_pct": round(ihsg_change, 2),
+        "lq45_change_pct": round(lq45_change, 2),
+        "breadth_pct": breadth,
+        "top_gainer_count": len(top_gainer or []),
+        "top_loser_count": len(top_loser or []),
+        "sample_top_gainers": [
+            str((x or {}).get("code") or (x or {}).get("ticker") or "").upper()
+            for x in (top_gainer or [])[:5]
+            if isinstance(x, dict)
+        ],
+    }
+
+
+def annotate_screener_lanes(items: List[Dict[str, Any]], market_regime: Dict[str, Any], watchlist_fallback_used: bool = False) -> List[Dict[str, Any]]:
+    """Attach user-facing lane labels that Analytical can consume without guessing."""
+    regime_key = (market_regime or {}).get("key", "MIXED_MARKET")
+    annotated: List[Dict[str, Any]] = []
+    for raw in items or []:
+        item = dict(raw)
+        top_opp = item.get("top_gainer_opportunity") if isinstance(item.get("top_gainer_opportunity"), dict) else {}
+        if item.get("no_chase_radar") or top_opp.get("radar_only"):
+            lane = "NO_CHASE_RADAR"
+            expectation = "RADAR_ONLY_WAIT_RESET_BASE"
+        elif top_opp.get("available"):
+            lane = "TOP_GAINER_OPPORTUNITY"
+            expectation = "ANALYTIC_CONDITIONAL_BUY_STOP_REVIEW"
+        elif item.get("watchlist_only") or watchlist_fallback_used:
+            lane = "WATCHLIST_ONLY"
+            expectation = "ANALYTIC_WAIT_CONFIRMATION_REVIEW"
+        elif regime_key in ("BAD_MARKET_OPPORTUNITY_ONLY", "DEFENSIVE_NO_CHASE"):
+            lane = "DEFENSIVE_QUALIFIED_CANDIDATE"
+            expectation = "ANALYTIC_STRICT_CONFIRMATION_REQUIRED"
+        else:
+            lane = "EXECUTION_CANDIDATE"
+            expectation = "ANALYTIC_FULL_VARIABLE_REVIEW"
+        item["market_execution_regime"] = regime_key
+        item["screener_lane"] = lane
+        item["analytic_expectation"] = expectation
+        item["execution_candidate"] = lane in ("EXECUTION_CANDIDATE", "TOP_GAINER_OPPORTUNITY")
+        annotated.append(item)
+    return annotated
+
+
 # ===== Phase 1: Universe Filter =====
 
 
@@ -418,6 +499,28 @@ async def build_universe(mode: str) -> list:
     except Exception as exc:
         logger.debug("[UNIVERSE] top gainer lane unavailable: %s", exc)
 
+    if not mover_map:
+        for row in stocks:
+            raw = row.get("raw", {}) if isinstance(row.get("raw"), dict) else {}
+            code = str(row.get("ticker") or row.get("code") or raw.get("code") or raw.get("ticker") or "").upper()
+            change_pct = to_float(
+                row.get("change_pct")
+                or row.get("change_percent")
+                or raw.get("change_pct")
+                or raw.get("change_percent")
+                or raw.get("pct_change")
+                or raw.get("percent")
+            )
+            if not code or change_pct < 5:
+                continue
+            mover_map[code] = {
+                "rank": len(mover_map) + 1,
+                "change_pct": change_pct,
+                "source": "stock_list_change_fallback",
+                "name": row.get("name") or raw.get("name") or code,
+                "price": row.get("price") or row.get("last_price") or raw.get("close") or raw.get("price") or raw.get("last_price"),
+            }
+
     if mover_map:
         by_code = {str(s.get("ticker") or s.get("code") or "").upper(): s for s in stocks}
         for code, meta in mover_map.items():
@@ -429,6 +532,7 @@ async def build_universe(mode: str) -> list:
             stock["_opportunity_lane"] = "top_gainer"
             stock["_mover_rank"] = meta.get("rank")
             stock["_mover_change_pct"] = meta.get("change_pct")
+            stock["_mover_price"] = meta.get("price")
             stock["_mover_source"] = meta.get("source")
 
     # Gate 1: drop suspended/delisted
@@ -682,7 +786,18 @@ async def prefilter_one(stock: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
                 last_date_raw = str(metrics.get("date") or "")[:10]
                 today_str = datetime.now().strftime("%Y-%m-%d")
                 if last_date_raw and last_date_raw != today_str:
-                    return None
+                    if is_top_gainer_lane and to_float(stock.get("_mover_change_pct")) >= 5:
+                        mover_price = to_float(stock.get("_mover_price"))
+                        if mover_price > 0:
+                            metrics["price"] = mover_price
+                        metrics["change_pct"] = round(to_float(stock.get("_mover_change_pct")), 2)
+                        metrics["date_status"] = "STALE_DAILY_TOP_GAINER_FALLBACK"
+                        metrics["data_warning"] = (
+                            "Daily OHLCV belum update hari ini; top gainer dipertahankan sebagai radar opening, "
+                            "bukan entry otomatis."
+                        )
+                    else:
+                        return None
 
             if metrics["volume"] <= 0:
                 return None
@@ -1999,6 +2114,8 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
             "change_pct": candidate.get("change_pct"),
             "rvol": candidate.get("rvol"),
             "volume": candidate.get("volume"),
+            "data_status": candidate.get("date_status"),
+            "data_warning": candidate.get("data_warning"),
             "opportunity_lane": candidate.get("_opportunity_lane"),
             "mover_rank": candidate.get("_mover_rank"),
             "mover_source": candidate.get("_mover_source"),
@@ -2051,6 +2168,13 @@ async def score_one(candidate: Dict[str, Any], mode: Mode, semaphore: asyncio.Se
                 "upgrade_rule": "Only 5%-10% movers can enter execution lane; above 10% is no-chase radar unless it resets cleanly.",
             }
             result["watchlist_only"] = True
+            if result.get("data_status") == "STALE_DAILY_TOP_GAINER_FALLBACK":
+                result["top_gainer_opportunity"]["data_quality"] = "OPENING_FEED_FALLBACK"
+                result["top_gainer_opportunity"]["radar_only"] = True
+                result["top_gainer_opportunity"]["executable"] = False
+                result["top_gainer_opportunity"]["preferred_entry"] = (
+                    "Radar opening only sampai official daily/live intraday data hari ini terkonfirmasi."
+                )
             if not executable:
                 result["no_chase_radar"] = True
                 result["disqualify"] = True
@@ -2215,6 +2339,7 @@ async def run_screener(request: ScreenerRequest) -> Dict[str, Any]:
     cfg = MODE_CONFIG[mode]
 
     try:
+        market_execution_regime = await build_market_execution_regime()
         universe = await build_universe(mode)
         candidates = await ohlcv_prefilter(universe, mode, request.filter_intensity)
         strict_candidate_count = len(candidates)
@@ -2231,6 +2356,27 @@ async def run_screener(request: ScreenerRequest) -> Dict[str, Any]:
             qualified = build_watchlist_fallback(scored, mode, request.limit)
             watchlist_fallback_used = bool(qualified)
         top = rank_top(qualified, request.limit)
+        top = annotate_screener_lanes(top, market_execution_regime, watchlist_fallback_used)
+        top_gainer_universe_count = len([x for x in universe if x.get("_opportunity_lane") == "top_gainer"])
+        opening_feed_fallback_count = len([x for x in scored if x.get("data_status") == "STALE_DAILY_TOP_GAINER_FALLBACK"])
+        top_gainer_opportunities = annotate_screener_lanes(
+            [
+                x for x in scored
+                if isinstance(x.get("top_gainer_opportunity"), dict)
+                and x["top_gainer_opportunity"].get("available")
+            ][:10],
+            market_execution_regime,
+            watchlist_fallback_used,
+        )
+        no_chase_radar = annotate_screener_lanes(
+            [
+                x for x in scored
+                if x.get("no_chase_radar")
+                or (isinstance(x.get("top_gainer_opportunity"), dict) and x["top_gainer_opportunity"].get("radar_only"))
+            ][:10],
+            market_execution_regime,
+            watchlist_fallback_used,
+        )
         official_enrichment = {"available": False}
         if enrich_screener_results is not None and top:
             try:
@@ -2243,6 +2389,7 @@ async def run_screener(request: ScreenerRequest) -> Dict[str, Any]:
             "status": "watchlist" if watchlist_fallback_used else "ok",
             "mode": mode,
             "message": "Strict screener kosong; menampilkan adaptive watchlist untuk observasi, bukan entry otomatis." if watchlist_fallback_used else "",
+            "market_execution_regime": market_execution_regime,
             "duration_sec": round(time.time() - started, 2),
             "universe_count": len(universe),
             "candidate_count": len(candidates),
@@ -2250,10 +2397,15 @@ async def run_screener(request: ScreenerRequest) -> Dict[str, Any]:
             "scored_count": len(scored),
             "qualified_count": len(qualified),
             "strict_qualified_count": strict_qualified_count,
+            "top_gainer_universe_count": top_gainer_universe_count,
+            "opening_feed_fallback_count": opening_feed_fallback_count,
             "adaptive_prefilter_used": adaptive_used,
             "watchlist_fallback_used": watchlist_fallback_used,
             "top_5": top,
             "results": top,
+            "execution_candidates": [x for x in top if x.get("screener_lane") in ("EXECUTION_CANDIDATE", "DEFENSIVE_QUALIFIED_CANDIDATE")],
+            "top_gainer_opportunities": top_gainer_opportunities,
+            "no_chase_radar": no_chase_radar,
             "official_enrichment": official_enrichment,
             "config": {
                 "rvol_min": cfg["rvol_min"],

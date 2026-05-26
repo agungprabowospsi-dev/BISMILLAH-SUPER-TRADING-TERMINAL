@@ -21,6 +21,20 @@ const getInstitutionalRank = (score = 0) => {
   return { grade: "C", label: "Low Conviction", color: "#6b7280" };
 };
 
+const LANE_META = {
+  EXECUTION_CANDIDATE: { label: "Execution Candidate", color: "#16a34a", bg: "#f0fdf4" },
+  DEFENSIVE_QUALIFIED_CANDIDATE: { label: "Strict Confirm", color: "#d97706", bg: "#fffbeb" },
+  TOP_GAINER_OPPORTUNITY: { label: "Top Gainer Opportunity", color: "#0284c7", bg: "#f0f9ff" },
+  NO_CHASE_RADAR: { label: "No-Chase Radar", color: "#b45309", bg: "#fffbeb" },
+  WATCHLIST_ONLY: { label: "Watchlist Only", color: "#64748b", bg: "#f8fafc" },
+}
+
+const normalizeStock = (x = {}) => ({
+  ...x,
+  score: x.final_score ?? x.score ?? 0,
+  last_price: x.price ?? x.last_price ?? 0,
+})
+
 const PROGRESS_MESSAGES = [
   "Memuat daftar saham IDX...",
   "Scanning 970 saham...",
@@ -87,20 +101,20 @@ export default function ScreenerPage() {
         status: data?.status || "ok",
         message: data?.message || "",
         backend_error: data?.error || "",
+        market_execution_regime: data?.market_execution_regime || null,
         candidate_count: data?.candidate_count ?? 0,
         scored_count: data?.scored_count ?? 0,
         qualified_count: data?.qualified_count ?? 0,
         strict_candidate_count: data?.strict_candidate_count,
         strict_qualified_count: data?.strict_qualified_count,
+        top_gainer_universe_count: data?.top_gainer_universe_count ?? 0,
+        opening_feed_fallback_count: data?.opening_feed_fallback_count ?? 0,
         adaptive_prefilter_used: Boolean(data?.adaptive_prefilter_used),
         watchlist_fallback_used: Boolean(data?.watchlist_fallback_used),
-        stocks: Array.isArray(stocks)
-          ? stocks.map((x) => ({
-              ...x,
-              score: x.final_score ?? x.score ?? 0,
-              last_price: x.price ?? x.last_price ?? 0,
-            }))
-          : [],
+        stocks: Array.isArray(stocks) ? stocks.map(normalizeStock) : [],
+        execution_candidates: Array.isArray(data?.execution_candidates) ? data.execution_candidates.map(normalizeStock) : [],
+        top_gainer_opportunities: Array.isArray(data?.top_gainer_opportunities) ? data.top_gainer_opportunities.map(normalizeStock) : [],
+        no_chase_radar: Array.isArray(data?.no_chase_radar) ? data.no_chase_radar.map(normalizeStock) : [],
         total_scanned: data?.universe_count || data?.total_scanned || 0,
       });
     } catch (err) {
@@ -171,8 +185,31 @@ export default function ScreenerPage() {
             <span style={S.metaBadge}>Scanned: {result.total_scanned}</span>
             <span style={S.metaBadge}>Candidates: {result.candidate_count}</span>
             <span style={S.metaBadge}>Qualified: {result.qualified_count}</span>
+            {result.top_gainer_universe_count > 0 && (
+              <span style={S.metaBadge}>Top Gainer Lane: {result.top_gainer_universe_count}</span>
+            )}
+            {result.market_execution_regime?.key && (
+              <span style={S.metaBadge}>Regime: {String(result.market_execution_regime.key).replace(/_/g, " ")}</span>
+            )}
             <span style={S.metaBadge}>Session: {result.session_id}</span>
           </div>
+          {result.opening_feed_fallback_count > 0 && (
+            <div style={S.warningBox}>
+              <strong>OPENING FEED FALLBACK:</strong> {result.opening_feed_fallback_count} top gainer dipertahankan sebagai radar karena daily OHLCV belum update hari ini. Jangan dianggap entry otomatis sebelum Analytical mengonfirmasi data live, flow, dan orderbook.
+            </div>
+          )}
+          {result.market_execution_regime && (
+            <div style={S.regimeBox}>
+              <div style={S.regimeTitle}>{result.market_execution_regime.label || result.market_execution_regime.key}</div>
+              <div style={S.regimeGrid}>
+                <span>IHSG: {Number(result.market_execution_regime.ihsg_change_pct || 0).toFixed(2)}%</span>
+                <span>LQ45: {Number(result.market_execution_regime.lq45_change_pct || 0).toFixed(2)}%</span>
+                <span>Breadth: {Number(result.market_execution_regime.breadth_pct || 0).toFixed(1)}%</span>
+                <span>Top Gainer: {result.market_execution_regime.top_gainer_count || 0}</span>
+              </div>
+              <p style={S.regimePolicy}>{result.market_execution_regime.policy}</p>
+            </div>
+          )}
           {(result.status !== "ok" || result.watchlist_fallback_used) && (
             <div style={S.warningBox}>
               <strong>{result.watchlist_fallback_used ? "WATCHLIST MODE:" : "DATA WARNING:"}</strong> {result.message || "Screener berjalan dalam mode aman."}
@@ -193,11 +230,33 @@ export default function ScreenerPage() {
               {rawResponse && <pre style={S.debugPre}>{JSON.stringify(rawResponse, null, 2)}</pre>}
             </div>
           ) : (
-            <div style={S.stockGrid}>
-              {result.stocks.map((stock, idx) => (
-                <StockCard key={stock.ticker || idx} stock={stock} rank={idx + 1} onClick={() => sendToAnalytic(stock.ticker, mode, stock)} />
-              ))}
-            </div>
+            <>
+              <LanePanel
+                title="Execution Review"
+                subtitle="Full-variable candidates. Analytical tetap final validator."
+                stocks={result.stocks}
+                mode={mode}
+                sendToAnalytic={sendToAnalytic}
+              />
+              {result.top_gainer_opportunities.length > 0 && (
+                <LanePanel
+                  title="Top Gainer Opportunity"
+                  subtitle="Sweet spot 5%-10%. Analytical boleh menjadi conditional buy-stop jika flow valid."
+                  stocks={result.top_gainer_opportunities}
+                  mode={mode}
+                  sendToAnalytic={sendToAnalytic}
+                />
+              )}
+              {result.no_chase_radar.length > 0 && (
+                <LanePanel
+                  title="No-Chase Radar"
+                  subtitle="Mover extended. Jangan market chase; tunggu reset/base baru."
+                  stocks={result.no_chase_radar}
+                  mode={mode}
+                  sendToAnalytic={sendToAnalytic}
+                />
+              )}
+            </>
           )}
         </div>
       )}
@@ -211,10 +270,32 @@ export default function ScreenerPage() {
   );
 }
 
+function LanePanel({ title, subtitle, stocks, mode, sendToAnalytic }) {
+  if (!stocks?.length) return null
+  return (
+    <section style={S.laneSection}>
+      <div style={S.laneHeader}>
+        <div>
+          <div style={S.laneTitle}>{title}</div>
+          <div style={S.laneSubtitle}>{subtitle}</div>
+        </div>
+        <span style={S.laneCount}>{stocks.length}</span>
+      </div>
+      <div style={S.stockGrid}>
+        {stocks.map((stock, idx) => (
+          <StockCard key={`${title}-${stock.ticker || idx}`} stock={stock} rank={idx + 1} onClick={() => sendToAnalytic(stock.ticker, mode, stock)} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
 function StockCard({ stock, rank, onClick }) {
   const signal = (stock.signal || "NEUTRAL").toUpperCase();
   const sc = SIGNAL_COLOR[signal] || SIGNAL_COLOR.NEUTRAL;
   const institutionalRank = getInstitutionalRank(stock.final_score || stock.score || 0);
+  const lane = stock.screener_lane || (stock.top_gainer_opportunity?.available ? "TOP_GAINER_OPPORTUNITY" : stock.no_chase_radar ? "NO_CHASE_RADAR" : "EXECUTION_CANDIDATE")
+  const laneMeta = LANE_META[lane] || { label: String(lane || "Candidate").replace(/_/g, " "), color: "#64748b", bg: "#f8fafc" }
   return (
     <div style={{ ...S.card, cursor: "pointer" }} onClick={onClick} title={`Analyze ${stock.ticker}`}>
       <div style={S.cardHeader}>
@@ -223,6 +304,9 @@ function StockCard({ stock, rank, onClick }) {
         <span style={{ ...S.signalBadge, backgroundColor: sc + "22", color: sc, border: "1px solid " + sc }}>{signal}</span>
       </div>
       <div style={S.cardBody}>
+        <div style={{ ...S.laneBadge, color: laneMeta.color, borderColor: laneMeta.color, backgroundColor: laneMeta.bg }}>
+          {laneMeta.label}
+        </div>
 
         <div
           style={{
@@ -244,6 +328,11 @@ function StockCard({ stock, rank, onClick }) {
         </div>
         <div style={S.scoreRow}><span style={S.scoreLabel}>Score</span><span style={S.scoreValue}>{Number(stock.final_score || stock.score || 0).toFixed(1)}</span></div>
         <div style={S.priceRow}><span style={S.priceLabel}>Last Price</span><span style={S.priceValue}>Rp {Number(stock.price || stock.last_price || 0).toLocaleString("id-ID")}</span></div>
+        {stock.data_warning && (
+          <div style={S.dataWarningBox}>
+            {stock.data_warning}
+          </div>
+        )}
         {stock.top_gainer_opportunity?.available && (
           <div style={S.moverBox}>
             <div style={S.moverTitle}>Top Gainer Sweet Spot</div>
@@ -315,11 +404,20 @@ const S = {
   progressSub: { fontSize: 11, color: "#94a3b8", margin: 0 },
   errorBox: { backgroundColor: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: 16, color: "#dc2626", marginBottom: 16, fontSize: 13 },
   warningBox: { backgroundColor: "#fef3c7", border: "1px solid #f59e0b", borderRadius: 6, padding: 14, color: "#92400e", marginBottom: 16, fontSize: 13 },
+  regimeBox: { backgroundColor: "#ffffff", border: "1px solid #bae6fd", borderRadius: 8, padding: 14, marginBottom: 16 },
+  regimeTitle: { color: "#0369a1", fontWeight: "bold", fontSize: 13, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 },
+  regimeGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 6, fontSize: 11, color: "#475569", fontFamily: "monospace" },
+  regimePolicy: { margin: "8px 0 0", color: "#64748b", fontSize: 12 },
   resultsSection: { marginTop: 8 },
   metaRow: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 },
   metaBadge: { backgroundColor: "#e0f2fe", padding: "4px 10px", borderRadius: 4, fontSize: 11, color: "#0369a1", fontWeight: "600", border: "1px solid #bae6fd" },
   emptyBox: { textAlign: "center", padding: 32, border: "1px dashed #cbd5e1", borderRadius: 8, color: "#94a3b8", backgroundColor: "#ffffff" },
   debugPre: { backgroundColor: "#f8fafc", padding: 12, borderRadius: 4, fontSize: 10, color: "#64748b", textAlign: "left", marginTop: 12, maxHeight: 200, overflow: "auto" },
+  laneSection: { marginBottom: 18 },
+  laneHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10 },
+  laneTitle: { color: "#1e293b", fontSize: 14, fontWeight: "bold", textTransform: "uppercase", letterSpacing: 1 },
+  laneSubtitle: { color: "#64748b", fontSize: 12, marginTop: 2 },
+  laneCount: { minWidth: 28, height: 28, borderRadius: 14, backgroundColor: "#e0f2fe", color: "#0369a1", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: 12 },
   stockGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 },
   card: { backgroundColor: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.06)" },
   cardHeader: { display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", borderBottom: "1px solid #f1f5f9", backgroundColor: "#f8fafc" },
@@ -327,12 +425,14 @@ const S = {
   ticker: { color: "#0ea5e9", fontWeight: "bold", fontSize: 16, flex: 1, letterSpacing: 1 },
   signalBadge: { padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: "bold", letterSpacing: 1 },
   cardBody: { padding: "12px 16px" },
+  laneBadge: { display: "inline-block", border: "1px solid", borderRadius: 5, padding: "3px 7px", fontSize: 10, fontWeight: "bold", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 },
   scoreRow: { display: "flex", justifyContent: "space-between", marginBottom: 6 },
   scoreLabel: { color: "#94a3b8", fontSize: 12 },
   scoreValue: { color: "#d97706", fontSize: 16, fontWeight: "bold" },
   priceRow: { display: "flex", justifyContent: "space-between", marginBottom: 10 },
   priceLabel: { color: "#94a3b8", fontSize: 12 },
   priceValue: { color: "#1e293b", fontSize: 13, fontWeight: "600" },
+  dataWarningBox: { border: "1px solid #f59e0b", backgroundColor: "#fffbeb", color: "#92400e", borderRadius: 6, padding: 8, marginBottom: 10, fontSize: 10, lineHeight: 1.4 },
   officialBox: { border: "1px solid #bbf7d0", backgroundColor: "#f0fdf4", borderRadius: 6, padding: 8, marginBottom: 10 },
   officialTitle: { color: "#15803d", fontSize: 10, fontWeight: "bold", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 },
   moneyMakerBox: { border: "1px solid #f0abfc", backgroundColor: "#fdf4ff", borderRadius: 6, padding: 8, marginBottom: 10 },

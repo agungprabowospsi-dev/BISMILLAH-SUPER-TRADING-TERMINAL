@@ -71,6 +71,9 @@ export default function AnalyticPage() {
           watchlist_fallback_used: Boolean(s.watchlist_fallback_used),
           opportunity_lane: s._opportunity_lane || s.opportunity_lane || '',
           top_gainer_opportunity: s.top_gainer_opportunity || {},
+          market_execution_regime: s.market_execution_regime || '',
+          screener_lane: s.screener_lane || '',
+          analytic_expectation: s.analytic_expectation || '',
         }
       }
       const res = await analyzeStock(analyticTicker.toUpperCase().trim(), analyticMode, screenerCtx)
@@ -166,6 +169,8 @@ export default function AnalyticPage() {
   const opportunityExecution = r?.opportunity_execution || r?.action_plan?.opportunity_execution || null
   const watchlistAlignment = r?.watchlist_alignment || r?.action_plan?.watchlist_alignment || null
   const screenerAlignment = r?.screener_alignment || r?.action_plan?.screener_alignment || null
+  const executionRouter = r?.execution_router || r?.action_plan?.execution_router || null
+  const setupFamily = r?.setup_family || r?.action_plan?.setup_family || executionRouter?.setup_family || null
   const noActionableLong = ['NO_LONG_ENTRY', 'NO_MARKET_ENTRY'].includes(actionOrderType)
   const valueOrFallback = (value, fallback) =>
     value !== undefined && value !== null && value !== '' ? value : fallback
@@ -183,7 +188,102 @@ export default function AnalyticPage() {
     ? null
     : valueOrFallback(r?.action_plan?.take_profit_3, valueOrFallback(r?.dynamic_sltp?.tp3, r?.tp3))
   const watchlistOnlyNoExecution = Boolean(watchlistAlignment?.active && !opportunityExecution?.active)
-  const canSendToMonitoring = Boolean(tradeEntry && tradeStop && tradeTp1 && !noActionableLong && !watchlistOnlyNoExecution)
+  const routerAllowsMonitoring = executionRouter?.monitoring_allowed
+  const canSendToMonitoring = Boolean(
+    tradeEntry &&
+    tradeStop &&
+    tradeTp1 &&
+    !noActionableLong &&
+    !watchlistOnlyNoExecution &&
+    (routerAllowsMonitoring === undefined || routerAllowsMonitoring)
+  )
+  const selectedTicker = String(screenerSelectedStock?.ticker || '').toUpperCase()
+  const resultTicker = String(r?.ticker || analyticTicker || '').toUpperCase()
+  const hasScreenerContext = Boolean(screenerSelectedStock && selectedTicker && selectedTicker === resultTicker)
+  const screenerScore = Number(
+    screenerAlignment?.score ||
+    screenerSelectedStock?.final_score ||
+    screenerSelectedStock?.score ||
+    0
+  )
+  const screenerGrade = String(
+    screenerAlignment?.grade ||
+    (screenerScore >= 75 ? 'A' : screenerScore >= 55 ? 'B' : screenerScore >= 45 ? 'C' : '-')
+  ).toUpperCase()
+  const screenerSignal = String(screenerSelectedStock?.signal || 'NEUTRAL').replace(/_/g, ' ').toUpperCase()
+  const fatalFlowReject = Boolean(
+    screenerAlignment?.status === 'ANALYTIC_REJECTED_FATAL_FLOW' ||
+    moneyMaker?.verdict === 'FLOW_OUT_AVOID' ||
+    r?.action_plan?.decision_modifier === 'MONEY_MAKER_FLOW_OUT'
+  )
+  const screenerWaitAlignment = screenerAlignment?.status === 'SCREENER_QUALIFIED_ANALYTIC_WAIT'
+  const decisionView = (() => {
+    if (executionRouter?.status) {
+      const routerTone = executionRouter.status === 'EXECUTABLE'
+        ? 'green'
+        : executionRouter.status === 'CONDITIONAL'
+        ? 'sky'
+        : executionRouter.status === 'REJECTED'
+        ? 'red'
+        : 'amber'
+      return {
+        label: executionRouter.user_position || executionRouter.status,
+        sublabel: setupFamily?.label || executionRouter.order_type || '',
+        tone: routerTone,
+        confidence: r?.go_confidence || 0,
+        note: executionRouter.reason || setupFamily?.description || '',
+      }
+    }
+    if (fatalFlowReject) {
+      return {
+        label: 'NO ENTRY',
+        sublabel: 'FLOW OUT AVOID',
+        tone: 'red',
+        confidence: r?.go_confidence || 0,
+        note: 'Screener menemukan kandidat, tetapi Analytic final menolak long entry karena Money Maker/flow risk fatal.',
+      }
+    }
+    if (screenerWaitAlignment) {
+      return {
+        label: 'WAIT',
+        sublabel: 'CONFIRMATION ONLY',
+        tone: 'amber',
+        confidence: Math.max(Number(r?.go_confidence || 0), 50),
+        note: 'Screener Grade A/B masih valid sebagai radar. Entry hanya boleh setelah trigger, flow, dan struktur pendek membaik.',
+      }
+    }
+    if (watchlistAlignment?.active) {
+      return {
+        label: 'WATCHLIST',
+        sublabel: 'RADAR ONLY',
+        tone: 'amber',
+        confidence: r?.go_confidence || 0,
+        note: watchlistAlignment.reason || 'Masih observasi. Belum masuk execution lane.',
+      }
+    }
+    if (opportunityExecution?.active) {
+      return {
+        label: 'WAIT',
+        sublabel: 'CONDITIONAL BUY STOP',
+        tone: 'sky',
+        confidence: Math.max(Number(r?.go_confidence || 0), 55),
+        note: 'Opportunity hanya aktif jika trigger, base/VWAP, orderbook, dan flow mengonfirmasi.',
+      }
+    }
+    return {
+      label: r?.go_no_go || 'WAIT',
+      sublabel: actionOrderType ? actionOrderType.replace(/_/g, ' ') : '',
+      tone: r?.go_no_go === 'STRONG GO' || r?.go_no_go === 'GO' ? 'green' : r?.go_no_go === 'WAIT' ? 'amber' : 'red',
+      confidence: r?.go_confidence || 0,
+      note: '',
+    }
+  })()
+  const decisionToneClasses = {
+    green: 'border-green-400 bg-green-400/10 text-green-500',
+    amber: 'border-amber-400 bg-amber-400/10 text-amber-600',
+    red: 'border-red-500 bg-red-500/10 text-red-500',
+    sky: 'border-sky-400 bg-sky-400/10 text-sky-600',
+  }
 
   const groupEngineKeys = {
     group1:['priceaction','trend','support','resistance','volumeintelligence','relativevolume','multitime','orderblock','breakorder','fairvalue','liquidity'],
@@ -310,30 +410,27 @@ export default function AnalyticPage() {
               </div>
               {r.signal && <SignalBadge signal={r.signal}/>}
 
-              {/* GO / NO GO Banner */}
+              {/* Position Decision */}
               {r.go_no_go && (
-                <div className={`w-full rounded-xl border-2 px-4 py-3 text-center ${
-                  r.go_no_go === 'STRONG GO' ? 'border-green-500 bg-green-500/10' :
-                  r.go_no_go === 'GO'         ? 'border-green-400 bg-green-400/10' :
-                  r.go_no_go === 'WAIT'       ? 'border-yellow-400 bg-yellow-400/10' :
-                                                'border-red-500 bg-red-500/10'
-                }`}>
+                <div className={`w-full rounded-xl border-2 px-4 py-3 text-center ${decisionToneClasses[decisionView.tone]}`}>
                   <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500 mb-1">
-                    Setup Decision
+                    Current Position
                   </p>
-                  <p className={`font-display text-2xl font-bold ${
-                    r.go_no_go === 'STRONG GO' ? 'text-green-400' :
-                    r.go_no_go === 'GO'         ? 'text-green-400' :
-                    r.go_no_go === 'WAIT'       ? 'text-yellow-400' :
-                                                  'text-red-400'
-                  }`}>
-                    {r.go_no_go === 'STRONG GO' ? '🟢 STRONG GO' :
-                     r.go_no_go === 'GO'         ? '🟢 GO' :
-                     r.go_no_go === 'WAIT'       ? '🟡 WAIT' :
-                                                   '🔴 NO GO'}
+                  <p className="font-display text-2xl font-bold">
+                    {decisionView.label}
                   </p>
-                  <p className="font-mono text-xs text-slate-400 mt-1">
-                    Confidence: {r.go_confidence}%
+                  {decisionView.sublabel && (
+                    <p className="font-mono text-[11px] font-bold uppercase tracking-wider mt-0.5">
+                      {decisionView.sublabel}
+                    </p>
+                  )}
+                  {decisionView.note && (
+                    <p className="font-mono text-[11px] leading-relaxed text-slate-700 mt-2">
+                      {decisionView.note}
+                    </p>
+                  )}
+                  <p className="font-mono text-xs text-slate-500 mt-1">
+                    Confidence: {decisionView.confidence}%
                   </p>
                   {r.go_reasons?.length > 0 && (
                     <div className="mt-2 text-left space-y-0.5">
@@ -347,6 +444,68 @@ export default function AnalyticPage() {
                       {r.no_go_reasons.map((reason, i) => (
                         <p key={i} className="font-mono text-[10px] text-red-400">❌ {reason}</p>
                       ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {(hasScreenerContext || screenerAlignment?.active || noActionableLong) && (
+                <div className="w-full rounded-lg border border-slate-200 bg-white/70 p-3">
+                  <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500 mb-2">
+                    Screener to Analytic Position Map
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="rounded border border-slate-200 bg-white px-2 py-2">
+                      <p className="font-mono text-[9px] uppercase text-slate-400">Screener</p>
+                      <p className="font-mono text-xs font-bold text-slate-800">
+                        {hasScreenerContext ? `Grade ${screenerGrade} / ${screenerSignal}` : 'Direct Analyze'}
+                      </p>
+                      {hasScreenerContext && (
+                        <p className="font-mono text-[10px] text-slate-500">Score {screenerScore.toFixed(1)}</p>
+                      )}
+                    </div>
+                    <div className="rounded border border-slate-200 bg-white px-2 py-2">
+                      <p className="font-mono text-[9px] uppercase text-slate-400">Analytic</p>
+                      <p className={clsx(
+                        'font-mono text-xs font-bold',
+                        fatalFlowReject ? 'text-red-600' :
+                        screenerWaitAlignment || watchlistAlignment?.active ? 'text-amber-600' :
+                        opportunityExecution?.active ? 'text-sky-600' :
+                        'text-slate-800'
+                      )}>
+                        {decisionView.label} {decisionView.sublabel ? `/ ${decisionView.sublabel}` : ''}
+                      </p>
+                    </div>
+                    <div className="rounded border border-slate-200 bg-white px-2 py-2">
+                      <p className="font-mono text-[9px] uppercase text-slate-400">Monitoring</p>
+                      <p className={clsx('font-mono text-xs font-bold', canSendToMonitoring ? 'text-green-600' : 'text-slate-500')}>
+                        {canSendToMonitoring ? 'READY' : 'LOCKED'}
+                      </p>
+                      <p className="font-mono text-[10px] text-slate-500">
+                        {canSendToMonitoring ? 'Action plan executable' : 'Butuh entry plan valid'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {setupFamily && (
+                <div className="w-full rounded-lg border border-sky-200 bg-sky-50/80 p-3">
+                  <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500 mb-1">
+                    Setup Family
+                  </p>
+                  <p className="font-mono text-sm font-bold text-sky-700">
+                    {setupFamily.label || formatLabel(setupFamily.key)}
+                  </p>
+                  <p className="mt-1 font-mono text-[11px] leading-relaxed text-slate-600">
+                    {setupFamily.description || executionRouter?.reason || 'Setup belum terklasifikasi.'}
+                  </p>
+                  {executionRouter?.monitoring_mode && (
+                    <div className="mt-2 flex justify-between rounded border border-sky-100 bg-white px-2 py-1">
+                      <span className="font-mono text-[10px] uppercase text-slate-400">Monitoring Mode</span>
+                      <span className="font-mono text-[10px] font-bold text-slate-800">
+                        {formatLabel(executionRouter.monitoring_mode)}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -686,8 +845,15 @@ export default function AnalyticPage() {
                 </div>
               ))}
               {noActionableLong && (
-                <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 font-mono text-xs leading-relaxed text-amber-700">
-                  Belum ada long entry aktif. Gunakan trigger dan confirmation needed sebagai syarat sebelum target profit dianggap valid.
+                <div className={clsx(
+                  'rounded-lg border px-3 py-2 font-mono text-xs leading-relaxed',
+                  fatalFlowReject
+                    ? 'border-red-400/40 bg-red-400/10 text-red-700'
+                    : 'border-amber-400/40 bg-amber-400/10 text-amber-700'
+                )}>
+                  {fatalFlowReject
+                    ? 'No entry long. Trigger hanya alert evaluasi ulang, bukan order entry, sampai Money Maker/flow risk batal.'
+                    : 'Belum ada long entry aktif. Gunakan trigger dan confirmation needed sebagai syarat sebelum target profit dianggap valid.'}
                 </div>
               )}
               {opportunityExecution?.active && (
@@ -712,14 +878,23 @@ export default function AnalyticPage() {
                   </p>
                 </div>
               )}
-              {screenerAlignment?.active && screenerAlignment.status === 'SCREENER_QUALIFIED_ANALYTIC_WAIT' && (
-                <div className="rounded-lg border border-emerald-400/40 bg-emerald-400/10 px-3 py-2 font-mono text-xs leading-relaxed text-emerald-700">
+              {screenerAlignment?.active && (
+                <div className={clsx(
+                  'rounded-lg border px-3 py-2 font-mono text-xs leading-relaxed',
+                  fatalFlowReject
+                    ? 'border-red-400/40 bg-red-400/10 text-red-700'
+                    : 'border-emerald-400/40 bg-emerald-400/10 text-emerald-700'
+                )}>
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-bold uppercase">Screener Qualified</span>
-                    <span className="font-bold">Grade {screenerAlignment.grade || '-'}</span>
+                    <span className="font-bold uppercase">
+                      {fatalFlowReject ? 'Screener Qualified, Analytic Reject' : 'Screener Qualified'}
+                    </span>
+                    <span className="font-bold">Grade {screenerAlignment.grade || screenerGrade || '-'}</span>
                   </div>
                   <p className="mt-1">
-                    Analytical selaras sebagai WAIT confirmation. Belum market entry; eksekusi hanya jika trigger, flow, dan struktur pendek membaik.
+                    {fatalFlowReject
+                      ? (screenerAlignment.reason || 'Screener memberi kandidat, tetapi Money Maker/flow risk fatal menolak long entry.')
+                      : 'Analytical selaras sebagai WAIT confirmation. Belum market entry; eksekusi hanya jika trigger, flow, dan struktur pendek membaik.'}
                   </p>
                 </div>
               )}
@@ -774,6 +949,10 @@ export default function AnalyticPage() {
                   watchlist_alignment: watchlistAlignment || null,
                   screener_alignment: screenerAlignment || null,
                   empirical_memory: r.empirical_memory || null,
+                  setup_family: setupFamily || null,
+                  execution_router: executionRouter || null,
+                  execution_status: r.execution_status || executionRouter?.status || '',
+                  monitoring_mode: r.monitoring_mode || executionRouter?.monitoring_mode || '',
                   setup_type: r.setup_type || '',
                   setup_reason: r.setup_reason || ''
                 }

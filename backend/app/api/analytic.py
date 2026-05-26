@@ -93,6 +93,9 @@ class ScreenerContext(BaseModel):
     watchlist_fallback_used: bool = False
     opportunity_lane: str = ""
     top_gainer_opportunity: dict = Field(default_factory=dict)
+    market_execution_regime: str = ""
+    screener_lane: str = ""
+    analytic_expectation: str = ""
 
 class AnalyticRequest(BaseModel):
     ticker: str
@@ -475,6 +478,153 @@ def _finalize_action_plan_levels(action: dict, atr: float, mode: str) -> dict:
         "take_profit_3": fixed[2],
     })
     return action
+
+
+def classify_analytic_setup_family(
+    *,
+    action_plan: dict,
+    setup_type: str,
+    mode: str,
+    screener_context: Any,
+    opportunity_execution: dict,
+    watchlist_alignment: dict,
+    screener_alignment: dict,
+    money_maker: dict,
+    wyckoff_phase: str,
+    weinstein_stage: int,
+    price_dist: dict,
+) -> dict:
+    """Classify the trading setup family separately from GO/NO GO."""
+    action = action_plan or {}
+    setup = str(action.get("setup_type") or setup_type or "").upper()
+    order_type = str(action.get("order_type") or "").upper()
+    sc = _context_dict(screener_context)
+    top_opp = sc.get("top_gainer_opportunity") if isinstance(sc.get("top_gainer_opportunity"), dict) else {}
+    mm_verdict = str((money_maker or {}).get("verdict") or "").upper()
+    phase = str((money_maker or {}).get("phase") or "").upper()
+
+    if mm_verdict == "FLOW_OUT_AVOID" or action.get("decision_modifier") == "MONEY_MAKER_FLOW_OUT":
+        key = "DEFENSIVE_FLOW_AVOID"
+        label = "Defensive Flow Avoid"
+        desc = "Setup beli dibatalkan karena Money Maker/flow risk fatal."
+    elif opportunity_execution.get("active") or top_opp.get("available"):
+        key = "TOP_GAINER_MOMENTUM"
+        label = "Top Gainer Momentum Sweet Spot"
+        desc = "Mover awal 5%-10%; hanya conditional buy-stop, bukan market chase."
+    elif watchlist_alignment.get("active") or top_opp.get("radar_only") or sc.get("screener_lane") == "NO_CHASE_RADAR":
+        key = "NO_CHASE_EXTENDED_MOVER"
+        label = "No-Chase Extended Mover"
+        desc = "Mover sudah terlalu extended atau hanya radar; tunggu reset/base."
+    elif "BREAKOUT" in setup or order_type in ("BUY_STOP_BREAKOUT", "BULKOWSKI_MEASURE_RULE"):
+        key = "BREAKOUT_CONTINUATION"
+        label = "Breakout Continuation"
+        desc = "Eksekusi valid hanya setelah resistance/trigger ditembus dengan volume."
+    elif "PULLBACK" in setup or order_type in ("LIMIT_PULLBACK", "LIMIT_AT_MA"):
+        key = "PULLBACK_BUY_ON_WEAKNESS"
+        label = "Pullback / Buy on Weakness"
+        desc = "Trend harus sehat; entry di area pullback dengan invalidation ketat."
+    elif "ACCUMULATION" in setup or str(wyckoff_phase or "").upper() in ("ACCUMULATION", "REACCUMULATION"):
+        key = "ACCUMULATION_BASE"
+        label = "Accumulation Base"
+        desc = "Akumulasi/base terdeteksi; perlu reclaim struktur untuk upgrade entry."
+    elif "REVERSAL" in setup or int(weinstein_stage or 0) == 4:
+        key = "REVERSAL_ATTEMPT"
+        label = "Reversal Attempt"
+        desc = "Masih percobaan reversal; tunggu reclaim dan higher low."
+    elif (price_dist or {}).get("poc_price") and order_type in ("LIMIT_AT_POC", "LIMIT_ACCUMULATION"):
+        key = "RANGE_MEAN_REVERSION"
+        label = "Range / Mean Reversion"
+        desc = "Entry hanya dekat value area/support, bukan chase di tengah range."
+    elif str(mode or "").lower() in ("intraday", "scalping") and order_type in ("MARKET_MOMENTUM", "WAIT_CLOSE_CONFIRMATION"):
+        key = "INTRADAY_LIQUIDITY_TRIGGER"
+        label = "Intraday Liquidity Trigger"
+        desc = "Butuh orderbook, VWAP/base, dan flow pendek ikut mengonfirmasi."
+    elif screener_alignment.get("active"):
+        key = "SCREENER_QUALIFIED_CONFIRMATION"
+        label = "Screener Qualified Confirmation"
+        desc = "Screener valid sebagai kandidat; Analytic menunggu struktur/flow."
+    else:
+        key = "NEUTRAL_SETUP_WAIT"
+        label = "Neutral Setup Wait"
+        desc = "Belum ada setup dominan yang layak dieksekusi."
+
+    return {"key": key, "label": label, "description": desc}
+
+
+def build_execution_router(
+    *,
+    action_plan: dict,
+    go_no_go: str,
+    setup_family: dict,
+    opportunity_execution: dict,
+    watchlist_alignment: dict,
+    screener_alignment: dict,
+    money_maker: dict,
+) -> dict:
+    """Single user-facing contract for execution, monitoring, and UI language."""
+    action = action_plan or {}
+    order_type = str(action.get("order_type") or "").upper()
+    decision = str(action.get("decision") or go_no_go or "WAIT").upper()
+    fatal_flow = (
+        str((money_maker or {}).get("verdict") or "").upper() == "FLOW_OUT_AVOID"
+        or str(action.get("decision_modifier") or "").upper() == "MONEY_MAKER_FLOW_OUT"
+        or screener_alignment.get("status") == "ANALYTIC_REJECTED_FATAL_FLOW"
+    )
+    radar = watchlist_alignment.get("active") or order_type == "WATCHLIST_RADAR"
+    no_entry = order_type in ("NO_LONG_ENTRY", "NO_MARKET_ENTRY", "WATCHLIST_RADAR")
+    executable_orders = {
+        "MARKET_ORDER",
+        "MARKET_MOMENTUM",
+        "BUY_STOP_BREAKOUT",
+        "LIMIT_PULLBACK",
+        "LIMIT_ACCUMULATION",
+        "LIMIT_AT_MA",
+        "LIMIT_AT_POC",
+        "BULKOWSKI_MEASURE_RULE",
+    }
+    conditional_orders = {"CONDITIONAL_BUY_STOP", "WAIT_CLOSE_CONFIRMATION"}
+
+    if fatal_flow or order_type == "NO_LONG_ENTRY":
+        status = "REJECTED"
+        user_position = "NO ENTRY"
+        monitoring = "LOCKED"
+        allowed = False
+        reason = "Fatal flow/risk aktif; semua setup long dibatalkan sampai flow membaik."
+    elif radar:
+        status = "RADAR"
+        user_position = "RADAR ONLY"
+        monitoring = "LOCKED"
+        allowed = False
+        reason = "Masih radar observasi, bukan execution lane."
+    elif order_type in conditional_orders or opportunity_execution.get("active"):
+        status = "CONDITIONAL"
+        user_position = "CONDITIONAL BUY"
+        monitoring = "OPPORTUNITY_WATCH"
+        allowed = True
+        reason = "Boleh disiapkan hanya jika trigger dan confirmation terpenuhi."
+    elif decision in ("GO", "STRONG GO") and order_type in executable_orders and not no_entry:
+        status = "EXECUTABLE"
+        user_position = "EXECUTABLE BUY"
+        monitoring = "POSITION_MONITOR"
+        allowed = True
+        reason = "Action plan executable tersedia dengan entry, SL, dan TP valid."
+    else:
+        status = "WAIT"
+        user_position = "WAIT CONFIRMATION"
+        monitoring = "LOCKED"
+        allowed = False
+        reason = "Belum ada entry plan yang cukup matang."
+
+    return {
+        "status": status,
+        "user_position": user_position,
+        "setup_family": setup_family,
+        "order_type": order_type,
+        "decision": decision,
+        "monitoring_mode": monitoring,
+        "monitoring_allowed": allowed,
+        "reason": reason,
+    }
 
 
 def build_setup_action_plan(
@@ -1131,6 +1281,17 @@ async def analyze(req: AnalyticRequest):
             
             top_gainer = regime_data.get("top_gainer", [])
             top_loser = regime_data.get("top_loser", [])
+            try:
+                lq45_close_calc = float(lq45.get("close", 0) or 0)
+                lq45_prev_calc = float(lq45.get("prev", 0) or 0)
+                lq45_chg = ((lq45_close_calc - lq45_prev_calc) / lq45_prev_calc) * 100 if lq45_prev_calc > 0 else 0.0
+            except Exception:
+                lq45_chg = 0.0
+            try:
+                mover_total = len(top_gainer or []) + len(top_loser or [])
+                breadth = round((len(top_gainer or []) / mover_total) * 100, 1) if mover_total > 0 else 50.0
+            except Exception:
+                breadth = 50.0
             
             # Determine regime
             if ihsg_change_pct > 1:
@@ -1528,6 +1689,42 @@ Top Brokers: {", ".join(top_brokers[:5])}
             go_confidence = max(float(go_confidence or 0), 50)
         setup_type = action_plan.get("setup_type", setup_type)
         entry_method = action_plan.get("order_type", entry_method if 'entry_method' in locals() else "MARKET_ORDER")
+        sc_dict = _context_dict(req.screener_context)
+        market_execution_regime = str(sc_dict.get("market_execution_regime") or "").upper()
+        if not market_execution_regime:
+            if (lq45_chg <= -0.75 or breadth < 40) and (sc_dict.get("top_gainer_opportunity") or {}).get("available"):
+                market_execution_regime = "BAD_MARKET_OPPORTUNITY_ONLY"
+            elif lq45_chg <= -0.75 or breadth < 40:
+                market_execution_regime = "DEFENSIVE_NO_CHASE"
+            elif lq45_chg >= 0.35 and breadth >= 50:
+                market_execution_regime = "NORMAL_GREEN_MARKET"
+            else:
+                market_execution_regime = "MIXED_MARKET"
+        setup_family = classify_analytic_setup_family(
+            action_plan=action_plan,
+            setup_type=setup_type,
+            mode=req.mode,
+            screener_context=req.screener_context,
+            opportunity_execution=opportunity_execution,
+            watchlist_alignment=watchlist_alignment,
+            screener_alignment=screener_alignment,
+            money_maker=money_maker,
+            wyckoff_phase=wyckoff_phase,
+            weinstein_stage=weinstein_stage,
+            price_dist=price_dist if 'price_dist' in locals() else {},
+        )
+        execution_router = build_execution_router(
+            action_plan=action_plan,
+            go_no_go=go_no_go,
+            setup_family=setup_family,
+            opportunity_execution=opportunity_execution,
+            watchlist_alignment=watchlist_alignment,
+            screener_alignment=screener_alignment,
+            money_maker=money_maker,
+        )
+        action_plan["setup_family"] = setup_family
+        action_plan["execution_router"] = execution_router
+        action_plan["market_execution_regime"] = market_execution_regime
         no_long_entry = entry_method == "NO_LONG_ENTRY"
         response_entry = 0.0 if no_long_entry else float(action_plan.get("entry_price") or entry or 0)
         response_sl = float(action_plan.get("stop_loss") or sl or 0)
@@ -1599,7 +1796,14 @@ Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memper
             "confidence": float(min(95, score)),
             "signal": all_engines['signal'],
             "market_regime": regime if 'regime' in dir() else "N/A",
+            "market_execution_regime": market_execution_regime,
             "setup_type": setup_type,
+            "setup_family": setup_family,
+            "execution_router": execution_router,
+            "execution_status": execution_router.get("status"),
+            "user_position": execution_router.get("user_position"),
+            "monitoring_mode": execution_router.get("monitoring_mode"),
+            "monitoring_allowed": execution_router.get("monitoring_allowed"),
             "setup_reason": setup_reason,
             "action_plan": action_plan,
             "orderbook_execution": orderbook_execution,
