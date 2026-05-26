@@ -405,6 +405,7 @@ def fallback_stock_universe() -> List[Dict[str, Any]]:
             "sector": "",
             "logo": None,
             "raw": {"source": "fallback_universe"},
+            "_default_universe_seed": True,
         }
         for ticker in DEFAULT_UNIVERSE_TICKERS
     ]
@@ -415,6 +416,7 @@ def merge_default_universe(stocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]
     for seed in DEFAULT_UNIVERSE_TICKERS:
         code = seed.upper()
         if code in by_code:
+            by_code[code]["_default_universe_seed"] = True
             continue
         stocks.append({
             "ticker": code,
@@ -423,6 +425,7 @@ def merge_default_universe(stocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             "sector": "",
             "logo": None,
             "raw": {"source": "default_universe_seed"},
+            "_default_universe_seed": True,
         })
     return stocks
 
@@ -640,7 +643,7 @@ async def build_universe(mode: str) -> list:
             s["_liquidity_fallback"] = True
             soft.append(s)
             continue
-        if value == 0 and freq == 0 and raw_source == "default_universe_seed":
+        if value == 0 and freq == 0 and (raw_source == "default_universe_seed" or s.get("_default_universe_seed")):
             s["_liquidity_fallback"] = True
             soft.append(s)
             continue
