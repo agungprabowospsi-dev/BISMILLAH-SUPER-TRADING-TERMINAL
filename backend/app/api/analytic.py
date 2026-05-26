@@ -895,6 +895,8 @@ async def analyze(req: AnalyticRequest):
         if not ohlcv or len(ohlcv) < 20:
             raise HTTPException(400, "Insufficient OHLCV data")
 
+        live_context_change_pct = None
+
         # Inject harga realtime ke candle terakhir
         try:
             ctx = await invesgo.get_market_context(req.ticker)
@@ -902,6 +904,7 @@ async def analyze(req: AnalyticRequest):
                 realtime_price = float(ctx["price"]["last"])
                 realtime_high = float(ctx["price"].get("high", ohlcv[-1].get("high", realtime_price)))
                 realtime_low = float(ctx["price"].get("low", ohlcv[-1].get("low", realtime_price)))
+                live_context_change_pct = float(ctx["price"].get("change_pct", 0) or 0)
                 ohlcv[-1]["close"] = realtime_price
                 ohlcv[-1]["high"] = max(realtime_high, realtime_price)
                 ohlcv[-1]["low"] = min(realtime_low, realtime_price)
@@ -1680,7 +1683,11 @@ Top Brokers: {", ".join(top_brokers[:5])}
             current=current,
             atr=atr,
             rvol=rvol,
-            change_pct=((current - ohlcv[-2]["close"]) / ohlcv[-2]["close"] * 100) if len(ohlcv) >= 2 and ohlcv[-2]["close"] else 0,
+            change_pct=(
+                live_context_change_pct
+                if live_context_change_pct is not None
+                else ((current - ohlcv[-2]["close"]) / ohlcv[-2]["close"] * 100) if len(ohlcv) >= 2 and ohlcv[-2]["close"] else 0
+            ),
             range_high_20=range_high_20,
             range_low_20=range_low_20,
             ma20=ma20,
