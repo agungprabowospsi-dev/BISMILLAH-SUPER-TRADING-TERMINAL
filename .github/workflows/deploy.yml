@@ -10,6 +10,6 @@ jobs:
       - name: Install Railway
         run: npm install -g @railway/cli
       - name: Deploy
-        run: railway up --service bismillah-backend
+        run: railway up ./backend --path-as-root --service bismillah-backend --environment production --ci
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
