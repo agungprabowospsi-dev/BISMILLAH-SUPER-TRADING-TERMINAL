@@ -216,6 +216,27 @@ export default function AnalyticPage() {
     moneyMaker?.verdict === 'FLOW_OUT_AVOID' ||
     r?.action_plan?.decision_modifier === 'MONEY_MAKER_FLOW_OUT'
   )
+  const opportunityBlocked = Boolean(opportunityExecution?.blocked)
+  const opportunityBlockEvidence = [
+    opportunityBlocked && opportunityExecution?.change_pct
+      ? `Kenaikan ${Number(opportunityExecution.change_pct || 0).toFixed(2)}% terbaca sebagai top gainer sweet spot, tetapi belum otomatis jadi entry.`
+      : null,
+    marketCtx?.volume?.rvol
+      ? `RVOL ${Number(marketCtx.volume.rvol || 0).toFixed(2)}x (${marketCtx.volume.signal || 'N/A'}), belum menunjukkan volume conviction.`
+      : null,
+    marketCtx?.technical?.trend
+      ? `Trend ${marketCtx.technical.trend}; harga masih ${marketCtx.technical.above_ma20 ? 'di atas' : 'di bawah'} MA20 dan ${marketCtx.technical.above_ma50 ? 'di atas' : 'di bawah'} MA50.`
+      : null,
+    r?.wyckoff_phase || r?.weinstein_stage || r?.vsa_signal
+      ? `Structure: Wyckoff ${formatLabel(r?.wyckoff_phase)}, Weinstein Stage ${r?.weinstein_stage || '-'}, VSA ${formatLabel(r?.vsa_signal)}.`
+      : null,
+    r?.foreign_net_bil
+      ? `Foreign flow ${Number(r.foreign_net_bil || 0).toFixed(1)}B; ${formatLabel(r?.foreign_signal || r?.value_inflow?.signal)}.`
+      : null,
+    moneyMaker?.verdict
+      ? `Money Maker: ${formatLabel(moneyMaker.verdict)} / ${formatLabel(moneyMaker.phase)}.`
+      : null,
+  ].filter(Boolean)
   const screenerWaitAlignment = screenerAlignment?.status === 'SCREENER_QUALIFIED_ANALYTIC_WAIT'
   const decisionView = (() => {
     if (executionRouter?.status) {
@@ -854,6 +875,24 @@ export default function AnalyticPage() {
                   {fatalFlowReject
                     ? 'No entry long. Trigger hanya alert evaluasi ulang, bukan order entry, sampai Money Maker/flow risk batal.'
                     : 'Belum ada long entry aktif. Gunakan trigger dan confirmation needed sebagai syarat sebelum target profit dianggap valid.'}
+                </div>
+              )}
+              {opportunityBlocked && (
+                <div className="rounded-lg border border-red-400/40 bg-red-400/10 px-3 py-2 font-mono text-xs leading-relaxed text-red-700">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold uppercase">Top Gainer Blocked by Analytical</span>
+                    <span className="font-bold">{Number(opportunityExecution.change_pct || 0).toFixed(2)}%</span>
+                  </div>
+                  <p className="mt-1">
+                    Screener membaca momentum, tetapi Analytical menolak long entry karena confirmation layer belum valid.
+                  </p>
+                  {opportunityBlockEvidence.length > 0 && (
+                    <ul className="mt-2 space-y-1">
+                      {opportunityBlockEvidence.slice(0, 6).map((item) => (
+                        <li key={item}>- {item}</li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )}
               {opportunityExecution?.active && (
