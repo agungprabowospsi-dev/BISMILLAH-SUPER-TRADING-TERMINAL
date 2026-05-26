@@ -396,6 +396,10 @@ DEFAULT_UNIVERSE_TICKERS = [
     "TPIA", "NZIA", "SIPD", "FILM", "BUMI", "BIPI", "BUVA", "BRPT", "MBMA", "NCKL",
 ]
 
+OPENING_MOMENTUM_RADAR_TICKERS = [
+    "TPIA", "NZIA", "CUAN", "SIPD", "AMMN", "FILM", "BREN", "BRPT", "BUMI", "BIPI", "BUVA", "MBMA", "NCKL",
+]
+
 def fallback_stock_universe() -> List[Dict[str, Any]]:
     return [
         {
@@ -2279,6 +2283,64 @@ async def score_candidates(candidates: List[Dict[str, Any]], mode: Mode) -> List
     return [r for r in results if isinstance(r, dict)]
 
 
+async def build_opening_seed_radar(scored: List[Dict[str, Any]], mode: Mode) -> List[Dict[str, Any]]:
+    if mode not in ("intraday", "scalping"):
+        return []
+    existing = {str(x.get("ticker") or x.get("code") or "").upper() for x in scored}
+    radar: List[Dict[str, Any]] = []
+    for ticker in OPENING_MOMENTUM_RADAR_TICKERS:
+        code = ticker.upper()
+        if code in existing:
+            continue
+        try:
+            ohlcv = await asyncio.wait_for(fetch_ohlcv_safe(code), timeout=8)
+            metrics = calc_prefilter_metrics(ohlcv)
+            if not metrics:
+                continue
+            chg = to_float(metrics.get("change_pct"))
+            price = to_float(metrics.get("price"))
+            if chg < 5 or chg >= 24 or price < MODE_CONFIG[mode]["price_min"] or price > MODE_CONFIG[mode]["price_max"]:
+                continue
+            sweet_spot = 5 <= chg < 10
+            tier = "SWEET_SPOT_5_10" if sweet_spot else "EXTENDED_10_20" if chg < 20 else "EXTREME_20_PLUS"
+            radar.append({
+                "ticker": code,
+                "code": code,
+                "name": code,
+                "sector": "",
+                "price": price,
+                "change_pct": round(chg, 2),
+                "rvol": metrics.get("rvol"),
+                "volume": metrics.get("volume"),
+                "data_status": metrics.get("date_status") or "OPENING_SEED_RADAR",
+                "data_warning": metrics.get("data_warning") or "Opening radar dari baseline ticker; gunakan Analytical untuk validasi eksekusi.",
+                "final_score": 0,
+                "signal": "RADAR" if not sweet_spot else "WATCHLIST",
+                "watchlist_only": True,
+                "disqualify": not sweet_spot,
+                "disqualify_reason": None if sweet_spot else f"Top gainer {chg:.2f}% di luar sweet spot 5%-10%; no-chase radar only.",
+                "reason": "Opening momentum radar; bukan sinyal beli otomatis.",
+                "top_gainer_opportunity": {
+                    "available": sweet_spot,
+                    "lane": "OPENING_SEED_PRICE_MOVER",
+                    "rank": None,
+                    "change_pct": round(chg, 2),
+                    "opportunity_tier": tier,
+                    "executable": sweet_spot,
+                    "radar_only": not sweet_spot,
+                    "execution_bias": "MOMENTUM_CONFIRMATION_5_10" if sweet_spot else "EXTENDED_NO_CHASE" if chg < 20 else "EXTREME_EXTENSION_RISK",
+                    "preferred_entry": "Breakout continuation or VWAP pullback with bid refill; no market chase." if sweet_spot else "Radar only; wait deeper reset/base before any execution review.",
+                    "risk_rule": "Avoid market chase; validate with Analytical, orderbook, and broker flow.",
+                    "exit_rule": "Scale out into extension; trail under higher-low or VWAP for intraday/scalping.",
+                    "upgrade_rule": "Only 5%-10% movers can enter execution lane; above 10% is no-chase radar unless it resets cleanly.",
+                },
+                "no_chase_radar": not sweet_spot,
+            })
+        except Exception:
+            continue
+    return radar
+
+
 # ===== Phase 4 and 5 =====
 
 def apply_disqualifiers(scored: List[Dict[str, Any]], mode: Mode) -> List[Dict[str, Any]]:
@@ -2424,6 +2486,9 @@ async def run_screener(request: ScreenerRequest) -> Dict[str, Any]:
             candidates = candidates[:25]
             adaptive_used = bool(candidates)
         scored = await score_candidates(candidates, mode)
+        opening_seed_radar = await build_opening_seed_radar(scored, mode)
+        if opening_seed_radar:
+            scored.extend(opening_seed_radar)
         qualified = apply_disqualifiers(scored, mode)
         strict_qualified_count = len(qualified)
         watchlist_fallback_used = False
