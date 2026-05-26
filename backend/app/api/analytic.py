@@ -2095,9 +2095,10 @@ Top Brokers: {", ".join(top_brokers[:5])}
             else 0
         )
 
-        rationale = await ask_claude(
-            system="Kamu adalah analis saham IDX profesional. Berikan analisis trading yang jelas dan actionable dalam Bahasa Indonesia.",
-            prompt=f"""
+        try:
+            rationale = await _asyncio.wait_for(ask_claude(
+                system="Kamu adalah analis saham IDX profesional. Berikan analisis trading yang jelas dan actionable dalam Bahasa Indonesia.",
+                prompt=f"""
 Ticker: {req.ticker} | Mode: {req.mode}
 Score: {score:.1f}/100 | Signal: {all_engines['signal']}
 Entry: {response_entry} | SL: {response_sl} | TP1: {response_tp1} | TP2: {response_tp2} | TP3: {response_tp3}
@@ -2132,8 +2133,16 @@ Tulis analisis trading 3-4 kalimat dalam Bahasa Indonesia:
 4. Manajemen risiko (SL/TP)
 Jika ada referensi Knowledge Base di atas, gunakan insight tersebut untuk memperkuat analisis.
 """,
-            max_tokens=400
-        )
+                max_tokens=320
+            ), timeout=14)
+        except Exception as exc:
+            logger.warning("Analytic rationale fallback [%s]: %s", req.ticker, exc)
+            rationale = (
+                f"Analytic validation: {setup_validation.get('final_status')} - "
+                f"{setup_validation.get('user_position')}. "
+                f"Regime {market_execution_regime}; setup mengikuti validation matrix, "
+                f"dengan entry hanya valid setelah trigger dan konfirmasi risiko terpenuhi."
+            )
 
         import json as _json
         class NumpyEncoder(_json.JSONEncoder):
