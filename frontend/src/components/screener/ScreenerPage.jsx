@@ -216,7 +216,7 @@ export default function ScreenerPage() {
               {result.backend_error && <div style={{ marginTop: 6, fontSize: 11 }}>{result.backend_error}</div>}
             </div>
           )}
-          {result.stocks.length === 0 ? (
+          {result.stocks.length === 0 && result.top_gainer_opportunities.length === 0 && result.no_chase_radar.length === 0 ? (
             <div style={S.emptyBox}>
               <p>{result.candidate_count === 0 ? "Belum ada saham yang lolos prefilter hari ini." : "Belum ada saham yang lolos scoring dan disqualifier hari ini."}</p>
               <p style={{ fontSize: 12, marginTop: 8 }}>
@@ -231,13 +231,15 @@ export default function ScreenerPage() {
             </div>
           ) : (
             <>
-              <LanePanel
-                title="Execution Review"
-                subtitle="Full-variable candidates. Analytical tetap final validator."
-                stocks={result.stocks}
-                mode={mode}
-                sendToAnalytic={sendToAnalytic}
-              />
+              {result.stocks.length > 0 && (
+                <LanePanel
+                  title="Execution Review"
+                  subtitle="Full-variable candidates. Analytical tetap final validator."
+                  stocks={result.stocks}
+                  mode={mode}
+                  sendToAnalytic={sendToAnalytic}
+                />
+              )}
               {result.top_gainer_opportunities.length > 0 && (
                 <LanePanel
                   title="Top Gainer Opportunity"
@@ -255,6 +257,11 @@ export default function ScreenerPage() {
                   mode={mode}
                   sendToAnalytic={sendToAnalytic}
                 />
+              )}
+              {result.stocks.length === 0 && (
+                <div style={S.infoBox}>
+                  Tidak ada saham yang lolos menjadi execution candidate penuh. Namun radar di bawah tetap ditampilkan agar top gainer tidak hilang dari layar.
+                </div>
               )}
             </>
           )}
@@ -404,6 +411,7 @@ const S = {
   progressSub: { fontSize: 11, color: "#94a3b8", margin: 0 },
   errorBox: { backgroundColor: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: 16, color: "#dc2626", marginBottom: 16, fontSize: 13 },
   warningBox: { backgroundColor: "#fef3c7", border: "1px solid #f59e0b", borderRadius: 6, padding: 14, color: "#92400e", marginBottom: 16, fontSize: 13 },
+  infoBox: { backgroundColor: "#eff6ff", border: "1px solid #93c5fd", borderRadius: 6, padding: 14, color: "#1d4ed8", marginBottom: 16, fontSize: 13 },
   regimeBox: { backgroundColor: "#ffffff", border: "1px solid #bae6fd", borderRadius: 8, padding: 14, marginBottom: 16 },
   regimeTitle: { color: "#0369a1", fontWeight: "bold", fontSize: 13, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 },
   regimeGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 6, fontSize: 11, color: "#475569", fontFamily: "monospace" },
