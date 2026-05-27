@@ -3271,7 +3271,7 @@ async def _apply_manual_master_layer(scored: List[Dict[str, Any]], mode: Mode, e
         merged.append(item)
     merged.sort(
         key=lambda x: (
-            1 if (x.get("manual_master_layer") or {}).get("available") else 0,
+            1 if (x.get("manual_master_layer") or {}).get("status") != "PENDING_NOT_ENRICHED" else 0,
             1 if x.get("analytic_expectation") == "EXECUTABLE_TOP3" else 0,
             1 if x.get("analytic_expectation") == "CONDITIONAL_EXECUTION" else 0,
             to_float(x.get("final_score")),
