@@ -23,11 +23,14 @@ import asyncio
 import inspect
 import logging
 import math
+import re
 import time
+import zipfile
 from datetime import date, timedelta
+from io import BytesIO
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-from fastapi import APIRouter
+from fastapi import APIRouter, File, Form, UploadFile
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -2681,6 +2684,344 @@ async def test_endpoints() -> Dict[str, Any]:
         }
 
     return tests
+
+
+# ===== Manual Stockbit top gainer upload lane =====
+
+def _manual_number(value: Any, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    raw = str(value).strip()
+    if raw in {"", "-", "nan", "None"}:
+        return default
+    raw = raw.replace("Rp", "").replace("IDR", "").replace(" ", "")
+    multiplier = 1.0
+    suffix = raw[-1:].upper()
+    if suffix in {"K", "M", "B", "T"}:
+        multiplier = {"K": 1e3, "M": 1e6, "B": 1e9, "T": 1e12}[suffix]
+        raw = raw[:-1]
+    raw = raw.replace(",", "")
+    try:
+        return float(raw) * multiplier
+    except Exception:
+        return default
+
+
+def _manual_symbol(value: Any) -> str:
+    text = str(value or "").upper().strip()
+    text = re.sub(r"[^A-Z0-9-]", "", text.replace(".JK", ""))
+    if not text or text in {"SYMBOL", "YMBOL", "CODE", "TICKER", "SAHAM"}:
+        return ""
+    if len(text) % 2 == 0:
+        half = len(text) // 2
+        if text[:half] == text[half:]:
+            text = text[:half]
+    return text
+
+
+def _manual_price_change(value: Any) -> Tuple[float, float]:
+    text = str(value or "").strip()
+    match = re.search(r"([\d.,]+)\s*\(\s*([+-]?[\d.,]+)\s*%\s*\)", text)
+    if match:
+        return _manual_number(match.group(1)), _manual_number(match.group(2))
+    return _manual_number(text), 0.0
+
+
+def _xlsx_rows_from_bytes(content: bytes) -> List[List[str]]:
+    rows: List[List[str]] = []
+    with zipfile.ZipFile(BytesIO(content)) as zf:
+        shared: List[str] = []
+        if "xl/sharedStrings.xml" in zf.namelist():
+            import xml.etree.ElementTree as ET
+
+            root = ET.fromstring(zf.read("xl/sharedStrings.xml"))
+            ns = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+            for si in root.findall("x:si", ns):
+                parts = [t.text or "" for t in si.findall(".//x:t", ns)]
+                shared.append("".join(parts))
+
+        sheet_names = sorted([n for n in zf.namelist() if n.startswith("xl/worksheets/sheet") and n.endswith(".xml")])
+        if not sheet_names:
+            return rows
+
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(zf.read(sheet_names[0]))
+        ns = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+        for row in root.findall(".//x:sheetData/x:row", ns):
+            values: List[str] = []
+            for cell in row.findall("x:c", ns):
+                cell_type = cell.attrib.get("t")
+                value = ""
+                if cell_type == "inlineStr":
+                    value = "".join(t.text or "" for t in cell.findall(".//x:t", ns))
+                else:
+                    node = cell.find("x:v", ns)
+                    value = node.text if node is not None and node.text is not None else ""
+                    if cell_type == "s":
+                        idx = int(float(value or 0))
+                        value = shared[idx] if 0 <= idx < len(shared) else ""
+                values.append(str(value).strip())
+            rows.append(values)
+    return rows
+
+
+def _text_rows_from_upload(filename: str, content: bytes) -> List[List[str]]:
+    lower = (filename or "").lower()
+    if lower.endswith(".xlsx"):
+        return _xlsx_rows_from_bytes(content)
+    text = content.decode("utf-8-sig", errors="ignore")
+    return [re.split(r"[\t,;]+", line.strip()) for line in text.splitlines() if line.strip()]
+
+
+def _parse_manual_top_gainer_rows(rows: List[List[Any]]) -> List[Dict[str, Any]]:
+    parsed: List[Dict[str, Any]] = []
+    seen = set()
+    for row_idx, row in enumerate(rows, start=1):
+        cells = [str(x).strip() for x in row if str(x or "").strip()]
+        if len(cells) == 1:
+            compact = cells[0]
+            match = re.match(r"^\s*([A-Z0-9-]{3,12})\s+(.+)$", compact, re.IGNORECASE)
+            if match:
+                cells = [match.group(1)] + re.split(r"\s+", match.group(2).strip())
+        if len(cells) < 2:
+            continue
+        joined = " ".join(cells).upper()
+        if "SYMBOL" in joined or "PRICE" in joined or "NET FOREIGN" in joined:
+            continue
+
+        code = _manual_symbol(cells[0])
+        if not code and len(cells) >= 2:
+            code = _manual_symbol(cells[1])
+        if not code or len(code) < 3:
+            continue
+
+        price = 0.0
+        change_pct = 0.0
+        price_cell_index = 1 if _manual_symbol(cells[0]) else 2
+        for cell in cells[1:4]:
+            p, chg = _manual_price_change(cell)
+            if p > 0:
+                price = p
+            if chg:
+                change_pct = chg
+            if price > 0 and change_pct:
+                break
+
+        if price <= 0 and len(cells) > price_cell_index:
+            price = _manual_number(cells[price_cell_index])
+        if change_pct <= 0:
+            pct_match = re.search(r"([+-]?\d+(?:[.,]\d+)?)\s*%", " ".join(cells))
+            if pct_match:
+                change_pct = _manual_number(pct_match.group(1))
+        if price <= 0 or change_pct <= 0:
+            continue
+
+        tail = cells[2:]
+        value = _manual_number(tail[0]) if len(tail) >= 1 else 0.0
+        volume = _manual_number(tail[1]) if len(tail) >= 2 else 0.0
+        freq = _manual_number(tail[2]) if len(tail) >= 3 else 0.0
+        net_foreign = _manual_number(tail[3]) if len(tail) >= 4 else 0.0
+        if code in seen:
+            continue
+        seen.add(code)
+        parsed.append({
+            "ticker": code,
+            "code": code,
+            "price": round(price, 2),
+            "last_price": round(price, 2),
+            "change_pct": round(change_pct, 2),
+            "value": value,
+            "volume": volume,
+            "freq": freq,
+            "net_foreign": net_foreign,
+            "raw_line": " | ".join(cells),
+            "row": row_idx,
+        })
+    return parsed
+
+
+def _bucket_score(value: float, buckets: List[Tuple[float, float]]) -> float:
+    score = 0.0
+    for threshold, bucket_score in buckets:
+        if value >= threshold:
+            score = bucket_score
+    return score
+
+
+def _manual_top_gainer_score(item: Dict[str, Any], rank: int) -> Dict[str, Any]:
+    chg = to_float(item.get("change_pct"))
+    value = to_float(item.get("value"))
+    volume = to_float(item.get("volume"))
+    freq = to_float(item.get("freq"))
+    net_foreign = to_float(item.get("net_foreign"))
+    code = str(item.get("ticker") or "")
+
+    if 5 <= chg < 9:
+        momentum_score = 96
+        tier = "SWEET_SPOT_5_9"
+        preferred_entry = "VWAP pullback or buy-stop above intraday base; no market chase."
+    elif 9 <= chg < 10:
+        momentum_score = 78
+        tier = "LATE_SWEET_SPOT_9_10"
+        preferred_entry = "Conditional only after reset/base and bid refill."
+    elif 3 <= chg < 5:
+        momentum_score = 66
+        tier = "EARLY_MOMENTUM_3_5"
+        preferred_entry = "Early watch; execute only if volume/frequency expands."
+    elif 10 <= chg < 20:
+        momentum_score = 36
+        tier = "EXTENDED_10_20"
+        preferred_entry = "No chase; wait reset/base before analytic execution review."
+    else:
+        momentum_score = 18
+        tier = "EXTREME_20_PLUS"
+        preferred_entry = "No chase; likely extension/ARA-risk, observe only."
+
+    value_score = _bucket_score(value, [(0, 20), (1e8, 35), (1e9, 58), (5e9, 72), (20e9, 85), (100e9, 96)])
+    freq_score = _bucket_score(freq, [(0, 20), (100, 36), (500, 55), (1500, 72), (5000, 86), (15000, 96), (50000, 100)])
+    volume_score = _bucket_score(volume, [(0, 20), (1_000, 35), (10_000, 50), (100_000, 70), (1_000_000, 88), (5_000_000, 96)])
+    if net_foreign > 0:
+        foreign_score = _bucket_score(net_foreign, [(1, 62), (10e6, 70), (100e6, 78), (1e9, 88), (10e9, 96)])
+    elif net_foreign < 0:
+        foreign_score = 35
+    else:
+        foreign_score = 50
+
+    score = (
+        momentum_score * 0.30
+        + value_score * 0.25
+        + freq_score * 0.20
+        + foreign_score * 0.15
+        + volume_score * 0.10
+    )
+    penalties: List[str] = []
+    if value and value < 1e9:
+        score -= 8
+        penalties.append("value di bawah 1B")
+    if freq and freq < 500:
+        score -= 7
+        penalties.append("frequency tipis")
+    if chg >= 10:
+        score -= 18
+        penalties.append("di atas 10% = no-chase default")
+    if chg >= 20:
+        score -= 12
+        penalties.append("extreme/ARA-risk")
+    if "-" in code:
+        score -= 30
+        penalties.append("instrumen warrant/non-common stock")
+
+    score = round(clamp(score), 2)
+    executable = 5 <= chg < 10 and value >= 1e9 and freq >= 500 and "-" not in code
+    conditional = (3 <= chg < 5 or 9 <= chg < 10) and value >= 1e9 and freq >= 500 and "-" not in code
+    radar_only = not (executable or conditional)
+    lane = "MANUAL_TOP_GAINER_OPPORTUNITY" if executable else "MANUAL_CONDITIONAL_EXECUTION" if conditional else "NO_CHASE_RADAR"
+    expectation = "EXECUTABLE_TOP3" if executable else "CONDITIONAL_EXECUTION" if conditional else "RADAR_NO_CHASE"
+
+    return {
+        **item,
+        "manual_rank": rank,
+        "final_score": score,
+        "score": score,
+        "signal": "BUY" if executable and score >= 65 else "HOLD" if conditional else "NEUTRAL",
+        "screener_lane": lane,
+        "opportunity_lane": "manual_top_gainer",
+        "_opportunity_lane": "top_gainer",
+        "_mover_rank": rank,
+        "_mover_source": "stockbit_manual_upload",
+        "watchlist_only": not executable,
+        "manual_feed": {
+            "source": "stockbit_manual_upload",
+            "rank": rank,
+            "score_components": {
+                "momentum": momentum_score,
+                "value": value_score,
+                "frequency": freq_score,
+                "foreign": foreign_score,
+                "volume": volume_score,
+            },
+            "penalties": penalties,
+        },
+        "top_gainer_opportunity": {
+            "available": executable or conditional,
+            "lane": "manual_top_gainer",
+            "rank": rank,
+            "change_pct": chg,
+            "opportunity_tier": tier,
+            "executable": executable,
+            "conditional": conditional,
+            "radar_only": radar_only,
+            "manual_feed": True,
+            "source": "stockbit_manual_upload",
+            "execution_bias": expectation,
+            "preferred_entry": preferred_entry,
+            "risk_rule": "Analytic wajib validasi VWAP, orderbook, broker flow, spread, dan invalidation sebelum entry.",
+            "exit_rule": "Target minimal +3%; scale out TP1/TP2/TP3 dan pindah ke Monitoring setelah user buy.",
+            "upgrade_rule": "Manual lane hanya mempercepat radar; fatal risk di Analytic tetap boleh menolak.",
+        },
+        "analytic_expectation": expectation,
+        "reason": f"Manual Stockbit top gainer {chg:.2f}% | value {value:,.0f} | freq {freq:,.0f} | {expectation}",
+        "data_warning": "Manual Stockbit feed; Invezgo/Analytic tetap final validator sebelum execution.",
+    }
+
+
+@router.post("/manual-top-gainer/upload")
+async def upload_manual_top_gainer(
+    mode: Mode = Form(default="intraday"),
+    raw_text: str = Form(default=""),
+    file: Optional[UploadFile] = File(default=None),
+) -> Dict[str, Any]:
+    started = time.time()
+    source_name = "manual_text"
+    rows: List[List[Any]] = []
+    if file is not None:
+        content = await file.read()
+        source_name = file.filename or "uploaded_file"
+        rows.extend(_text_rows_from_upload(source_name, content))
+    if raw_text.strip():
+        rows.extend([re.split(r"[\t,; ]{2,}", line.strip()) for line in raw_text.splitlines() if line.strip()])
+
+    parsed = _parse_manual_top_gainer_rows(rows)
+    scored = [_manual_top_gainer_score(item, idx) for idx, item in enumerate(parsed, start=1)]
+    scored.sort(
+        key=lambda x: (
+            1 if x.get("analytic_expectation") == "EXECUTABLE_TOP3" else 0,
+            to_float(x.get("final_score")),
+            to_float(x.get("value")),
+            to_float(x.get("freq")),
+        ),
+        reverse=True,
+    )
+    for idx, item in enumerate(scored, start=1):
+        item["manual_rank"] = idx
+        item["mover_rank"] = idx
+        if isinstance(item.get("top_gainer_opportunity"), dict):
+            item["top_gainer_opportunity"]["rank"] = idx
+
+    executable = [x for x in scored if x.get("analytic_expectation") == "EXECUTABLE_TOP3"]
+    conditional = [x for x in scored if x.get("analytic_expectation") == "CONDITIONAL_EXECUTION"]
+    radar = [x for x in scored if x.get("analytic_expectation") == "RADAR_NO_CHASE"]
+    top3 = (executable + conditional + radar)[:3]
+    return {
+        "status": "ok" if parsed else "empty",
+        "mode": mode,
+        "source": source_name,
+        "duration_sec": round(time.time() - started, 2),
+        "parsed_count": len(parsed),
+        "top_3": top3,
+        "results": top3,
+        "manual_top_gainer_candidates": scored,
+        "execution_candidates": executable[:3],
+        "conditional_candidates": conditional[:5],
+        "no_chase_radar": radar[:10],
+        "quota_policy": "Manual lane hanya enrich saham yang diupload; tidak scan 970 saham sehingga hemat token Invezgo.",
+        "message": (
+            "Upload berhasil; Top 3 siap dikirim ke Analytic sebagai Manual Top Gainer Lane."
+            if parsed else
+            "Tidak ada baris top gainer valid. Pastikan ada kolom Symbol dan Price(+%)."
+        ),
+    }
 
 
 # ===== Main API =====

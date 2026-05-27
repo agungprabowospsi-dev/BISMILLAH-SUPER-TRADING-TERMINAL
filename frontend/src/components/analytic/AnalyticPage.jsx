@@ -74,6 +74,12 @@ export default function AnalyticPage() {
           market_execution_regime: s.market_execution_regime || '',
           screener_lane: s.screener_lane || '',
           analytic_expectation: s.analytic_expectation || '',
+          manual_feed: s.manual_feed || {},
+          manual_rank: s.manual_rank || 0,
+          manual_top_gainer: Boolean(s.manual_feed || s.top_gainer_opportunity?.manual_feed),
+          value: s.value || 0,
+          freq: s.freq || 0,
+          net_foreign: s.net_foreign || 0,
         }
       }
       const res = await analyzeStock(analyticTicker.toUpperCase().trim(), analyticMode, screenerCtx)

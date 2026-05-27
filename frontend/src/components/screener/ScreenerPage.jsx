@@ -25,6 +25,8 @@ const LANE_META = {
   EXECUTION_CANDIDATE: { label: "Execution Candidate", color: "#16a34a", bg: "#f0fdf4" },
   DEFENSIVE_QUALIFIED_CANDIDATE: { label: "Strict Confirm", color: "#d97706", bg: "#fffbeb" },
   TOP_GAINER_OPPORTUNITY: { label: "Top Gainer Opportunity", color: "#0284c7", bg: "#f0f9ff" },
+  MANUAL_TOP_GAINER_OPPORTUNITY: { label: "Manual Top Gainer", color: "#16a34a", bg: "#f0fdf4" },
+  MANUAL_CONDITIONAL_EXECUTION: { label: "Manual Conditional", color: "#d97706", bg: "#fffbeb" },
   NO_CHASE_RADAR: { label: "No-Chase Radar", color: "#b45309", bg: "#fffbeb" },
   WATCHLIST_ONLY: { label: "Watchlist Only", color: "#64748b", bg: "#f8fafc" },
 }
@@ -58,6 +60,11 @@ export default function ScreenerPage() {
   const [progress, setProgress] = useState(0);
   const [progressMsg, setProgressMsg] = useState("");
   const [elapsedSec, setElapsedSec] = useState(0);
+  const [manualFile, setManualFile] = useState(null);
+  const [manualText, setManualText] = useState("");
+  const [manualLoading, setManualLoading] = useState(false);
+  const [manualResult, setManualResult] = useState(null);
+  const [manualError, setManualError] = useState(null);
   const progressRef = useRef(null);
   const scanStartedAtRef = useRef(0);
   const { sendToAnalytic } = useStore();
@@ -141,6 +148,47 @@ export default function ScreenerPage() {
     }
   };
 
+  const uploadManualTopGainer = async () => {
+    if (!manualFile && !manualText.trim()) {
+      setManualError("Upload file Excel/CSV atau paste tabel Stockbit dulu.");
+      return;
+    }
+    setManualLoading(true);
+    setManualError(null);
+    setManualResult(null);
+    try {
+      const form = new FormData();
+      form.append("mode", mode.toLowerCase());
+      if (manualFile) form.append("file", manualFile);
+      if (manualText.trim()) form.append("raw_text", manualText.trim());
+      const res = await fetch(`${BACKEND_URL}/api/screener/manual-top-gainer/upload`, {
+        method: "POST",
+        body: form,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setManualResult({
+        ...data,
+        top_3: Array.isArray(data?.top_3) ? data.top_3.map(normalizeStock) : [],
+        manual_top_gainer_candidates: Array.isArray(data?.manual_top_gainer_candidates) ? data.manual_top_gainer_candidates.map(normalizeStock) : [],
+        execution_candidates: Array.isArray(data?.execution_candidates) ? data.execution_candidates.map(normalizeStock) : [],
+        conditional_candidates: Array.isArray(data?.conditional_candidates) ? data.conditional_candidates.map(normalizeStock) : [],
+        no_chase_radar: Array.isArray(data?.no_chase_radar) ? data.no_chase_radar.map(normalizeStock) : [],
+      });
+    } catch (err) {
+      setManualError(err.message || "Upload manual top gainer gagal.");
+    } finally {
+      setManualLoading(false);
+    }
+  };
+
+  const clearManualTopGainer = () => {
+    setManualFile(null);
+    setManualText("");
+    setManualResult(null);
+    setManualError(null);
+  };
+
   return (
     <div style={S.container}>
       <div style={S.header}>
@@ -177,6 +225,71 @@ export default function ScreenerPage() {
       <button onClick={runScreener} disabled={loading} style={S.runBtn}>
         {loading ? "SCANNING..." : "RUN SCREENER"}
       </button>
+
+      <section style={S.manualBox}>
+        <div style={S.manualHeader}>
+          <div>
+            <div style={S.manualTitle}>MANUAL TOP GAINER FEED</div>
+            <div style={S.manualSubtitle}>Upload Excel/CSV Stockbit atau paste tabel setelah 09.15; terminal pilih Top 3 untuk dikirim ke Analytic.</div>
+          </div>
+          <span style={S.manualBadge}>hemat token</span>
+        </div>
+        <div style={S.manualGrid}>
+          <label style={S.fileDrop}>
+            <input
+              type="file"
+              accept=".xlsx,.csv,.txt"
+              style={{ display: "none" }}
+              onChange={(e) => setManualFile(e.target.files?.[0] || null)}
+            />
+            <span style={S.fileTitle}>{manualFile ? manualFile.name : "Upload Excel / CSV"}</span>
+            <span style={S.fileSub}>Format Stockbit: Symbol, Price(+%), Value, Volume, Freq, Net Foreign</span>
+          </label>
+          <textarea
+            value={manualText}
+            onChange={(e) => setManualText(e.target.value)}
+            placeholder={"Atau paste tabel di sini, contoh:\nLAJU 75(+25.00%) 2.97B 260.66K 3.49K 252.96M\nWBSA 740(+17.46%) 148.30M 613 189 417K"}
+            style={S.manualTextarea}
+          />
+        </div>
+        <div style={S.manualActions}>
+          <button onClick={uploadManualTopGainer} disabled={manualLoading} style={S.manualPrimaryBtn}>
+            {manualLoading ? "PROCESSING..." : "SCORE MANUAL TOP GAINER"}
+          </button>
+          <button onClick={clearManualTopGainer} disabled={manualLoading} style={S.manualSecondaryBtn}>CLEAR</button>
+        </div>
+        {manualError && <div style={S.errorBox}><strong>MANUAL FEED ERROR:</strong> {manualError}</div>}
+        {manualResult && (
+          <div style={S.manualResultBox}>
+            <div style={S.metaRow}>
+              <span style={S.metaBadge}>Manual Parsed: {manualResult.parsed_count || 0}</span>
+              <span style={S.metaBadge}>Source: {manualResult.source || "-"}</span>
+              <span style={S.metaBadge}>Mode: {String(manualResult.mode || mode).toUpperCase()}</span>
+            </div>
+            <div style={S.infoBox}>
+              {manualResult.message} {manualResult.quota_policy}
+            </div>
+            {manualResult.top_3?.length > 0 && (
+              <LanePanel
+                title="Manual Top 3 - Analytic Ready"
+                subtitle="Dipilih dari upload Stockbit. Klik kartu untuk masuk Analytic dengan konteks manual top gainer."
+                stocks={manualResult.top_3}
+                mode={mode}
+                sendToAnalytic={sendToAnalytic}
+              />
+            )}
+            {manualResult.no_chase_radar?.length > 0 && (
+              <LanePanel
+                title="Manual No-Chase Radar"
+                subtitle="Mover terlalu tinggi/likuiditas tipis. Tetap terlihat, tapi bukan entry otomatis."
+                stocks={manualResult.no_chase_radar.slice(0, 6)}
+                mode={mode}
+                sendToAnalytic={sendToAnalytic}
+              />
+            )}
+          </div>
+        )}
+      </section>
 
       {loading && (
         <div style={S.progressBox}>
@@ -422,6 +535,20 @@ const S = {
   modeBtn: { padding: "8px 20px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", color: "#64748b", cursor: "pointer", borderRadius: 6, fontSize: 12, fontWeight: "600" },
   modeBtnActive: { borderColor: "#0ea5e9", color: "#0ea5e9", backgroundColor: "#e0f2fe" },
   runBtn: { display: "block", width: "100%", maxWidth: 320, margin: "0 auto 24px", padding: "14px 0", backgroundColor: "#0ea5e9", color: "#ffffff", border: "none", borderRadius: 6, fontSize: 14, fontWeight: "bold", cursor: "pointer" },
+  manualBox: { backgroundColor: "#ffffff", border: "1px solid #bbf7d0", borderRadius: 10, padding: 16, marginBottom: 20, boxShadow: "0 2px 8px rgba(0,0,0,0.05)" },
+  manualHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 12 },
+  manualTitle: { color: "#15803d", fontSize: 14, fontWeight: "bold", textTransform: "uppercase", letterSpacing: 1.5 },
+  manualSubtitle: { color: "#64748b", fontSize: 12, marginTop: 3, lineHeight: 1.45 },
+  manualBadge: { border: "1px solid #22c55e", color: "#15803d", backgroundColor: "#f0fdf4", borderRadius: 999, padding: "4px 10px", fontSize: 10, fontWeight: "bold", textTransform: "uppercase", whiteSpace: "nowrap" },
+  manualGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 },
+  fileDrop: { border: "1px dashed #86efac", backgroundColor: "#f0fdf4", borderRadius: 8, padding: 14, cursor: "pointer", display: "flex", flexDirection: "column", justifyContent: "center", minHeight: 110 },
+  fileTitle: { color: "#14532d", fontWeight: "bold", fontSize: 13, marginBottom: 6, wordBreak: "break-word" },
+  fileSub: { color: "#64748b", fontSize: 11, lineHeight: 1.45 },
+  manualTextarea: { minHeight: 110, resize: "vertical", border: "1px solid #cbd5e1", borderRadius: 8, padding: 12, fontSize: 12, color: "#1e293b", fontFamily: "monospace", outline: "none", backgroundColor: "#f8fafc" },
+  manualActions: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, marginBottom: 8 },
+  manualPrimaryBtn: { padding: "10px 16px", border: "none", borderRadius: 6, backgroundColor: "#16a34a", color: "#ffffff", fontSize: 12, fontWeight: "bold", cursor: "pointer", letterSpacing: 0.5 },
+  manualSecondaryBtn: { padding: "10px 16px", border: "1px solid #cbd5e1", borderRadius: 6, backgroundColor: "#ffffff", color: "#64748b", fontSize: 12, fontWeight: "bold", cursor: "pointer", letterSpacing: 0.5 },
+  manualResultBox: { borderTop: "1px solid #e2e8f0", paddingTop: 12, marginTop: 8 },
   progressBox: { backgroundColor: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 20, marginBottom: 20, boxShadow: "0 2px 8px rgba(0,0,0,0.06)" },
   progressHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
   progressMsg: { fontSize: 13, color: "#0ea5e9", fontWeight: "600" },
