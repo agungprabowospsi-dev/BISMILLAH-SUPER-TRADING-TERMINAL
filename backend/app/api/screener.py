@@ -103,6 +103,7 @@ except Exception:
 
 
 router = APIRouter(tags=["screener"])
+MANUAL_TOP_GAINER_LOGIC_VERSION = "manual_master_sort_v2_2026-05-27"
 
 
 # ===== Request / config =====
@@ -3328,6 +3329,7 @@ async def upload_manual_top_gainer(
     return {
         "status": "ok" if parsed else "empty",
         "mode": mode,
+        "logic_version": MANUAL_TOP_GAINER_LOGIC_VERSION,
         "source": source_name,
         "duration_sec": round(time.time() - started, 2),
         "parsed_count": len(parsed),
