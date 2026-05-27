@@ -237,7 +237,7 @@ export default function ScreenerPage() {
           <span style={S.manualBadge}>hemat token</span>
         </div>
         <div style={S.manualGrid}>
-          <label
+          <div
             style={S.fileDrop}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
@@ -249,13 +249,13 @@ export default function ScreenerPage() {
             <input
               type="file"
               accept=".xlsx,.xls,.csv,.txt"
-              style={{ display: "none" }}
+              style={S.fileInput}
               onChange={(e) => setManualFile(e.target.files?.[0] || null)}
             />
-            <span style={S.fileTitle}>{manualFile ? manualFile.name : "Upload Excel / CSV"}</span>
+            <span style={S.fileTitle}>{manualFile ? manualFile.name : "Belum ada file dipilih"}</span>
             <span style={S.fileSub}>Klik di sini untuk pilih file. Nama file harus tampil sebelum score dijalankan.</span>
             <span style={S.fileHint}>Format Stockbit: Symbol, Price(+%), Value, Volume, Freq, Net Foreign</span>
-          </label>
+          </div>
           <textarea
             value={manualText}
             onChange={(e) => setManualText(e.target.value)}
@@ -264,7 +264,10 @@ export default function ScreenerPage() {
           />
         </div>
         <div style={S.manualActions}>
-          <button onClick={uploadManualTopGainer} disabled={manualLoading} style={S.manualPrimaryBtn}>
+          <button onClick={uploadManualTopGainer} disabled={manualLoading || (!manualFile && !manualText.trim())} style={{
+            ...S.manualPrimaryBtn,
+            ...((manualLoading || (!manualFile && !manualText.trim())) ? S.manualPrimaryBtnDisabled : {}),
+          }}>
             {manualLoading ? "PROCESSING..." : "SCORE MANUAL TOP GAINER"}
           </button>
           <button onClick={clearManualTopGainer} disabled={manualLoading} style={S.manualSecondaryBtn}>CLEAR</button>
@@ -565,12 +568,14 @@ const S = {
   manualBadge: { border: "1px solid #22c55e", color: "#15803d", backgroundColor: "#f0fdf4", borderRadius: 999, padding: "4px 10px", fontSize: 10, fontWeight: "bold", textTransform: "uppercase", whiteSpace: "nowrap" },
   manualGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 },
   fileDrop: { border: "1px dashed #86efac", backgroundColor: "#f0fdf4", borderRadius: 8, padding: 14, cursor: "pointer", display: "flex", flexDirection: "column", justifyContent: "center", minHeight: 110 },
+  fileInput: { display: "block", width: "100%", maxWidth: 420, marginBottom: 10, fontSize: 12, color: "#14532d", backgroundColor: "#ffffff", border: "1px solid #86efac", borderRadius: 6, padding: 8 },
   fileTitle: { color: "#14532d", fontWeight: "bold", fontSize: 13, marginBottom: 6, wordBreak: "break-word" },
   fileSub: { color: "#64748b", fontSize: 11, lineHeight: 1.45 },
   fileHint: { color: "#16a34a", fontSize: 10, lineHeight: 1.45, marginTop: 6, fontWeight: "600" },
   manualTextarea: { minHeight: 110, resize: "vertical", border: "1px solid #cbd5e1", borderRadius: 8, padding: 12, fontSize: 12, color: "#1e293b", fontFamily: "monospace", outline: "none", backgroundColor: "#f8fafc" },
   manualActions: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, marginBottom: 8 },
   manualPrimaryBtn: { padding: "10px 16px", border: "none", borderRadius: 6, backgroundColor: "#16a34a", color: "#ffffff", fontSize: 12, fontWeight: "bold", cursor: "pointer", letterSpacing: 0.5 },
+  manualPrimaryBtnDisabled: { backgroundColor: "#94a3b8", cursor: "not-allowed", opacity: 0.65 },
   manualSecondaryBtn: { padding: "10px 16px", border: "1px solid #cbd5e1", borderRadius: 6, backgroundColor: "#ffffff", color: "#64748b", fontSize: 12, fontWeight: "bold", cursor: "pointer", letterSpacing: 0.5 },
   manualBatchBtn: { width: "100%", border: "none", borderRadius: 8, padding: "12px 16px", marginBottom: 12, backgroundColor: "#0ea5e9", color: "#ffffff", fontSize: 13, fontWeight: "bold", letterSpacing: 1, cursor: "pointer" },
   manualResultBox: { borderTop: "1px solid #e2e8f0", paddingTop: 12, marginTop: 8 },
