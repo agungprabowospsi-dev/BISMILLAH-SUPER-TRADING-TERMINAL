@@ -3322,10 +3322,23 @@ async def upload_manual_top_gainer(
         if isinstance(item.get("top_gainer_opportunity"), dict):
             item["top_gainer_opportunity"]["rank"] = idx
 
-    executable = [x for x in scored if x.get("analytic_expectation") == "EXECUTABLE_TOP3"]
-    conditional = [x for x in scored if x.get("analytic_expectation") == "CONDITIONAL_EXECUTION"]
-    radar = [x for x in scored if x.get("analytic_expectation") == "RADAR_NO_CHASE"]
+    validated = [
+        x for x in scored
+        if (x.get("manual_master_layer") or {}).get("status") != "PENDING_NOT_ENRICHED"
+    ] if master_layer else scored
+    pending = [x for x in scored if (x.get("manual_master_layer") or {}).get("status") == "PENDING_NOT_ENRICHED"]
+    executable = [x for x in validated if x.get("analytic_expectation") == "EXECUTABLE_TOP3"]
+    conditional = [x for x in validated if x.get("analytic_expectation") == "CONDITIONAL_EXECUTION"]
+    radar = [x for x in validated if x.get("analytic_expectation") == "RADAR_NO_CHASE"]
+    rejected = [x for x in validated if x.get("analytic_expectation") == "REJECT_FATAL_RISK"]
     top3 = (executable + conditional + radar)[:3]
+    if not master_layer and not top3:
+        top3 = scored[:3]
+    message = (
+        "Upload berhasil; Top 3 siap dikirim ke Analytic sebagai Manual Top Gainer Lane."
+        if top3 else
+        "Upload berhasil, tetapi Master Layer belum menemukan kandidat executable/conditional. Kandidat tervalidasi masuk rejected/no-chase; jangan dipromosikan dari pending."
+    ) if parsed else "Tidak ada baris top gainer valid. Pastikan ada kolom Symbol dan Price(+%)."
     return {
         "status": "ok" if parsed else "empty",
         "mode": mode,
@@ -3339,12 +3352,10 @@ async def upload_manual_top_gainer(
         "execution_candidates": executable[:3],
         "conditional_candidates": conditional[:5],
         "no_chase_radar": radar[:10],
+        "rejected_candidates": rejected[:10],
+        "pending_master_layer": pending[:10],
         "quota_policy": "Manual lane hanya enrich saham yang diupload; tidak scan 970 saham sehingga hemat token Invezgo.",
-        "message": (
-            "Upload berhasil; Top 3 siap dikirim ke Analytic sebagai Manual Top Gainer Lane."
-            if parsed else
-            "Tidak ada baris top gainer valid. Pastikan ada kolom Symbol dan Price(+%)."
-        ),
+        "message": message,
     }
 
 

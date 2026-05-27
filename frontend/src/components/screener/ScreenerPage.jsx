@@ -175,6 +175,7 @@ export default function ScreenerPage() {
         execution_candidates: Array.isArray(data?.execution_candidates) ? data.execution_candidates.map(normalizeStock) : [],
         conditional_candidates: Array.isArray(data?.conditional_candidates) ? data.conditional_candidates.map(normalizeStock) : [],
         no_chase_radar: Array.isArray(data?.no_chase_radar) ? data.no_chase_radar.map(normalizeStock) : [],
+        rejected_candidates: Array.isArray(data?.rejected_candidates) ? data.rejected_candidates.map(normalizeStock) : [],
       });
     } catch (err) {
       setManualError(err.message || "Upload manual top gainer gagal.");
@@ -284,6 +285,15 @@ export default function ScreenerPage() {
                 title="Manual No-Chase Radar"
                 subtitle="Mover terlalu tinggi/likuiditas tipis. Tetap terlihat, tapi bukan entry otomatis."
                 stocks={manualResult.no_chase_radar.slice(0, 6)}
+                mode={mode}
+                sendToAnalytic={sendToAnalytic}
+              />
+            )}
+            {manualResult.rejected_candidates?.length > 0 && (
+              <LanePanel
+                title="Master Layer Rejected"
+                subtitle="Sudah divalidasi, tetapi gagal guardrail utama. Tidak dipromosikan menjadi Top 3."
+                stocks={manualResult.rejected_candidates.slice(0, 6)}
                 mode={mode}
                 sendToAnalytic={sendToAnalytic}
               />
