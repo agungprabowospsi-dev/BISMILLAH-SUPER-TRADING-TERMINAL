@@ -57,18 +57,28 @@ export default function ScreenerPage() {
   const [rawResponse, setRawResponse] = useState(null);
   const [progress, setProgress] = useState(0);
   const [progressMsg, setProgressMsg] = useState("");
+  const [elapsedSec, setElapsedSec] = useState(0);
   const progressRef = useRef(null);
+  const scanStartedAtRef = useRef(0);
   const { sendToAnalytic } = useStore();
 
   const startProgress = () => {
     setProgress(0);
+    setElapsedSec(0);
     setProgressMsg(PROGRESS_MESSAGES[0]);
+    scanStartedAtRef.current = Date.now();
     let step = 0;
     progressRef.current = setInterval(() => {
       step += 1;
-      const pct = Math.min(90, step * 10);
+      const elapsed = Math.floor((Date.now() - scanStartedAtRef.current) / 1000);
+      setElapsedSec(elapsed);
+      const pct = step <= 9 ? step * 10 : Math.min(97, 90 + Math.floor((step - 9) / 4));
       setProgress(pct);
-      setProgressMsg(PROGRESS_MESSAGES[Math.min(step, PROGRESS_MESSAGES.length - 1)]);
+      setProgressMsg(
+        pct >= 90
+          ? "Finalisasi response backend..."
+          : PROGRESS_MESSAGES[Math.min(step, PROGRESS_MESSAGES.length - 1)]
+      );
     }, 3000);
   };
 
@@ -76,7 +86,7 @@ export default function ScreenerPage() {
     if (progressRef.current) clearInterval(progressRef.current);
     setProgress(100);
     setProgressMsg("Selesai!");
-    setTimeout(() => { setProgress(0); setProgressMsg(""); }, 1500);
+    setTimeout(() => { setProgress(0); setProgressMsg(""); setElapsedSec(0); }, 1500);
   };
 
   const runScreener = async () => {
@@ -85,10 +95,13 @@ export default function ScreenerPage() {
     setResult(null);
     setRawResponse(null);
     startProgress();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
     try {
       const res = await fetch(`${BACKEND_URL}/api/screener/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({ mode: mode.toLowerCase(), limit: 5, include_debug: false, filter_intensity: filterIntensity }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -118,8 +131,11 @@ export default function ScreenerPage() {
         total_scanned: data?.universe_count || data?.total_scanned || 0,
       });
     } catch (err) {
-      setError(err.message || "Unknown error");
+      setError(err.name === "AbortError"
+        ? "Screener timeout setelah 5 menit. Backend terlalu lama merespons; coba ulang atau turunkan filter intensity."
+        : err.message || "Unknown error");
     } finally {
+      clearTimeout(timeoutId);
       stopProgress();
       setLoading(false);
     }
@@ -171,7 +187,11 @@ export default function ScreenerPage() {
           <div style={S.progressBg}>
             <div style={{ ...S.progressFill, width: `${progress}%` }} />
           </div>
-          <p style={S.progressSub}>Scanning 970 saham IDX dengan 11 engines...</p>
+          <p style={S.progressSub}>
+            {progress >= 90
+              ? `Menunggu response backend... ${elapsedSec}s. Ini bukan freeze; engine sedang finalisasi hasil.`
+              : `Scanning saham IDX dengan 11 engines... ${elapsedSec}s`}
+          </p>
         </div>
       )}
 
