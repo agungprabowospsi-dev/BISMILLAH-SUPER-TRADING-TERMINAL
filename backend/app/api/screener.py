@@ -87,6 +87,16 @@ except Exception:
     MasterRunner = None
 
 try:
+    from app.engines.broker_behavior_engine import summarize_broker_behavior
+except Exception:
+    summarize_broker_behavior = None
+
+try:
+    from app.engines.orderbook_microstructure import normalize_orderbook
+except Exception:
+    normalize_orderbook = None
+
+try:
     from app.knowledge_base.kb_service import kb_service
 except Exception:
     kb_service = None
@@ -300,6 +310,19 @@ def _pct_change(close: Any, prev: Any) -> float:
     if close_f <= 0 or prev_f <= 0:
         return 0.0
     return ((close_f - prev_f) / prev_f) * 100
+
+
+def _idx_tick_size(price: float) -> int:
+    price = float(price or 0)
+    if price < 200:
+        return 1
+    if price < 500:
+        return 2
+    if price < 2000:
+        return 5
+    if price < 5000:
+        return 10
+    return 25
 
 
 async def build_market_execution_regime() -> Dict[str, Any]:
@@ -2966,11 +2989,306 @@ def _manual_top_gainer_score(item: Dict[str, Any], rank: int) -> Dict[str, Any]:
     }
 
 
+def _criterion(ok: Optional[bool], label: str, value: Any, note: str = "") -> Dict[str, Any]:
+    status = "PASS" if ok is True else "FAIL" if ok is False else "UNKNOWN"
+    return {"status": status, "label": label, "value": value, "note": note}
+
+
+def _safe_rows(payload: Any) -> List[dict]:
+    if isinstance(payload, list):
+        return [x for x in payload if isinstance(x, dict)]
+    if isinstance(payload, dict):
+        for key in ("data", "items", "rows", "result"):
+            if isinstance(payload.get(key), list):
+                return [x for x in payload[key] if isinstance(x, dict)]
+    return []
+
+
+def _calc_atr_pct_from_ohlcv(ohlcv: List[Dict[str, Any]], price: float) -> float:
+    if len(ohlcv) < 15 or price <= 0:
+        return 0.0
+    trs: List[float] = []
+    for idx in range(max(1, len(ohlcv) - 14), len(ohlcv)):
+        cur = ohlcv[idx]
+        prev = ohlcv[idx - 1]
+        high = to_float(cur.get("high"))
+        low = to_float(cur.get("low"))
+        prev_close = to_float(prev.get("close"))
+        if high <= 0 or low <= 0 or prev_close <= 0:
+            continue
+        trs.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
+    atr = sum(trs) / len(trs) if trs else 0.0
+    return round((atr / price) * 100, 2) if atr > 0 else 0.0
+
+
+def _summarize_mtf_vwap(rows: Any, price: float) -> Dict[str, Any]:
+    data = _safe_rows(rows)
+    if not data:
+        return {"available": False, "above_vwap": None, "vwap": 0.0, "rows": 0}
+    latest = data[-1]
+    vwap = to_float(
+        latest.get("vwap")
+        or latest.get("avg")
+        or latest.get("average")
+        or latest.get("wap")
+    )
+    close = to_float(latest.get("close") or latest.get("price") or latest.get("last") or price)
+    if vwap <= 0:
+        return {"available": True, "above_vwap": None, "vwap": 0.0, "rows": len(data), "latest_price": close}
+    return {
+        "available": True,
+        "above_vwap": close >= vwap,
+        "vwap": round(vwap, 2),
+        "rows": len(data),
+        "latest_price": close,
+    }
+
+
+def _broker_top3_accumulation(broker_rows: Any) -> Dict[str, Any]:
+    rows = _safe_rows(broker_rows)
+    if not rows:
+        return {"available": False, "accumulation_edge_pct": 0.0}
+    normalized = []
+    for row in rows:
+        buy = to_float(row.get("buy_value") or row.get("buy") or row.get("buy_val"))
+        sell = to_float(row.get("sell_value") or row.get("sell") or row.get("sell_val"))
+        net = row.get("net_value")
+        if net is None:
+            net = buy - sell
+        normalized.append({"row": row, "buy": buy, "sell": sell, "net": to_float(net)})
+    top_buy = sorted(normalized, key=lambda x: x["buy"], reverse=True)[:3]
+    top_sell = sorted(normalized, key=lambda x: x["sell"], reverse=True)[:3]
+    buy_value = sum(x["buy"] for x in top_buy)
+    sell_value = sum(x["sell"] for x in top_sell)
+    edge = ((buy_value - sell_value) / sell_value * 100) if sell_value > 0 else (100.0 if buy_value > 0 else 0.0)
+    return {
+        "available": True,
+        "accumulation_edge_pct": round(edge, 2),
+        "top3_buy_value": round(buy_value, 2),
+        "top3_sell_value": round(sell_value, 2),
+    }
+
+
+def _large_lot_proxy(item: Dict[str, Any], time_table: Any) -> Dict[str, Any]:
+    rows = _safe_rows(time_table)
+    lots = []
+    for row in rows:
+        lots.append(to_float(row.get("lot") or row.get("volume") or row.get("buy_lot") or row.get("sell_lot")))
+    max_lot = max(lots) if lots else 0.0
+    avg_lot = (to_float(item.get("volume")) / max(to_float(item.get("freq")), 1.0)) if to_float(item.get("freq")) > 0 else 0.0
+    proxy = max(max_lot, avg_lot)
+    return {"available": bool(rows) or avg_lot > 0, "max_or_avg_lot": round(proxy, 2), "pass": proxy > 500}
+
+
+def _tick_speed_proxy(item: Dict[str, Any], time_table: Any) -> Dict[str, Any]:
+    rows = _safe_rows(time_table)
+    if rows:
+        latest = rows[-1]
+        freq = to_float(latest.get("freq") or latest.get("frequency") or latest.get("trade_frequency"))
+        ticks_per_10s = freq / 30 if freq else 0.0
+        return {"available": True, "ticks_per_10s": round(ticks_per_10s, 2), "pass": ticks_per_10s > 30}
+    freq = to_float(item.get("freq"))
+    ticks_per_10s = freq / 900 if freq else 0.0
+    return {"available": freq > 0, "ticks_per_10s": round(ticks_per_10s, 2), "pass": ticks_per_10s > 30, "proxy": "daily_freq_rough"}
+
+
+def _round_number_breakthrough(price: float) -> Dict[str, Any]:
+    if price <= 0:
+        return {"available": False, "pass": None, "nearest_round": 0}
+    major_step = 1000 if price >= 1000 else 500 if price >= 500 else 100 if price >= 100 else 50
+    nearest = math.floor(price / major_step) * major_step
+    tick = _idx_tick_size(price)
+    passed = price >= nearest + tick if nearest > 0 else True
+    return {"available": True, "pass": passed, "nearest_round": nearest, "tick": tick}
+
+
+async def _manual_master_layer_validate(item: Dict[str, Any], mode: Mode) -> Dict[str, Any]:
+    ticker = str(item.get("ticker") or item.get("code") or "").upper()
+    price = to_float(item.get("price") or item.get("last_price"))
+    checks: Dict[str, Any] = {}
+    payloads = await asyncio.gather(
+        asyncio.wait_for(fetch_ohlcv_safe(ticker), timeout=7),
+        invesgo_call("get_multi_timeframe_chart", ticker, timeframe="5"),
+        invesgo_call("get_multi_timeframe_chart", ticker, timeframe="15"),
+        invesgo_call("get_broker_summary", ticker),
+        invesgo_call("get_orderbook", ticker),
+        invesgo_call("get_time_table", ticker, range_minutes=5),
+        invesgo_call("get_momentum_chart", ticker, range_minutes=5),
+        return_exceptions=True,
+    )
+    ohlcv = payloads[0] if isinstance(payloads[0], list) else []
+    mtf5 = [] if isinstance(payloads[1], Exception) else payloads[1]
+    mtf15 = [] if isinstance(payloads[2], Exception) else payloads[2]
+    broker_rows = [] if isinstance(payloads[3], Exception) else payloads[3]
+    orderbook = {} if isinstance(payloads[4], Exception) else payloads[4]
+    time_table = [] if isinstance(payloads[5], Exception) else payloads[5]
+    momentum = [] if isinstance(payloads[6], Exception) else payloads[6]
+
+    metrics = calc_prefilter_metrics(ohlcv) if ohlcv else None
+    if metrics:
+        price = price or to_float(metrics.get("price"))
+        atr_pct = _calc_atr_pct_from_ohlcv(ohlcv, price)
+        opening_gap = _pct_change(metrics.get("open"), ohlcv[-2].get("close") if len(ohlcv) >= 2 else 0)
+        support_preserved = to_float(metrics.get("low")) >= to_float(metrics.get("open")) * 0.995 if to_float(metrics.get("open")) > 0 else None
+        checks["rvol"] = _criterion(to_float(metrics.get("rvol")) >= 1.5, "RVOL >= 1.5x", metrics.get("rvol"))
+        checks["atr_pct"] = _criterion(atr_pct < 5 if atr_pct else None, "ATR Percentage < 5%", atr_pct)
+        checks["opening_gap"] = _criterion(abs(opening_gap) < 2 if opening_gap else None, "Opening Gap < 2%", round(opening_gap, 2))
+        checks["support_preservation"] = _criterion(support_preserved, "Low tidak tembus 0.5% di bawah open", metrics.get("low"))
+    else:
+        checks["rvol"] = _criterion(None, "RVOL >= 1.5x", None, "OHLCV belum tersedia")
+        checks["atr_pct"] = _criterion(None, "ATR Percentage < 5%", None, "OHLCV belum tersedia")
+        checks["opening_gap"] = _criterion(None, "Opening Gap < 2%", None, "OHLCV belum tersedia")
+        checks["support_preservation"] = _criterion(None, "Low tidak tembus 0.5% di bawah open", None, "OHLCV belum tersedia")
+
+    vwap5 = _summarize_mtf_vwap(mtf5, price)
+    vwap15 = _summarize_mtf_vwap(mtf15, price)
+    vwap_ok = None
+    if vwap5.get("above_vwap") is not None or vwap15.get("above_vwap") is not None:
+        vwap_ok = (vwap5.get("above_vwap") is not False) and (vwap15.get("above_vwap") is not False)
+    checks["vwap_m5_m15"] = _criterion(vwap_ok, "Price > VWAP M5/M15", {"m5": vwap5, "m15": vwap15})
+
+    broker_edge = _broker_top3_accumulation(broker_rows)
+    checks["broker_top3_accumulation"] = _criterion(
+        broker_edge.get("accumulation_edge_pct", 0) > 20 if broker_edge.get("available") else None,
+        "Top 3 Broker Accumulation > 20% vs Dist",
+        broker_edge,
+    )
+    if summarize_broker_behavior is not None:
+        broker_behavior = summarize_broker_behavior(_safe_rows(broker_rows), top_n=5)
+    else:
+        broker_behavior = {"signal": "neutral", "pressure": "neutral"}
+    checks["net_foreign"] = _criterion(to_float(item.get("net_foreign")) >= 0, "Net Foreign Flow >= 0", item.get("net_foreign"))
+    checks["maa_5_session"] = _criterion(None, "MAA Trending Up 5-Session", None, "Butuh agregasi broker multi-session; validasi lanjut di Analytic")
+    large_lot = _large_lot_proxy(item, time_table)
+    checks["large_lot"] = _criterion(large_lot.get("pass") if large_lot.get("available") else None, "Large Lot > 500 lot/transaksi", large_lot)
+
+    normalized_ob = normalize_orderbook(orderbook) if normalize_orderbook is not None else {"available": False}
+    bids = normalized_ob.get("bids") or []
+    asks = normalized_ob.get("asks") or []
+    bid3 = sum(to_float(x.get("lot")) for x in bids[:3])
+    ask3 = sum(to_float(x.get("lot")) for x in asks[:3])
+    ofi_ratio = bid3 / ask3 if ask3 > 0 else 0
+    checks["giant_bid"] = _criterion(bid3 > ask3 if normalized_ob.get("available") else None, "Bid L1-3 > Offer L1-3", {"bid3": bid3, "ask3": ask3})
+    checks["ofi"] = _criterion(ofi_ratio > 1.5 if normalized_ob.get("available") else None, "OFI Bids > Asks 1.5x", round(ofi_ratio, 2))
+    checks["spread"] = _criterion(to_float(normalized_ob.get("spread_pct")) < 1 if normalized_ob.get("available") else None, "Bid/Offer Spread < 1%", normalized_ob.get("spread_pct"))
+    checks["aggressor_ratio"] = _criterion(None, "Aggressor Ratio HK/HAKI > 1.2x", None, "Endpoint tick/HK-HAKI belum pasti; proxy di Analytic dari time table")
+    tick_speed = _tick_speed_proxy(item, time_table)
+    checks["tick_speed"] = _criterion(tick_speed.get("pass") if tick_speed.get("available") else None, "Tick Speed > 30/10s", tick_speed)
+
+    tt_rows = _safe_rows(time_table)
+    volume_decay_ok = None
+    if len(tt_rows) >= 2:
+        cur_vol = to_float(tt_rows[-1].get("volume") or tt_rows[-1].get("lot") or tt_rows[-1].get("buy_lot"))
+        prev_vol = to_float(tt_rows[-2].get("volume") or tt_rows[-2].get("lot") or tt_rows[-2].get("buy_lot"))
+        volume_decay_ok = cur_vol > prev_vol if prev_vol > 0 else None
+        volume_decay_value = {"current": cur_vol, "previous": prev_vol}
+    else:
+        volume_decay_value = None
+    checks["volume_decay"] = _criterion(volume_decay_ok, "M15 Volume current > previous", volume_decay_value)
+    checks["sector_correlation"] = _criterion(None, "Correlation > 0.6 with Sector Leader", None, "Butuh sector leader intraday; validasi lanjut")
+    rn = _round_number_breakthrough(price)
+    checks["round_number"] = _criterion(rn.get("pass") if rn.get("available") else None, "1 tick di atas round number", rn)
+
+    pass_count = sum(1 for x in checks.values() if x.get("status") == "PASS")
+    fail_count = sum(1 for x in checks.values() if x.get("status") == "FAIL")
+    unknown_count = sum(1 for x in checks.values() if x.get("status") == "UNKNOWN")
+    hard_fail_keys = {"vwap_m5_m15", "rvol", "broker_top3_accumulation", "ofi", "spread"}
+    hard_fails = [key for key in hard_fail_keys if checks.get(key, {}).get("status") == "FAIL"]
+    master_score = round(clamp(50 + pass_count * 4 - fail_count * 8 - unknown_count * 1.5), 2)
+    status = "MASTER_FAIL" if hard_fails else "MASTER_PASS" if master_score >= 70 and fail_count <= 1 else "MASTER_CONDITIONAL"
+    return {
+        "available": True,
+        "status": status,
+        "score": master_score,
+        "pass_count": pass_count,
+        "fail_count": fail_count,
+        "unknown_count": unknown_count,
+        "hard_fails": hard_fails,
+        "checks": checks,
+        "broker_behavior": broker_behavior,
+        "time_table_rows": len(tt_rows),
+        "momentum_rows": len(_safe_rows(momentum)),
+        "quota_policy": "Master layer dipanggil hanya untuk shortlist manual, bukan 970 saham.",
+    }
+
+
+async def _apply_manual_master_layer(scored: List[Dict[str, Any]], mode: Mode, enrich_limit: int = 8) -> List[Dict[str, Any]]:
+    shortlist = scored[:max(1, enrich_limit)]
+    sem = asyncio.Semaphore(2)
+
+    async def enrich(item: Dict[str, Any]) -> Dict[str, Any]:
+        async with sem:
+            try:
+                master = await _manual_master_layer_validate(item, mode)
+            except Exception as exc:
+                master = {
+                    "available": False,
+                    "status": "MASTER_UNKNOWN",
+                    "score": 50,
+                    "error": str(exc)[:160],
+                    "quota_policy": "Master layer gagal; fallback Stage A tetap dipakai.",
+                }
+            out = dict(item)
+            out["manual_master_layer"] = master
+            if master.get("available"):
+                out["final_score"] = round(clamp(to_float(out.get("final_score")) * 0.55 + to_float(master.get("score")) * 0.45), 2)
+                out["score"] = out["final_score"]
+                if master.get("status") == "MASTER_FAIL":
+                    out["screener_lane"] = "NO_CHASE_RADAR"
+                    out["signal"] = "NEUTRAL"
+                    out["watchlist_only"] = True
+                    out["analytic_expectation"] = "REJECT_FATAL_RISK"
+                    if isinstance(out.get("top_gainer_opportunity"), dict):
+                        out["top_gainer_opportunity"]["executable"] = False
+                        out["top_gainer_opportunity"]["conditional"] = False
+                        out["top_gainer_opportunity"]["radar_only"] = True
+                        out["top_gainer_opportunity"]["execution_bias"] = "REJECT_FATAL_RISK"
+                elif master.get("status") == "MASTER_CONDITIONAL" and out.get("analytic_expectation") == "EXECUTABLE_TOP3":
+                    out["analytic_expectation"] = "CONDITIONAL_EXECUTION"
+                    out["signal"] = "HOLD"
+                    out["screener_lane"] = "MANUAL_CONDITIONAL_EXECUTION"
+                    if isinstance(out.get("top_gainer_opportunity"), dict):
+                        out["top_gainer_opportunity"]["conditional"] = True
+                        out["top_gainer_opportunity"]["execution_bias"] = "CONDITIONAL_EXECUTION"
+            return out
+
+    enriched = await asyncio.gather(*[enrich(x) for x in shortlist])
+    by_code = {str(x.get("ticker")): x for x in enriched}
+    merged = []
+    for x in scored:
+        item = by_code.get(str(x.get("ticker")), x)
+        if "manual_master_layer" not in item:
+            item = dict(item)
+            item["manual_master_layer"] = {
+                "available": False,
+                "status": "PENDING_NOT_ENRICHED",
+                "score": 0,
+                "quota_policy": "Tidak dipanggil pada batch ini agar token Invezgo hemat; naikkan ranking Stage A untuk validasi berikutnya.",
+            }
+            if item.get("analytic_expectation") == "EXECUTABLE_TOP3":
+                item["analytic_expectation"] = "PENDING_MASTER_LAYER"
+                item["screener_lane"] = "MANUAL_CONDITIONAL_EXECUTION"
+        merged.append(item)
+    merged.sort(
+        key=lambda x: (
+            1 if (x.get("manual_master_layer") or {}).get("available") else 0,
+            1 if x.get("analytic_expectation") == "EXECUTABLE_TOP3" else 0,
+            1 if x.get("analytic_expectation") == "CONDITIONAL_EXECUTION" else 0,
+            to_float(x.get("final_score")),
+            to_float((x.get("manual_master_layer") or {}).get("score")),
+            to_float(x.get("value")),
+        ),
+        reverse=True,
+    )
+    return merged
+
+
 @router.post("/manual-top-gainer/upload")
 async def upload_manual_top_gainer(
     mode: Mode = Form(default="intraday"),
     raw_text: str = Form(default=""),
     file: Optional[UploadFile] = File(default=None),
+    master_layer: bool = Form(default=True),
 ) -> Dict[str, Any]:
     started = time.time()
     source_name = "manual_text"
@@ -2993,6 +3311,8 @@ async def upload_manual_top_gainer(
         ),
         reverse=True,
     )
+    if master_layer and scored:
+        scored = await _apply_manual_master_layer(scored, mode, enrich_limit=8)
     for idx, item in enumerate(scored, start=1):
         item["manual_rank"] = idx
         item["mover_rank"] = idx

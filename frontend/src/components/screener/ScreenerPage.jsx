@@ -159,6 +159,7 @@ export default function ScreenerPage() {
     try {
       const form = new FormData();
       form.append("mode", mode.toLowerCase());
+      form.append("master_layer", "true");
       if (manualFile) form.append("file", manualFile);
       if (manualText.trim()) form.append("raw_text", manualText.trim());
       const res = await fetch(`${BACKEND_URL}/api/screener/manual-top-gainer/upload`, {
@@ -485,6 +486,19 @@ function StockCard({ stock, rank, onClick }) {
             </div>
           </div>
         )}
+        {stock.manual_master_layer && (
+          <div style={S.masterLayerBox}>
+            <div style={S.masterLayerTitle}>Master Layer Ultimate</div>
+            <div style={S.officialGrid}>
+              <span>Status: {String(stock.manual_master_layer.status || "-").replace(/_/g, " ")}</span>
+              <span>Score: {Number(stock.manual_master_layer.score || 0).toFixed(1)}</span>
+              <span>Pass: {stock.manual_master_layer.pass_count ?? "-"}</span>
+              <span>Fail: {stock.manual_master_layer.fail_count ?? "-"}</span>
+              <span>Unknown: {stock.manual_master_layer.unknown_count ?? "-"}</span>
+              <span>Policy: shortlist only</span>
+            </div>
+          </div>
+        )}
         {stock.top_gainer_opportunity?.radar_only && (
           <div style={S.noChaseBox}>
             <div style={S.noChaseTitle}>No-Chase Top Gainer Radar</div>
@@ -594,6 +608,8 @@ const S = {
   moneyMakerTitle: { color: "#a21caf", fontSize: 10, fontWeight: "bold", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 },
   moverBox: { border: "1px solid #fdba74", backgroundColor: "#fff7ed", borderRadius: 6, padding: 8, marginBottom: 10 },
   moverTitle: { color: "#c2410c", fontSize: 10, fontWeight: "bold", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 },
+  masterLayerBox: { border: "1px solid #86efac", backgroundColor: "#f0fdf4", borderRadius: 6, padding: 8, marginBottom: 10 },
+  masterLayerTitle: { color: "#15803d", fontSize: 10, fontWeight: "bold", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 },
   noChaseBox: { border: "1px solid #f59e0b", backgroundColor: "#fffbeb", borderRadius: 6, padding: 8, marginBottom: 10 },
   noChaseTitle: { color: "#b45309", fontSize: 10, fontWeight: "bold", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 },
   officialGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, color: "#475569", fontSize: 10, fontFamily: "monospace" },
