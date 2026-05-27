@@ -150,7 +150,7 @@ export default function ScreenerPage() {
 
   const uploadManualTopGainer = async () => {
     if (!manualFile && !manualText.trim()) {
-      setManualError("Upload file Excel/CSV atau paste tabel Stockbit dulu.");
+      setManualError("Belum ada file atau data paste. Klik kotak Upload Excel/CSV sampai nama file tampil, atau paste data asli ke box kanan.");
       return;
     }
     setManualLoading(true);
@@ -237,15 +237,24 @@ export default function ScreenerPage() {
           <span style={S.manualBadge}>hemat token</span>
         </div>
         <div style={S.manualGrid}>
-          <label style={S.fileDrop}>
+          <label
+            style={S.fileDrop}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const file = e.dataTransfer.files?.[0];
+              if (file) setManualFile(file);
+            }}
+          >
             <input
               type="file"
-              accept=".xlsx,.csv,.txt"
+              accept=".xlsx,.xls,.csv,.txt"
               style={{ display: "none" }}
               onChange={(e) => setManualFile(e.target.files?.[0] || null)}
             />
             <span style={S.fileTitle}>{manualFile ? manualFile.name : "Upload Excel / CSV"}</span>
-            <span style={S.fileSub}>Format Stockbit: Symbol, Price(+%), Value, Volume, Freq, Net Foreign</span>
+            <span style={S.fileSub}>Klik di sini untuk pilih file. Nama file harus tampil sebelum score dijalankan.</span>
+            <span style={S.fileHint}>Format Stockbit: Symbol, Price(+%), Value, Volume, Freq, Net Foreign</span>
           </label>
           <textarea
             value={manualText}
@@ -558,6 +567,7 @@ const S = {
   fileDrop: { border: "1px dashed #86efac", backgroundColor: "#f0fdf4", borderRadius: 8, padding: 14, cursor: "pointer", display: "flex", flexDirection: "column", justifyContent: "center", minHeight: 110 },
   fileTitle: { color: "#14532d", fontWeight: "bold", fontSize: 13, marginBottom: 6, wordBreak: "break-word" },
   fileSub: { color: "#64748b", fontSize: 11, lineHeight: 1.45 },
+  fileHint: { color: "#16a34a", fontSize: 10, lineHeight: 1.45, marginTop: 6, fontWeight: "600" },
   manualTextarea: { minHeight: 110, resize: "vertical", border: "1px solid #cbd5e1", borderRadius: 8, padding: 12, fontSize: 12, color: "#1e293b", fontFamily: "monospace", outline: "none", backgroundColor: "#f8fafc" },
   manualActions: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, marginBottom: 8 },
   manualPrimaryBtn: { padding: "10px 16px", border: "none", borderRadius: 6, backgroundColor: "#16a34a", color: "#ffffff", fontSize: 12, fontWeight: "bold", cursor: "pointer", letterSpacing: 0.5 },
