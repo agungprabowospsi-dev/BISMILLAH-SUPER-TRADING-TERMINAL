@@ -1,7 +1,7 @@
 import MonitoringEnhancementPanel from "./MonitoringEnhancementPanel"
 import React, { useState, useEffect, useRef } from 'react'
 import { useStore } from '../../stores/useStore'
-import { Activity, Plus, Trash2, AlertTriangle, WifiOff, ChevronDown, ChevronUp, Brain } from 'lucide-react'
+import { Activity, Plus, Trash2, AlertTriangle, WifiOff, ChevronDown, ChevronUp, Brain, ShieldCheck, Target } from 'lucide-react'
 import clsx from 'clsx'
 
 const BACKEND = 'https://backend-production-daed.up.railway.app'
@@ -79,6 +79,9 @@ function buildMonitoringPayload(pos) {
     empirical_memory: pos.empirical_memory || pos.analytic_context?.empirical_memory || null,
     name: pos.name || pos.ticker,
     status: pos.status || 'HOLD',
+    transfer_source: pos.transfer_source || 'manual_post_buy',
+    position_guard: pos.position_guard || null,
+    tp_sl_confidence: pos.tp_sl_confidence || null,
     created_at: pos.created_at,
   }
 }
@@ -96,8 +99,42 @@ function normalizeServerPosition(pos) {
     engine_scores: normalizeEngineScores(pos.engine_scores || {}),
     analytic_context: pos.analytic_context || {},
     empirical_memory: pos.empirical_memory || pos.analytic_context?.empirical_memory || null,
+    position_guard: pos.position_guard || null,
+    tp_sl_confidence: pos.tp_sl_confidence || null,
   }
   return normalized
+}
+
+function mapGuardStatus(guard, fallback = 'HOLD') {
+  const state = String(guard?.state || '').toUpperCase()
+  if (state === 'SL_HIT') return 'EXIT'
+  if (state === 'TP3_REACHED') return 'TP3'
+  if (state === 'TP2_REACHED') return 'TP2'
+  if (state === 'TP1_REACHED') return 'TP1'
+  if (state === 'ACTIVE_DANGER') return 'DANGER'
+  if (state === 'ACTIVE_CAUTION') return 'CAUTION'
+  if (state === 'POSITION_ACTIVE') return 'ACTIVE'
+  return fallback
+}
+
+function confidenceClass(value, danger = false) {
+  const n = Number(value || 0)
+  if (danger) {
+    return n >= 65 ? 'text-accent-red' : n >= 40 ? 'text-accent-gold' : 'text-accent-green'
+  }
+  return n >= 65 ? 'text-accent-green' : n >= 40 ? 'text-accent-gold' : 'text-accent-red'
+}
+
+function ConfidenceMiniBar({ value, danger = false }) {
+  const pct = Math.max(0, Math.min(100, Number(value || 0)))
+  const color = danger
+    ? pct >= 65 ? 'bg-accent-red' : pct >= 40 ? 'bg-accent-gold' : 'bg-accent-green'
+    : pct >= 65 ? 'bg-accent-green' : pct >= 40 ? 'bg-accent-gold' : 'bg-accent-red'
+  return (
+    <div className="h-1.5 rounded-full bg-border-dim overflow-hidden mt-1">
+      <div className={clsx('h-full rounded-full transition-all', color)} style={{ width: `${pct}%` }} />
+    </div>
+  )
 }
 
 async function fetchServerPositions() {
@@ -221,8 +258,11 @@ export default function MonitoringPage() {
     const pnlPct = (pnlAmt / pos.entry_price) * 100
     let status = 'HOLD'
     if (price <= pos.stop_loss) status = 'EXIT'
-    else if (pos.take_profit_1 && price >= pos.take_profit_1) status = 'TP HIT'
+    else if (pos.take_profit_3 && price >= pos.take_profit_3) status = 'TP3'
+    else if (pos.take_profit_2 && price >= pos.take_profit_2) status = 'TP2'
+    else if (pos.take_profit_1 && price >= pos.take_profit_1) status = 'TP1'
     else if (engine?.position === 'warning') status = 'WARNING'
+    status = mapGuardStatus(engine?.position_guard, status)
     if (market) setBackendOnline(true)
     return {
       ...pos,
@@ -241,6 +281,8 @@ export default function MonitoringPage() {
       rr: engine?.rr ?? pos.rr,
       analytic_context: engine?.analytic_context ?? pos.analytic_context,
       empirical_memory: engine?.empirical_memory ?? pos.empirical_memory,
+      position_guard: engine?.position_guard ?? pos.position_guard,
+      tp_sl_confidence: engine?.tp_sl_confidence ?? pos.tp_sl_confidence,
     }
   }
 
@@ -287,8 +329,11 @@ export default function MonitoringPage() {
       breadth_ratio: inputCtx.breadth_ratio || 50,
       final_score: inputCtx.final_score || 50.0,
       kb_context: inputCtx.kb_context || '',
+      transfer_source: inputCtx.transfer_source || 'manual_post_buy',
       analytic_context: inputCtx.analytic_context || {},
       empirical_memory: inputCtx.analytic_context?.empirical_memory || null,
+      position_guard: null,
+      tp_sl_confidence: null,
     }
     setMonitoringInput(null)
     setShowForm(false)
@@ -364,7 +409,7 @@ export default function MonitoringPage() {
 
       {showForm && (
         <div className="card p-5 mb-5 border-accent-green/20 animate-slide-up">
-          <p className="label-xs mb-4">NEW POSITION</p>
+          <p className="label-xs mb-4">NEW POSITION - SUDAH BUY</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             {[
               ['Ticker *','ticker','text','BBCA'],
@@ -415,9 +460,10 @@ export default function MonitoringPage() {
 
             return (
               <div key={pos.id || i} className={clsx('card p-4 space-y-3',
-                status==='WARNING'&&'border-accent-gold/30',
+                (status==='WARNING'||status==='CAUTION')&&'border-accent-gold/30',
                 status==='EXIT'&&'border-accent-red/30',
-                status==='TP HIT'&&'border-accent-green/30')}>
+                ['TP HIT','TP1','TP2','TP3','ACTIVE'].includes(status)&&'border-accent-green/30',
+                status==='DANGER'&&'border-accent-red/40')}>
 
                 {/* Header */}
                 <div className="flex items-center justify-between">
@@ -426,9 +472,11 @@ export default function MonitoringPage() {
                       <span className="font-display font-bold text-lg text-white">{pos.ticker}</span>
                       <span className={clsx('text-xs font-mono font-semibold px-2 py-0.5 rounded border',
                         status==='HOLD'?'text-slate-400 border-slate-600/30 bg-slate-600/5':
+                        status==='ACTIVE'?'text-accent-green border-accent-green/30 bg-accent-green/5':
                         status==='EXIT'?'text-accent-red border-accent-red/30 bg-accent-red/5':
-                        status==='TP HIT'?'text-accent-green border-accent-green/30 bg-accent-green/5':
-                        status==='WARNING'?'text-accent-gold border-accent-gold/30 bg-accent-gold/5':
+                        ['TP HIT','TP1','TP2','TP3'].includes(status)?'text-accent-green border-accent-green/30 bg-accent-green/5':
+                        ['WARNING','CAUTION'].includes(status)?'text-accent-gold border-accent-gold/30 bg-accent-gold/5':
+                        status==='DANGER'?'text-accent-red border-accent-red/30 bg-accent-red/5':
                         'text-slate-400 border-slate-600/30 bg-slate-600/5')}>{status}</span>
                     </div>
                     {pos.name && (
@@ -514,6 +562,56 @@ export default function MonitoringPage() {
                         {Number(pos.rr.rr_current||0).toFixed(2)}
                       </p>
                     </div>
+                  </div>
+                )}
+
+                {(pos.position_guard || pos.tp_sl_confidence) && (
+                  <div className="bg-bg-secondary border border-border-dim rounded p-3 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-accent-green"/>
+                        <p className="label-xs">POST-BUY GUARD</p>
+                      </div>
+                      <span className="text-[10px] font-mono font-bold text-accent-blue uppercase">
+                        {String(pos.position_guard?.state || 'POSITION_ACTIVE').replace(/_/g, ' ')}
+                      </span>
+                    </div>
+                    {pos.position_guard?.message && (
+                      <p className="text-[11px] font-mono text-slate-400 leading-relaxed">{pos.position_guard.message}</p>
+                    )}
+                    {pos.tp_sl_confidence && (
+                      <div className="space-y-2 pt-2 border-t border-border-dim">
+                        <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                          {[
+                            ['TP1', pos.tp_sl_confidence.tp1_confidence, false],
+                            ['TP2', pos.tp_sl_confidence.tp2_confidence, false],
+                            ['TP3', pos.tp_sl_confidence.tp3_confidence, false],
+                            ['SL Risk', pos.tp_sl_confidence.sl_risk_confidence, true],
+                          ].map(([label, value, danger]) => (
+                            <div key={label} className="rounded bg-bg-primary/50 border border-border-dim p-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-slate-600">{label}</span>
+                                <span className={clsx('font-bold', confidenceClass(value, danger))}>{Number(value || 0).toFixed(1)}%</span>
+                              </div>
+                              <ConfidenceMiniBar value={value} danger={danger}/>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex items-center justify-between gap-2 text-[10px] font-mono">
+                          <span className="text-slate-600">Regime</span>
+                          <span className="text-white font-bold uppercase">{String(pos.tp_sl_confidence.market_regime || '-').replace(/_/g, ' ')}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 text-[10px] font-mono">
+                          <span className="text-slate-600">Support Score</span>
+                          <span className="text-accent-green font-bold">{Number(pos.tp_sl_confidence.base_support_score || 0).toFixed(1)}%</span>
+                        </div>
+                        {(pos.tp_sl_confidence.confidence_drivers || []).slice(0, 2).map((driver, idx) => (
+                          <p key={idx} className="text-[10px] font-mono text-slate-500 leading-relaxed flex gap-1">
+                            <Target className="w-3 h-3 shrink-0 mt-0.5 text-slate-600"/>{driver}
+                          </p>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 

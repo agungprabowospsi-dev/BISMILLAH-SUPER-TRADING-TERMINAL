@@ -973,6 +973,7 @@ export default function AnalyticPage() {
                 lq45_change:r.lq45_change||0,
                 breadth_ratio:r.market_breadth||50,
                 kb_context:r.rag_used?'rag_active':'',
+                transfer_source:'analytic_post_buy',
                 // ALIGN: Pass GO/NO GO decision to monitoring
                 analytic_context: {
                   go_no_go: r.go_no_go || 'WAIT',
@@ -996,7 +997,7 @@ export default function AnalyticPage() {
                   setup_reason: r.setup_reason || ''
                 }
               })} disabled={!canSendToMonitoring} className="btn-primary w-full flex items-center justify-center gap-2 mt-2 disabled:opacity-50 disabled:cursor-not-allowed">
-                {canSendToMonitoring ? 'Monitor Posisi' : 'Belum Bisa Monitor'}<ArrowRight className="w-4 h-4"/>
+                {canSendToMonitoring ? 'Saya Sudah Buy - Monitor Posisi' : 'Belum Bisa Monitor'}<ArrowRight className="w-4 h-4"/>
               </button>
             </div>
           </div>

@@ -319,6 +319,186 @@ def analytic_alignment_warnings(analytic_context: dict, current: float) -> list:
             })
     return warnings
 
+def _clamp_pct(value: float, low: float = 1.0, high: float = 99.0) -> float:
+    return round(max(low, min(high, float(value or 0))), 1)
+
+def _warning_counts(warnings: list) -> dict:
+    counts = {"high": 0, "medium": 0, "low": 0}
+    for warning in warnings or []:
+        level = str(warning.get("level") or warning.get("severity") or "low").lower()
+        if level.startswith("high"):
+            counts["high"] += 1
+        elif level.startswith("med"):
+            counts["medium"] += 1
+        else:
+            counts["low"] += 1
+    return counts
+
+def _extract_win_probability(value: Any) -> float:
+    if isinstance(value, dict):
+        return _to_float(value.get("probability"), 50.0)
+    return _to_float(value, 50.0)
+
+def _regime_adjustment(regime: Any) -> tuple[float, str]:
+    text = str(regime or "SIDEWAYS").upper()
+    if any(key in text for key in ("BULL", "STRONG", "RISK_ON", "RECOVERY")):
+        return 7.0, "Market regime supportive; TP ladder diberi ruang lebih besar."
+    if any(key in text for key in ("BEAR", "BAD", "RED", "RISK_OFF", "WEAK")):
+        return -12.0, "Market regime defensif; confidence TP ditahan dan SL risk dinaikkan."
+    if any(key in text for key in ("SIDEWAYS", "CHOP", "MIXED")):
+        return -3.0, "Market regime sideways; monitoring memakai bias konservatif."
+    return 0.0, "Market regime netral."
+
+def _target_confidence(base: float, entry: float, current: float, target: float, level: str) -> float:
+    if not target or target <= entry:
+        return 0.0
+    if current >= target:
+        return 98.0
+    distance = target - entry
+    progress = (current - entry) / distance if distance else 0.0
+    progress_bonus = max(-18.0, min(18.0, progress * 24.0))
+    decay = {"tp1": 0.0, "tp2": -16.0, "tp3": -30.0}.get(level, 0.0)
+    return _clamp_pct(base + progress_bonus + decay, 1.0, 98.0)
+
+def _build_position_guard_state(pos: dict, current: float, warnings: list) -> dict:
+    entry = _to_float(pos.get("entry_price"))
+    stop = _to_float(pos.get("stop_loss"))
+    tp1 = _to_float(pos.get("take_profit_1"), _to_float(pos.get("take_profit")))
+    tp2 = _to_float(pos.get("take_profit_2"))
+    tp3 = _to_float(pos.get("take_profit_3"))
+    counts = _warning_counts(warnings)
+
+    if stop and current <= stop:
+        state = "SL_HIT"
+        action = "EXIT_REQUIRED"
+        message = "SL tersentuh. Monitoring berubah menjadi exit-required sesuai plan."
+    elif tp3 and current >= tp3:
+        state = "TP3_REACHED"
+        action = "TARGET_COMPLETE"
+        message = "TP3 tercapai. Posisi sudah menyelesaikan full target; user boleh stop monitoring."
+    elif tp2 and current >= tp2:
+        state = "TP2_REACHED"
+        action = "TRAILING_PROTECT"
+        message = "TP2 tercapai. Proteksi profit lebih ketat dan pantau distribusi."
+    elif tp1 and current >= tp1:
+        state = "TP1_REACHED"
+        action = "PROTECT_PARTIAL_PROFIT"
+        message = "TP1 tercapai. Monitoring masuk protect mode sampai TP2/TP3 atau user stop."
+    elif counts["high"] >= 2:
+        state = "ACTIVE_DANGER"
+        action = "RISK_REVIEW"
+        message = "Beberapa warning high aktif. Evaluasi exit/kurangi posisi sesuai risk plan."
+    elif counts["high"] >= 1 or counts["medium"] >= 3:
+        state = "ACTIVE_CAUTION"
+        action = "HOLD_TIGHT"
+        message = "Posisi masih aktif tetapi warning meningkat. Jangan tambah posisi tanpa konfirmasi baru."
+    else:
+        state = "POSITION_ACTIVE"
+        action = "HOLD_MONITOR"
+        message = "Posisi aktif; monitoring menjaga tesis analytic sampai TP/SL/stop manual."
+
+    pnl_pct = round((current - entry) / entry * 100, 2) if entry else 0
+    return {
+        "state": state,
+        "recommended_action": action,
+        "message": message,
+        "post_buy_only": True,
+        "user_has_bought_assumption": True,
+        "pnl_pct": pnl_pct,
+        "tp_reached": {
+            "tp1": bool(tp1 and current >= tp1),
+            "tp2": bool(tp2 and current >= tp2),
+            "tp3": bool(tp3 and current >= tp3),
+        },
+        "stop_monitoring_allowed": state in ("TP1_REACHED", "TP2_REACHED", "TP3_REACHED", "SL_HIT"),
+    }
+
+def build_tp_sl_confidence(pos: dict, current: float, engine_context: dict, empirical_memory: dict, warnings: list) -> dict:
+    analytic_context = pos.get("analytic_context") or {}
+    entry = _to_float(pos.get("entry_price"))
+    stop = _to_float(pos.get("stop_loss"))
+    tp1 = _to_float(pos.get("take_profit_1"), _to_float(pos.get("take_profit")))
+    tp2 = _to_float(pos.get("take_profit_2"))
+    tp3 = _to_float(pos.get("take_profit_3"))
+    market_regime = (
+        pos.get("market_regime")
+        or analytic_context.get("market_regime")
+        or (analytic_context.get("action_plan") or {}).get("market_regime")
+        or "SIDEWAYS"
+    )
+
+    analytic_conf = _to_float(analytic_context.get("go_confidence"), _to_float(pos.get("final_score"), 50.0))
+    win_prob = _extract_win_probability(analytic_context.get("win_probability"))
+    engine_score = _to_float((engine_context or {}).get("composite_score"), 50.0)
+    bullish = _to_float((engine_context or {}).get("bullish_count"), 0.0)
+    bearish = _to_float((engine_context or {}).get("bearish_count"), 0.0)
+    money_maker = (engine_context or {}).get("money_maker") or analytic_context.get("money_maker") or {}
+    mm_score = _to_float(money_maker.get("score"), 50.0)
+    mm_verdict = str(money_maker.get("verdict") or "").upper()
+    empirical_wr = _to_float((empirical_memory or {}).get("winrate"), 50.0) if (empirical_memory or {}).get("available") else 50.0
+    counts = _warning_counts(warnings)
+    regime_adj, regime_note = _regime_adjustment(market_regime)
+
+    support_score = (
+        50.0
+        + (analytic_conf - 50.0) * 0.25
+        + (win_prob - 50.0) * 0.20
+        + (engine_score - 50.0) * 0.35
+        + (mm_score - 50.0) * 0.20
+        + (empirical_wr - 50.0) * 0.25
+        + (bullish - bearish) * 2.0
+        + regime_adj
+        - counts["high"] * 9.0
+        - counts["medium"] * 4.0
+    )
+    if mm_verdict in ("FLOW_OUT_AVOID", "DISTRIBUTION_TRAP", "BFD_REVERSAL"):
+        support_score -= 14.0
+    elif mm_verdict in ("ACCUMULATION", "FLOW_IN_FOLLOW", "SMART_MONEY_IN"):
+        support_score += 8.0
+
+    sl_distance = entry - stop if entry and stop else 0.0
+    sl_progress = ((entry - current) / sl_distance * 35.0) if sl_distance > 0 else 0.0
+    sl_risk = 100.0 - support_score + sl_progress + counts["high"] * 11.0 + counts["medium"] * 4.0
+    if stop and current <= stop:
+        sl_risk = 99.0
+
+    drivers = [
+        f"Analytic confidence {analytic_conf:.1f} dan win probability {win_prob:.1f}.",
+        f"Monitoring engines score {engine_score:.1f} dengan bull/bear {int(bullish)}/{int(bearish)}.",
+        f"Money Maker score {mm_score:.1f} verdict {mm_verdict or 'NEUTRAL'}.",
+        regime_note,
+    ]
+    if (empirical_memory or {}).get("available"):
+        drivers.append(f"15Y memory winrate {empirical_wr:.1f}% ikut menimbang TP/SL.")
+    if counts["high"] or counts["medium"]:
+        drivers.append(f"Warning aktif: high {counts['high']}, medium {counts['medium']}.")
+
+    tp1_conf = _target_confidence(support_score, entry, current, tp1, "tp1")
+    tp2_conf = _target_confidence(support_score, entry, current, tp2, "tp2")
+    tp3_conf = _target_confidence(support_score, entry, current, tp3, "tp3")
+
+    return sanitize_for_json({
+        "scope": "post_buy_position_guardian",
+        "market_regime": market_regime,
+        "base_support_score": _clamp_pct(support_score),
+        "tp1_confidence": tp1_conf,
+        "tp2_confidence": tp2_conf,
+        "tp3_confidence": tp3_conf,
+        "sl_risk_confidence": _clamp_pct(sl_risk),
+        "confidence_drivers": drivers,
+        "source_weights": {
+            "analytic": "go_confidence + win_probability",
+            "engines": "monitoring composite + bull/bear + 35-engine lineage",
+            "money_maker": "score + flow verdict + broker/orderbook/foreign context",
+            "market_regime": "inherited from screener/analytic",
+            "historical_memory": "15Y empirical context when available",
+        },
+        "token_policy": {
+            "extra_invezgo_calls": 0,
+            "reason": "Confidence dihitung dari snapshot Monitoring yang sudah diambil, tanpa polling baru.",
+        },
+    })
+
 @router.post("/start")
 async def start_monitoring(req: MonitoringRequest):
     position = await save_monitoring_position(req)
@@ -813,6 +993,9 @@ async def build_monitoring_result(payload: Any) -> dict:
     except Exception:
         empirical_memory = pos.get("empirical_memory") or {"available": False}
 
+    position_guard = _build_position_guard_state(pos, current, warnings)
+    tp_sl_confidence = build_tp_sl_confidence(pos, current, engine_context, empirical_memory, warnings)
+
     result = {
         **pos,
         "current_price": current,
@@ -825,6 +1008,8 @@ async def build_monitoring_result(payload: Any) -> dict:
         "engine_context": engine_context,
         "empirical_memory": empirical_memory,
         "analytic_context": pos.get("analytic_context", {}),
+        "position_guard": position_guard,
+        "tp_sl_confidence": tp_sl_confidence,
         "warnings": warnings,
     }
     return sanitize_for_json(result)

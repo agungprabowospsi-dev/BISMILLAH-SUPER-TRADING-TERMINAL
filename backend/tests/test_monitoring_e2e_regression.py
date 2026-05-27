@@ -95,6 +95,14 @@ class MonitoringE2ERegressionTest(unittest.TestCase):
         checked_body = checked.json()
         self.assertTrue(checked_body["engine_context"]["broker_behavior_included"])
         self.assertTrue(checked_body["engine_context"]["orderbook_included"])
+        self.assertEqual(checked_body["position_guard"]["state"], "POSITION_ACTIVE")
+        self.assertTrue(checked_body["position_guard"]["post_buy_only"])
+        self.assertIn("tp1_confidence", checked_body["tp_sl_confidence"])
+        self.assertIn("sl_risk_confidence", checked_body["tp_sl_confidence"])
+        self.assertEqual(
+            checked_body["tp_sl_confidence"]["scope"],
+            "post_buy_position_guardian",
+        )
         self.assertEqual(
             checked_body["engine_context"]["orderbook_execution"]["overlay_policy"],
             "additive_only_no_decision_override",
