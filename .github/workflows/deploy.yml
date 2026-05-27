@@ -9,7 +9,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Railway
         run: npm install -g @railway/cli
-      - name: Deploy
-        run: railway up ./backend --path-as-root --service bismillah-backend --environment production --ci
+      - name: Validate Railway secrets
+        run: |
+          test -n "$RAILWAY_API_TOKEN" || (echo "Missing RAILWAY_TOKEN secret" && exit 1)
+          test -n "$RAILWAY_PROJECT_ID" || (echo "Missing RAILWAY_PROJECT_ID secret" && exit 1)
         env:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+      - name: Deploy
+        run: railway up ./backend --path-as-root --project "$RAILWAY_PROJECT_ID" --service bismillah-backend --environment production --ci
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
