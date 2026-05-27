@@ -6,10 +6,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Install Railway
         run: npm install -g @railway/cli
       - name: Deploy
         run: railway up ./backend --path-as-root --service bismillah-backend --environment production --ci
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
