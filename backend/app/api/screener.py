@@ -103,7 +103,7 @@ except Exception:
 
 
 router = APIRouter(tags=["screener"])
-MANUAL_TOP_GAINER_LOGIC_VERSION = "manual_master_sort_v2_2026-05-27"
+MANUAL_TOP_GAINER_LOGIC_VERSION = "manual_batch_top3_v3_2026-05-27"
 
 
 # ===== Request / config =====
@@ -3331,13 +3331,18 @@ async def upload_manual_top_gainer(
     conditional = [x for x in validated if x.get("analytic_expectation") == "CONDITIONAL_EXECUTION"]
     radar = [x for x in validated if x.get("analytic_expectation") == "RADAR_NO_CHASE"]
     rejected = [x for x in validated if x.get("analytic_expectation") == "REJECT_FATAL_RISK"]
-    top3 = (executable + conditional + radar)[:3]
-    if not master_layer and not top3:
-        top3 = scored[:3]
+    top3_pool = executable + conditional + radar + rejected + pending
+    top3 = top3_pool[:3] if top3_pool else scored[:3]
+    for item in top3:
+        item["batch_selected"] = True
+        item["batch_lane"] = "MANUAL_INTRADAY_TOP3"
+        if isinstance(item.get("top_gainer_opportunity"), dict):
+            item["top_gainer_opportunity"]["batch_selected"] = True
+            item["top_gainer_opportunity"]["batch_lane"] = "MANUAL_INTRADAY_TOP3"
     message = (
-        "Upload berhasil; Top 3 siap dikirim ke Analytic sebagai Manual Top Gainer Lane."
+        "Upload berhasil; sistem memilih 3 saham terbaik untuk batch Analytic intraday."
         if top3 else
-        "Upload berhasil, tetapi Master Layer belum menemukan kandidat executable/conditional. Kandidat tervalidasi masuk rejected/no-chase; jangan dipromosikan dari pending."
+        "Upload berhasil, tetapi belum ada baris yang bisa dibentuk menjadi Top 3."
     ) if parsed else "Tidak ada baris top gainer valid. Pastikan ada kolom Symbol dan Price(+%)."
     return {
         "status": "ok" if parsed else "empty",

@@ -36,53 +36,104 @@ const normalizeEngineScoresForMonitoring = (engines) => {
   return {}
 }
 
+const idxTickSize = (price) => {
+  const n = Number(price || 0)
+  if (n < 200) return 1
+  if (n < 500) return 2
+  if (n < 2000) return 5
+  if (n < 5000) return 10
+  return 25
+}
+
+const roundToTick = (value, basePrice, dir = 'nearest') => {
+  const tick = idxTickSize(basePrice || value)
+  const n = Number(value || 0)
+  if (!Number.isFinite(n) || n <= 0) return null
+  if (dir === 'up') return Math.ceil(n / tick) * tick
+  if (dir === 'down') return Math.floor(n / tick) * tick
+  return Math.round(n / tick) * tick
+}
+
+const buildIntradayReviewSetup = (stock = {}, result = {}) => {
+  const action = result?.action_plan || {}
+  const price = Number(action.entry_price || action.trigger_price || stock.price || stock.last_price || result.current_price || result.price || 0)
+  const trigger = roundToTick(action.trigger_price || price * 1.005, price, 'up')
+  const entryLow = roundToTick(action.entry_zone_low || trigger, price, 'nearest')
+  const entryHigh = roundToTick(action.entry_zone_high || trigger * 1.01, price, 'up')
+  const stop = roundToTick(action.stop_loss || result.stop_loss || price * 0.97, price, 'down')
+  const tp1 = roundToTick(action.take_profit_1 || result.tp1 || trigger * 1.03, price, 'up')
+  const tp2 = roundToTick(action.take_profit_2 || result.tp2 || trigger * 1.05, price, 'up')
+  const tp3 = roundToTick(action.take_profit_3 || result.tp3 || trigger * 1.08, price, 'up')
+  const probability = Math.max(
+    45,
+    Math.min(82, Number(result?.go_confidence || result?.win_probability || result?.probability_win || 0) || 55)
+  )
+  return {
+    orderType: String(action.order_type || result.entry_order_type || 'BUY_STOP_LIMIT').replace(/_/g, ' '),
+    trigger,
+    entryLow,
+    entryHigh,
+    stop,
+    tp1,
+    tp2,
+    tp3,
+    probability,
+    tp1Pct: trigger && tp1 ? ((tp1 - trigger) / trigger) * 100 : 3,
+  }
+}
+
 export default function AnalyticPage() {
   const { analyticTicker, setAnalyticTicker, analyticMode, setAnalyticMode, screenerSelectedStock,
     analyticResult, setAnalyticResult, analyticLoading, setAnalyticLoading,
-    analyticError, setAnalyticError, sendToMonitoring } = useStore()
+    analyticError, setAnalyticError, sendToMonitoring,
+    analyticBatch, analyticBatchResults, setAnalyticBatchResults } = useStore()
   const [activeGroup, setActiveGroup] = useState('group1')
   const [marketCtx, setMarketCtx] = useState(null)
   const lastAutoAnalyzeRef = useRef('')
+  const lastBatchAnalyzeRef = useRef('')
+
+  const buildScreenerContext = (stock) => {
+    if (!stock) return null
+    const s = stock
+    const sc = s.final_score || s.score || 0
+    return {
+      grade: sc >= 75 ? 'A' : sc >= 55 ? 'B' : sc >= 45 ? 'C' : 'D',
+      score: sc,
+      wyckoff_phase: s.bandarmology?.wyckoff_phase || s.wyckoff_phase || '',
+      weinstein_stage: s.bandarmology?.weinstein_stage || s.weinstein_stage || 0,
+      vsa_signal: s.bandarmology?.vsa_signal || s.vsa_signal || '',
+      phase: s.phase || s.bandarmology?.phase || '',
+      akumulasi_score: s.akumulasi_score || 50.0,
+      foreign_signal: s.foreign_flow?.signal || '',
+      bandarmology_score: s.bandarmology_composite || s.bandarmology?.score || 0,
+      signal: s.signal || '',
+      rvol: s.rvol || s.volume_ratio || 0,
+      change_pct: s.change_pct || 0,
+      watchlist_only: Boolean(s.watchlist_only),
+      adaptive_prefilter_used: Boolean(s.adaptive_prefilter_used),
+      watchlist_fallback_used: Boolean(s.watchlist_fallback_used),
+      opportunity_lane: s._opportunity_lane || s.opportunity_lane || '',
+      top_gainer_opportunity: s.top_gainer_opportunity || {},
+      market_execution_regime: s.market_execution_regime || '',
+      screener_lane: s.screener_lane || '',
+      analytic_expectation: s.analytic_expectation || '',
+      manual_feed: s.manual_feed || {},
+      manual_rank: s.manual_rank || 0,
+      manual_top_gainer: Boolean(s.manual_feed || s.top_gainer_opportunity?.manual_feed),
+      manual_master_layer: s.manual_master_layer || {},
+      batch_selected: Boolean(s.batch_selected),
+      batch_lane: s.batch_lane || '',
+      value: s.value || 0,
+      freq: s.freq || 0,
+      net_foreign: s.net_foreign || 0,
+    }
+  }
 
   const handleAnalyze = async () => {
     if(!analyticTicker.trim()) return
     setAnalyticLoading(true); setAnalyticError(null); setAnalyticResult(null); setMarketCtx(null)
     try {
-      // SA-6: Build screener_context jika ada
-      let screenerCtx = null
-      if (screenerSelectedStock) {
-        const s = screenerSelectedStock
-        const sc = s.final_score || s.score || 0
-        screenerCtx = {
-          grade: sc >= 75 ? 'A' : sc >= 55 ? 'B' : sc >= 45 ? 'C' : 'D',
-          score: sc,
-          wyckoff_phase: s.bandarmology?.wyckoff_phase || s.wyckoff_phase || '',
-          weinstein_stage: s.bandarmology?.weinstein_stage || s.weinstein_stage || 0,
-          vsa_signal: s.bandarmology?.vsa_signal || s.vsa_signal || '',
-          phase: s.phase || s.bandarmology?.phase || '',
-          akumulasi_score: s.akumulasi_score || 50.0,
-          foreign_signal: s.foreign_flow?.signal || '',
-          bandarmology_score: s.bandarmology_composite || s.bandarmology?.score || 0,
-          signal: s.signal || '',
-          rvol: s.rvol || s.volume_ratio || 0,
-          change_pct: s.change_pct || 0,
-          watchlist_only: Boolean(s.watchlist_only),
-          adaptive_prefilter_used: Boolean(s.adaptive_prefilter_used),
-          watchlist_fallback_used: Boolean(s.watchlist_fallback_used),
-          opportunity_lane: s._opportunity_lane || s.opportunity_lane || '',
-          top_gainer_opportunity: s.top_gainer_opportunity || {},
-          market_execution_regime: s.market_execution_regime || '',
-          screener_lane: s.screener_lane || '',
-          analytic_expectation: s.analytic_expectation || '',
-          manual_feed: s.manual_feed || {},
-          manual_rank: s.manual_rank || 0,
-          manual_top_gainer: Boolean(s.manual_feed || s.top_gainer_opportunity?.manual_feed),
-          manual_master_layer: s.manual_master_layer || {},
-          value: s.value || 0,
-          freq: s.freq || 0,
-          net_foreign: s.net_foreign || 0,
-        }
-      }
+      const screenerCtx = buildScreenerContext(screenerSelectedStock)
       const res = await analyzeStock(analyticTicker.toUpperCase().trim(), analyticMode, screenerCtx)
       setAnalyticResult(res)
       // Fetch market context 4 box
@@ -96,13 +147,54 @@ export default function AnalyticPage() {
     } finally { setAnalyticLoading(false) }
   }
 
+  const handleBatchAnalyze = async () => {
+    const stocks = Array.isArray(analyticBatch?.stocks) ? analyticBatch.stocks.slice(0, 3) : []
+    if (!stocks.length) return
+    setAnalyticLoading(true); setAnalyticError(null); setAnalyticResult(null); setMarketCtx(null); setAnalyticBatchResults([])
+    try {
+      const rows = await Promise.all(stocks.map(async (stock, idx) => {
+        const ticker = String(stock?.ticker || '').toUpperCase()
+        if (!ticker) return { stock, error: 'Ticker kosong' }
+        try {
+          const ctx = {
+            ...buildScreenerContext(stock),
+            analytic_lane: 'MANUAL_INTRADAY_BATCH',
+            batch_lane: 'MANUAL_INTRADAY_TOP3',
+            batch_rank: idx + 1,
+            force_intraday_setup: true,
+            required_tp_pct: 3,
+          }
+          const result = await analyzeStock(ticker, 'intraday', ctx)
+          return { stock, result, error: null }
+        } catch (e) {
+          return { stock, result: null, error: e?.response?.data?.detail || e.message || 'Gagal menganalisis' }
+        }
+      }))
+      setAnalyticBatchResults(rows)
+    } catch(e) {
+      setAnalyticError(e?.message || 'Batch analytic gagal')
+    } finally {
+      setAnalyticLoading(false)
+    }
+  }
+
   useEffect(() => {
+    if (analyticBatch?.stocks?.length) return
     const ticker = analyticTicker?.trim()?.toUpperCase()
     if (!ticker) return
     if (lastAutoAnalyzeRef.current === ticker) return
     lastAutoAnalyzeRef.current = ticker
     handleAnalyze()
   }, [analyticTicker])
+
+  useEffect(() => {
+    const stocks = Array.isArray(analyticBatch?.stocks) ? analyticBatch.stocks.slice(0, 3) : []
+    if (!stocks.length) return
+    const key = stocks.map((s) => String(s?.ticker || '').toUpperCase()).join('|')
+    if (!key || lastBatchAnalyzeRef.current === key) return
+    lastBatchAnalyzeRef.current = key
+    handleBatchAnalyze()
+  }, [analyticBatch])
 
   const r = analyticResult
   // Backend returns engines as array [{engine, score, signal, ...}]
@@ -425,6 +517,17 @@ export default function AnalyticPage() {
       )}
       {analyticLoading && <LoadingSpinner message={`Menganalisis ${analyticTicker}...`}/>}
       {analyticError && !analyticLoading && <ErrorBox message={analyticError} onRetry={handleAnalyze}/>}
+
+      {analyticBatch?.stocks?.length > 0 && (
+        <BatchAnalyticPanel
+          stocks={analyticBatch.stocks.slice(0, 3)}
+          results={analyticBatchResults}
+          loading={analyticLoading}
+          onRefresh={handleBatchAnalyze}
+          sendToMonitoring={sendToMonitoring}
+          mode="intraday"
+        />
+      )}
 
       {!analyticLoading && r && (
         <div className="space-y-4 animate-slide-up">
@@ -1227,13 +1330,149 @@ export default function AnalyticPage() {
         </div>
       )}
 
-      {!analyticLoading && !analyticError && !r && (
+      {!analyticLoading && !analyticError && !r && !analyticBatch?.stocks?.length && (
         <div className="card p-12 text-center">
           <BarChart2 className="w-12 h-12 text-slate-700 mx-auto mb-4"/>
           <p className="font-display text-lg text-slate-500 mb-1">Masukkan ticker saham</p>
           <p className="font-mono text-sm text-slate-700">Ketik kode saham IDX dan pilih mode trading</p>
         </div>
       )}
+    </div>
+  )
+}
+
+function BatchAnalyticPanel({ stocks, results, loading, onRefresh, sendToMonitoring, mode }) {
+  const rows = stocks.map((stock, idx) => {
+    const found = results?.find((r) => String(r?.stock?.ticker || '').toUpperCase() === String(stock?.ticker || '').toUpperCase())
+    return found || { stock, result: null, error: null, pending: loading }
+  })
+
+  return (
+    <div className="space-y-4 animate-slide-up">
+      <div className="card p-4 border border-sky-300 bg-sky-50/80">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="font-display text-lg font-bold text-slate-900">MANUAL INTRADAY TOP 3 ANALYTIC</p>
+            <p className="font-mono text-xs leading-relaxed text-slate-600">
+              Jalur khusus upload top gainer: tiga kandidat terbaik dianalisis bersamaan untuk setup intraday cepat. TP1 review minimal 3%.
+            </p>
+          </div>
+          <button onClick={onRefresh} disabled={loading} className="btn-primary flex items-center gap-2 disabled:opacity-50">
+            {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {loading ? 'Analyzing 3...' : 'Refresh 3 Analytic'}
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        {rows.map(({ stock, result, error, pending }, idx) => {
+          const setup = buildIntradayReviewSetup(stock, result || {})
+          const ticker = String(stock?.ticker || result?.ticker || '').toUpperCase()
+          const score = Number(result?.score || result?.composite_score || stock?.final_score || stock?.score || 0)
+          const decision = String(
+            result?.execution_router?.user_position ||
+            result?.go_no_go ||
+            (pending ? 'ANALYZING' : 'REVIEW')
+          ).replace(/_/g, ' ')
+          const master = stock?.manual_master_layer || {}
+          const canMonitor = Boolean(!error && setup.trigger && setup.stop && setup.tp1)
+
+          return (
+            <div key={`${ticker}-${idx}`} className="card p-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">Rank #{idx + 1}</p>
+                  <p className="font-display text-2xl font-bold text-accent-blue">{ticker || '-'}</p>
+                </div>
+                <span className="rounded border border-sky-300 bg-sky-50 px-2 py-1 font-mono text-[10px] font-bold uppercase text-sky-700">
+                  {decision}
+                </span>
+              </div>
+
+              {pending && (
+                <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-600">
+                  Menunggu hasil 35 engines...
+                </div>
+              )}
+              {error && (
+                <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 font-mono text-xs leading-relaxed text-red-700">
+                  {error}
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  ['Score', score ? score.toFixed(1) : '-'],
+                  ['Win/TP Prob.', `${setup.probability.toFixed(0)}%`],
+                  ['Move', fmtPercent(stock?.change_pct || stock?.top_gainer_opportunity?.change_pct, 2)],
+                  ['Master', String(master.status || 'SHORTLIST').replace(/_/g, ' ')],
+                ].map(([k, v]) => (
+                  <div key={k} className="rounded-lg border border-slate-200 bg-white/80 px-2 py-1.5">
+                    <p className="font-mono text-[9px] uppercase text-slate-400">{k}</p>
+                    <p className="font-mono text-[11px] font-bold text-slate-900">{v}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-xl border border-emerald-300 bg-emerald-50/70 px-3 py-3">
+                <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500 mb-2">
+                  Intraday Review Setup
+                </p>
+                {[
+                  ['Order', setup.orderType],
+                  ['Trigger', fmtPrice(setup.trigger)],
+                  ['Entry Zone', `${fmtPrice(setup.entryLow)} - ${fmtPrice(setup.entryHigh)}`],
+                  ['Stop Loss', fmtPrice(setup.stop)],
+                  ['TP1', `${fmtPrice(setup.tp1)} (${fmtPercent(setup.tp1Pct, 2)})`],
+                  ['TP2', fmtPrice(setup.tp2)],
+                  ['TP3', fmtPrice(setup.tp3)],
+                ].map(([k, v]) => (
+                  <div key={k} className="flex items-center justify-between gap-3 border-b border-emerald-100 py-1.5 last:border-0">
+                    <span className="font-mono text-xs text-slate-500">{k}</span>
+                    <span className="font-mono text-sm font-bold text-slate-900">{v}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 font-mono text-[11px] leading-relaxed text-amber-800">
+                Jalur ini tidak menghapus validitas Master Layer. Ia memaksa output menjadi Top 3 review intraday, lalu eksekusi tetap memakai trigger, entry zone, SL, dan TP minimal 3%.
+              </div>
+
+              <button
+                disabled={!canMonitor}
+                onClick={() => sendToMonitoring({
+                  ticker,
+                  entry_price: setup.trigger,
+                  stop_loss: setup.stop,
+                  take_profit: setup.tp1,
+                  take_profit_1: setup.tp1,
+                  take_profit_2: setup.tp2,
+                  take_profit_3: setup.tp3,
+                  mode,
+                  final_score: score || 50,
+                  market_regime: result?.market_regime || 'INTRADAY_MANUAL_TOP3',
+                  engine_scores: normalizeEngineScoresForMonitoring(result?.engines?.engines || result?.engine_scores || {}),
+                  transfer_source: 'manual_top3_intraday_batch',
+                  batch_lane: 'MANUAL_INTRADAY_TOP3',
+                  batch_rank: idx + 1,
+                  analytic_context: {
+                    go_no_go: result?.go_no_go || 'REVIEW',
+                    go_confidence: result?.go_confidence || setup.probability,
+                    win_probability: result?.win_probability || setup.probability,
+                    action_plan: result?.action_plan || null,
+                    manual_master_layer: master,
+                    required_tp_pct: 3,
+                    intraday_review_setup: setup,
+                  }
+                })}
+                className="btn-primary w-full flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Masuk Monitoring Setelah Buy <ArrowRight className="h-4 w-4" />
+              </button>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

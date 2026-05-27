@@ -67,7 +67,7 @@ export default function ScreenerPage() {
   const [manualError, setManualError] = useState(null);
   const progressRef = useRef(null);
   const scanStartedAtRef = useRef(0);
-  const { sendToAnalytic } = useStore();
+  const { sendToAnalytic, sendBatchToAnalytic } = useStore();
 
   const startProgress = () => {
     setProgress(0);
@@ -272,31 +272,21 @@ export default function ScreenerPage() {
               {manualResult.message} {manualResult.quota_policy}
             </div>
             {manualResult.top_3?.length > 0 && (
-              <LanePanel
-                title="Manual Top 3 - Analytic Ready"
-                subtitle="Dipilih dari upload Stockbit. Klik kartu untuk masuk Analytic dengan konteks manual top gainer."
-                stocks={manualResult.top_3}
-                mode={mode}
-                sendToAnalytic={sendToAnalytic}
-              />
-            )}
-            {manualResult.no_chase_radar?.length > 0 && (
-              <LanePanel
-                title="Manual No-Chase Radar"
-                subtitle="Mover terlalu tinggi/likuiditas tipis. Tetap terlihat, tapi bukan entry otomatis."
-                stocks={manualResult.no_chase_radar.slice(0, 6)}
-                mode={mode}
-                sendToAnalytic={sendToAnalytic}
-              />
-            )}
-            {manualResult.rejected_candidates?.length > 0 && (
-              <LanePanel
-                title="Master Layer Rejected"
-                subtitle="Sudah divalidasi, tetapi gagal guardrail utama. Tidak dipromosikan menjadi Top 3."
-                stocks={manualResult.rejected_candidates.slice(0, 6)}
-                mode={mode}
-                sendToAnalytic={sendToAnalytic}
-              />
+              <>
+                <button
+                  onClick={() => sendBatchToAnalytic(manualResult.top_3, mode)}
+                  style={S.manualBatchBtn}
+                >
+                  ANALYZE 3 SAHAM SEKALIGUS
+                </button>
+                <LanePanel
+                  title="Manual Top 3 - Analytic Ready"
+                  subtitle="Hanya 3 terbaik dari upload. Klik tombol batch untuk masuk Analytic intraday cepat."
+                  stocks={manualResult.top_3}
+                  mode={mode}
+                  sendToAnalytic={sendToAnalytic}
+                />
+              </>
             )}
           </div>
         )}
@@ -572,6 +562,7 @@ const S = {
   manualActions: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, marginBottom: 8 },
   manualPrimaryBtn: { padding: "10px 16px", border: "none", borderRadius: 6, backgroundColor: "#16a34a", color: "#ffffff", fontSize: 12, fontWeight: "bold", cursor: "pointer", letterSpacing: 0.5 },
   manualSecondaryBtn: { padding: "10px 16px", border: "1px solid #cbd5e1", borderRadius: 6, backgroundColor: "#ffffff", color: "#64748b", fontSize: 12, fontWeight: "bold", cursor: "pointer", letterSpacing: 0.5 },
+  manualBatchBtn: { width: "100%", border: "none", borderRadius: 8, padding: "12px 16px", marginBottom: 12, backgroundColor: "#0ea5e9", color: "#ffffff", fontSize: 13, fontWeight: "bold", letterSpacing: 1, cursor: "pointer" },
   manualResultBox: { borderTop: "1px solid #e2e8f0", paddingTop: 12, marginTop: 8 },
   progressBox: { backgroundColor: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 20, marginBottom: 20, boxShadow: "0 2px 8px rgba(0,0,0,0.06)" },
   progressHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },

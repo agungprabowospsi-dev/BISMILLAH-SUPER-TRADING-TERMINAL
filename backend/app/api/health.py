@@ -28,7 +28,7 @@ async def health():
         "engines": 35,
         "kb_loaded": kb_loaded,
         "redis": redis_ok,
-        "deploy_marker": "manual_master_sort_v2_2026-05-27",
+        "deploy_marker": "manual_batch_top3_v3_2026-05-27",
         "message": "BISMILLAH — Systems Online 🚀"
     }
 
