@@ -1375,6 +1375,9 @@ function BatchAnalyticPanel({ stocks, results, loading, onRefresh, sendToMonitor
             (pending ? 'ANALYZING' : 'REVIEW')
           ).replace(/_/g, ' ')
           const master = stock?.manual_master_layer || {}
+          const obBandar = result?.action_plan?.bandarmology_orderbook_setup || {}
+          const orderbook = result?.orderbook_execution || result?.action_plan?.orderbook_execution || {}
+          const moneyMaker = result?.money_maker || result?.action_plan?.money_maker || {}
           const canMonitor = Boolean(!error && setup.trigger && setup.stop && setup.tp1)
 
           return (
@@ -1430,6 +1433,25 @@ function BatchAnalyticPanel({ stocks, results, loading, onRefresh, sendToMonitor
                   <div key={k} className="flex items-center justify-between gap-3 border-b border-emerald-100 py-1.5 last:border-0">
                     <span className="font-mono text-xs text-slate-500">{k}</span>
                     <span className="font-mono text-sm font-bold text-slate-900">{v}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-xl border border-fuchsia-300 bg-fuchsia-50/70 px-3 py-3">
+                <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500 mb-2">
+                  Orderbook + Bandarmology Guard
+                </p>
+                {[
+                  ['Bandar', obBandar.money_maker_verdict || moneyMaker.verdict || '-'],
+                  ['Phase / BFD', `${obBandar.money_maker_phase || moneyMaker.phase || '-'} / ${obBandar.bfd_score ?? moneyMaker.bfd_score ?? '-'} `],
+                  ['Orderbook', obBandar.orderbook_bias || orderbook.liquidity_bias || '-'],
+                  ['Spread', obBandar.orderbook_spread || orderbook.spread_health || '-'],
+                  ['Bid/Ask', obBandar.bid_ask_ratio ?? orderbook.bid_ask_ratio ?? '-'],
+                  ['Permission', obBandar.setup_tone || result?.action_plan?.setup_permission || 'CONDITIONAL'],
+                ].map(([k, v]) => (
+                  <div key={k} className="flex items-center justify-between gap-3 border-b border-fuchsia-100 py-1.5 last:border-0">
+                    <span className="font-mono text-xs text-slate-500">{k}</span>
+                    <span className="font-mono text-[11px] font-bold uppercase text-slate-900">{String(v).replace(/_/g, ' ')}</span>
                   </div>
                 ))}
               </div>

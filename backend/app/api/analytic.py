@@ -788,6 +788,139 @@ def apply_analytic_validation_to_action_plan(action_plan: dict, validation: Dict
     return action
 
 
+def ensure_manual_batch_intraday_setup(
+    action_plan: dict,
+    *,
+    screener_context: Any,
+    mode: str,
+    current: float,
+    atr: float,
+    range_low_20: float,
+    ma20: float,
+    money_maker: dict,
+    orderbook_execution: dict,
+    setup_validation: Dict[str, Any],
+) -> dict:
+    """For manual Top 3 intraday lane, keep a visible setup while preserving validation evidence."""
+    sc = _context_dict(screener_context)
+    mode_l = str(mode or "").lower()
+    batch_lane = str(sc.get("batch_lane") or sc.get("analytic_lane") or "").upper()
+    force_setup = bool(sc.get("force_intraday_setup") or batch_lane in ("MANUAL_INTRADAY_TOP3", "MANUAL_INTRADAY_BATCH"))
+    if not force_setup or mode_l not in ("intraday", "scalping"):
+        return action_plan
+
+    action = dict(action_plan or {})
+    current_f = float(current or action.get("current_price") or action.get("entry_price") or 0)
+    if current_f <= 0:
+        return action
+
+    tick = _idx_tick_size(current_f)
+    ob = orderbook_execution or {}
+    mm = money_maker or {}
+    validation = setup_validation or {}
+    mm_verdict = str(mm.get("verdict") or "NO_CLEAR_FLOW").upper()
+    mm_phase = str(mm.get("phase") or "UNKNOWN").upper()
+    bfd_score = int(mm.get("bfd_score") or 0)
+    ob_available = bool(ob.get("available"))
+    ob_bias = str(ob.get("liquidity_bias") or "unknown").lower()
+    ob_spread = str(ob.get("spread_health") or "unknown").lower()
+    best_ask = float(ob.get("best_ask") or 0)
+    best_bid = float(ob.get("best_bid") or 0)
+    support_wall = float(ob.get("support_wall_price") or 0)
+
+    trigger_seed = best_ask if ob_available and best_ask >= current_f else current_f + tick
+    existing_trigger = float(action.get("trigger_price") or 0)
+    trigger = max(trigger_seed, existing_trigger if existing_trigger and existing_trigger <= current_f * 1.08 else 0)
+    trigger = _round_price(trigger)
+
+    atr_value = max(float(atr or 0), current_f * 0.012, tick * 2)
+    support_seed = support_wall or best_bid or max(float(ma20 or 0), current_f - atr_value)
+    entry_low = _round_price(max(0, min(trigger, support_seed)))
+    entry_high = trigger
+    raw_stop = min(
+        entry_low - tick if entry_low > tick else current_f - atr_value,
+        current_f - max(atr_value * 0.9, current_f * 0.025),
+    )
+    if range_low_20:
+        raw_stop = max(raw_stop, float(range_low_20))
+    raw_stop = min(raw_stop, trigger - tick)
+    stop = _round_price(raw_stop)
+    if stop <= 0 or stop >= trigger:
+        stop = _round_price(trigger - max(atr_value, current_f * 0.025))
+
+    required_tp_pct = max(3.0, float(sc.get("required_tp_pct") or 3.0))
+    risk = max(trigger - stop, atr_value)
+    tp1 = max(trigger * (1 + required_tp_pct / 100.0), trigger + risk * 0.9)
+    tp2 = max(trigger * 1.05, trigger + risk * 1.5)
+    tp3 = max(trigger * 1.08, trigger + risk * 2.2)
+
+    hard_blocks = list(validation.get("hard_blocks") or [])
+    final_status = str(validation.get("final_status") or "").upper()
+    fatal_flow = mm_verdict == "FLOW_OUT_AVOID" or bool(hard_blocks)
+    setup_tone = "REVIEW_ONLY" if fatal_flow else "CONDITIONAL"
+
+    confirmations = [
+        f"Bandarmology/Money Maker: {mm_verdict}; phase {mm_phase}; BFD {bfd_score}/5.",
+        (
+            f"Orderbook: {ob_bias}; spread {ob_spread}; bid/ask {ob.get('bid_ask_ratio', '-') }."
+            if ob_available
+            else "Orderbook belum tersedia; trigger wajib dikonfirmasi dari bid-offer live sebelum entry."
+        ),
+        "Entry hanya valid jika harga menyentuh trigger tanpa spread melebar dan bid refill tetap hidup.",
+        "TP1 minimal 3% dari trigger untuk intraday buy pagi jual sore.",
+    ] + list(action.get("confirmation_needed") or []) + list(validation.get("required_confirmations") or [])
+    invalidations = [
+        "Bandarmology berubah FLOW_OUT_AVOID atau broker kuat distribusi saat trigger.",
+        "Orderbook ask dominan/fake bid wall/spread wide ketika harga mendekati trigger.",
+        f"Gagal bertahan di atas stop {stop}.",
+    ] + list(action.get("invalidation_rules") or [])
+
+    action.update({
+        "decision": "WAIT",
+        "setup_type": "MANUAL_TOP3_ORDERBOOK_BANDAR_SETUP",
+        "order_type": "CONDITIONAL_BUY_STOP",
+        "decision_modifier": "MANUAL_TOP3_SETUP_VISIBLE_WITH_OB_BANDAR_GUARD",
+        "manual_batch_setup": True,
+        "setup_visibility": "ALWAYS_SHOW_FOR_MANUAL_TOP3",
+        "setup_permission": setup_tone,
+        "current_price": _round_price(current_f),
+        "entry_price": trigger,
+        "trigger_price": trigger,
+        "entry_zone_low": entry_low,
+        "entry_zone_high": entry_high,
+        "stop_loss": stop,
+        "invalidation_price": stop,
+        "take_profit_1": _round_price(tp1),
+        "take_profit_2": _round_price(tp2),
+        "take_profit_3": _round_price(tp3),
+        "next_action": (
+            "Manual Top 3 intraday lane: setup wajib terlihat, tetapi eksekusi hanya conditional. "
+            "Orderbook dan Bandarmology menjadi penguat/pengunci trigger, bukan alasan chase market order."
+        ),
+        "confirmation_needed": list(dict.fromkeys(confirmations)),
+        "invalidation_rules": list(dict.fromkeys(invalidations)),
+        "aggressive_plan": f"Buy-stop kecil di {trigger} hanya jika orderbook sehat dan BFD tidak turun saat trigger disentuh.",
+        "conservative_plan": f"Tunggu pullback/retest area {entry_low}-{entry_high}, lalu entry hanya jika bid refill muncul.",
+        "bandarmology_orderbook_setup": {
+            "available": True,
+            "setup_tone": setup_tone,
+            "validation_status": final_status,
+            "hard_blocks": hard_blocks,
+            "money_maker_verdict": mm_verdict,
+            "money_maker_phase": mm_phase,
+            "bfd_score": bfd_score,
+            "orderbook_available": ob_available,
+            "orderbook_bias": ob_bias,
+            "orderbook_spread": ob_spread,
+            "bid_ask_ratio": ob.get("bid_ask_ratio"),
+            "support_wall_price": ob.get("support_wall_price"),
+            "resistance_wall_price": ob.get("resistance_wall_price"),
+            "policy": "visible_setup_conditional_execution_no_market_chase",
+        },
+    })
+    return _finalize_action_plan_levels(action, atr, mode_l)
+
+
 def classify_analytic_setup_family(
     *,
     action_plan: dict,
@@ -2053,6 +2186,18 @@ Top Brokers: {", ".join(top_brokers[:5])}
             mode=req.mode,
         )
         action_plan = apply_analytic_validation_to_action_plan(action_plan, setup_validation)
+        action_plan = ensure_manual_batch_intraday_setup(
+            action_plan,
+            screener_context=req.screener_context,
+            mode=req.mode,
+            current=current,
+            atr=atr,
+            range_low_20=range_low_20,
+            ma20=ma20,
+            money_maker=money_maker,
+            orderbook_execution=orderbook_execution,
+            setup_validation=setup_validation,
+        )
         opportunity_execution = action_plan.get("opportunity_execution") or opportunity_execution
         watchlist_alignment = action_plan.get("watchlist_alignment") or watchlist_alignment
         screener_alignment = action_plan.get("screener_alignment") or screener_alignment
