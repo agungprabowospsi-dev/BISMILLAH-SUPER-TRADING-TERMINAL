@@ -2913,7 +2913,7 @@ def _manual_top_gainer_score(item: Dict[str, Any], rank: int) -> Dict[str, Any]:
         penalties.append("instrumen warrant/non-common stock")
 
     score = round(clamp(score), 2)
-    executable = 5 <= chg < 10 and value >= 1e9 and freq >= 500 and "-" not in code
+    executable = 5 <= chg < 9 and value >= 1e9 and freq >= 500 and "-" not in code
     conditional = (3 <= chg < 5 or 9 <= chg < 10) and value >= 1e9 and freq >= 500 and "-" not in code
     radar_only = not (executable or conditional)
     lane = "MANUAL_TOP_GAINER_OPPORTUNITY" if executable else "MANUAL_CONDITIONAL_EXECUTION" if conditional else "NO_CHASE_RADAR"
@@ -2996,6 +2996,8 @@ async def upload_manual_top_gainer(
     for idx, item in enumerate(scored, start=1):
         item["manual_rank"] = idx
         item["mover_rank"] = idx
+        if isinstance(item.get("manual_feed"), dict):
+            item["manual_feed"]["rank"] = idx
         if isinstance(item.get("top_gainer_opportunity"), dict):
             item["top_gainer_opportunity"]["rank"] = idx
 
