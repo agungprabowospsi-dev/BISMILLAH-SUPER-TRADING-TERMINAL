@@ -17,7 +17,7 @@ jobs:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
       - name: Deploy
-        run: railway up ./backend --path-as-root --project "$RAILWAY_PROJECT_ID" --service bismillah-backend --environment production --ci
+        run: railway up ./backend --path-as-root --project "$RAILWAY_PROJECT_ID" --service backend --environment production --ci
         env:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
