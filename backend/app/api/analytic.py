@@ -129,6 +129,21 @@ def _idx_tick_size(price: float) -> int:
     return 25
 
 
+def _round_to_tick(value: float, base_price: float = None, direction: str = "nearest") -> float:
+    try:
+        n = float(value or 0)
+    except Exception:
+        return 0.0
+    if n <= 0:
+        return 0.0
+    tick = _idx_tick_size(float(base_price or n))
+    if direction == "up":
+        return float(np.ceil(n / tick) * tick)
+    if direction == "down":
+        return float(np.floor(n / tick) * tick)
+    return float(round(n / tick) * tick)
+
+
 def _context_dict(ctx: Any) -> dict:
     if not ctx:
         return {}
@@ -810,7 +825,10 @@ def ensure_manual_batch_intraday_setup(
         return action_plan
 
     action = dict(action_plan or {})
-    current_f = float(current or action.get("current_price") or action.get("entry_price") or 0)
+    manual_feed = sc.get("manual_feed") if isinstance(sc.get("manual_feed"), dict) else {}
+    manual_price = float(sc.get("manual_price") or sc.get("price") or sc.get("last_price") or manual_feed.get("price") or 0)
+    live_price = float(current or action.get("current_price") or action.get("entry_price") or 0)
+    current_f = manual_price or live_price
     if current_f <= 0:
         return action
 
@@ -828,31 +846,28 @@ def ensure_manual_batch_intraday_setup(
     best_bid = float(ob.get("best_bid") or 0)
     support_wall = float(ob.get("support_wall_price") or 0)
 
-    trigger_seed = best_ask if ob_available and best_ask >= current_f else current_f + tick
-    existing_trigger = float(action.get("trigger_price") or 0)
-    trigger = max(trigger_seed, existing_trigger if existing_trigger and existing_trigger <= current_f * 1.08 else 0)
-    trigger = _round_price(trigger)
+    def near_anchor(value: float, max_pct: float) -> bool:
+        return bool(value and current_f and abs(float(value) - current_f) / current_f * 100 <= max_pct)
+
+    valid_best_ask = best_ask if ob_available and best_ask >= current_f and near_anchor(best_ask, 1.8) else 0
+    trigger = _round_to_tick(valid_best_ask or (current_f + tick), current_f, "up")
+    entry_low = trigger
+    entry_high = _round_to_tick(trigger * 1.008, current_f, "up")
 
     atr_value = max(float(atr or 0), current_f * 0.012, tick * 2)
-    support_seed = support_wall or best_bid or max(float(ma20 or 0), current_f - atr_value)
-    entry_low = _round_price(max(0, min(trigger, support_seed)))
-    entry_high = trigger
-    raw_stop = min(
-        entry_low - tick if entry_low > tick else current_f - atr_value,
-        current_f - max(atr_value * 0.9, current_f * 0.025),
-    )
-    if range_low_20:
-        raw_stop = max(raw_stop, float(range_low_20))
-    raw_stop = min(raw_stop, trigger - tick)
-    stop = _round_price(raw_stop)
-    if stop <= 0 or stop >= trigger:
-        stop = _round_price(trigger - max(atr_value, current_f * 0.025))
+    atr_pct = (atr_value / current_f * 100) if current_f > 0 else 0
+    risk_pct = 1.8 if mode_l == "scalping" else 2.4
+    if atr_pct > 3.0:
+        risk_pct = min(3.0, risk_pct + 0.4)
+    if mm_verdict == "FLOW_OUT_AVOID" or ob_bias == "ask_dominant" or ob_spread == "wide":
+        risk_pct = min(3.2, risk_pct + 0.4)
+    stop = _round_to_tick(current_f * (1 - risk_pct / 100.0), current_f, "nearest")
+    stop = min(stop, trigger - tick)
 
     required_tp_pct = max(3.0, float(sc.get("required_tp_pct") or 3.0))
-    risk = max(trigger - stop, atr_value)
-    tp1 = max(trigger * (1 + required_tp_pct / 100.0), trigger + risk * 0.9)
-    tp2 = max(trigger * 1.05, trigger + risk * 1.5)
-    tp3 = max(trigger * 1.08, trigger + risk * 2.2)
+    tp1 = _round_to_tick(trigger * (1 + required_tp_pct / 100.0), current_f, "up")
+    tp2 = _round_to_tick(trigger * 1.05, current_f, "up")
+    tp3 = _round_to_tick(trigger * 1.08, current_f, "up")
 
     hard_blocks = list(validation.get("hard_blocks") or [])
     final_status = str(validation.get("final_status") or "").upper()
@@ -883,6 +898,9 @@ def ensure_manual_batch_intraday_setup(
         "manual_batch_setup": True,
         "setup_visibility": "ALWAYS_SHOW_FOR_MANUAL_TOP3",
         "setup_permission": setup_tone,
+        "setup_anchor_price": _round_price(current_f),
+        "setup_anchor_source": "manual_upload_price" if manual_price else "live_invezgo_price",
+        "live_price_reference": _round_price(live_price) if live_price else 0,
         "current_price": _round_price(current_f),
         "entry_price": trigger,
         "trigger_price": trigger,
@@ -904,6 +922,10 @@ def ensure_manual_batch_intraday_setup(
         "bandarmology_orderbook_setup": {
             "available": True,
             "setup_tone": setup_tone,
+            "anchor_price": _round_price(current_f),
+            "anchor_source": "manual_upload_price" if manual_price else "live_invezgo_price",
+            "risk_pct": round(risk_pct, 2),
+            "tp1_pct": required_tp_pct,
             "validation_status": final_status,
             "hard_blocks": hard_blocks,
             "money_maker_verdict": mm_verdict,

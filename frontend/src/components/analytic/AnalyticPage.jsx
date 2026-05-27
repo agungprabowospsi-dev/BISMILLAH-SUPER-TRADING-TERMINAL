@@ -56,14 +56,19 @@ const roundToTick = (value, basePrice, dir = 'nearest') => {
 
 const buildIntradayReviewSetup = (stock = {}, result = {}) => {
   const action = result?.action_plan || {}
-  const price = Number(action.entry_price || action.trigger_price || stock.price || stock.last_price || result.current_price || result.price || 0)
-  const trigger = roundToTick(action.trigger_price || price * 1.005, price, 'up')
-  const entryLow = roundToTick(action.entry_zone_low || trigger, price, 'nearest')
-  const entryHigh = roundToTick(action.entry_zone_high || trigger * 1.01, price, 'up')
-  const stop = roundToTick(action.stop_loss || result.stop_loss || price * 0.97, price, 'down')
-  const tp1 = roundToTick(action.take_profit_1 || result.tp1 || trigger * 1.03, price, 'up')
-  const tp2 = roundToTick(action.take_profit_2 || result.tp2 || trigger * 1.05, price, 'up')
-  const tp3 = roundToTick(action.take_profit_3 || result.tp3 || trigger * 1.08, price, 'up')
+  const anchor = Number(stock.price || stock.last_price || action.current_price || result.current_price || result.price || action.entry_price || action.trigger_price || 0)
+  const saneNearAnchor = (value, maxPct = 8) => {
+    const n = Number(value || 0)
+    if (!Number.isFinite(n) || n <= 0 || !anchor) return null
+    return Math.abs(n - anchor) / anchor * 100 <= maxPct ? n : null
+  }
+  const trigger = roundToTick(saneNearAnchor(action.trigger_price, 4) || anchor * 1.005, anchor, 'up')
+  const entryLow = roundToTick(saneNearAnchor(action.entry_zone_low, 4) || trigger, anchor, 'nearest')
+  const entryHigh = roundToTick(saneNearAnchor(action.entry_zone_high, 4) || trigger * 1.008, anchor, 'up')
+  const stop = roundToTick(saneNearAnchor(action.stop_loss, 6) || anchor * 0.975, anchor, 'down')
+  const tp1 = roundToTick(saneNearAnchor(action.take_profit_1, 12) || trigger * 1.03, anchor, 'up')
+  const tp2 = roundToTick(saneNearAnchor(action.take_profit_2, 16) || trigger * 1.05, anchor, 'up')
+  const tp3 = roundToTick(saneNearAnchor(action.take_profit_3, 20) || trigger * 1.08, anchor, 'up')
   const probability = Math.max(
     45,
     Math.min(82, Number(result?.go_confidence || result?.win_probability || result?.probability_win || 0) || 55)
@@ -121,6 +126,9 @@ export default function AnalyticPage() {
       manual_rank: s.manual_rank || 0,
       manual_top_gainer: Boolean(s.manual_feed || s.top_gainer_opportunity?.manual_feed),
       manual_master_layer: s.manual_master_layer || {},
+      price: s.price || s.last_price || 0,
+      last_price: s.last_price || s.price || 0,
+      manual_price: s.price || s.last_price || 0,
       batch_selected: Boolean(s.batch_selected),
       batch_lane: s.batch_lane || '',
       value: s.value || 0,
